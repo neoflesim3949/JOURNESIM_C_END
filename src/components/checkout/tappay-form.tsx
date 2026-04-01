@@ -32,7 +32,9 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
   const [canGetPrime, setCanGetPrime] = useState(false)
   const [cardError, setCardError] = useState('')
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('credit_card')
-  const [enabledMethods, setEnabledMethods] = useState<Record<string, boolean>>({ credit_card: true })
+  const [methodOptions, setMethodOptions] = useState<{ id: string; enabled: boolean; label: string; icon: string }[]>([
+    { id: 'credit_card', enabled: true, label: '信用卡', icon: '' },
+  ])
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
     fetch('/api/shop/tappay-config')
       .then((r) => r.json())
       .then((config) => {
-        setEnabledMethods(config.methods || { credit_card: true })
+        setMethodOptions(config.methods || [{ id: 'credit_card', enabled: true, label: '信用卡', icon: '' }])
 
         const script = document.createElement('script')
         script.src = 'https://js.tappaysdk.com/sdk/tpdirect/v5.20.0'
@@ -123,15 +125,12 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
     }
   }
 
-  const allOptions: { id: PaymentMethod; label: string; icon: string }[] = [
-    { id: 'credit_card', label: '信用卡', icon: '💳' },
-    { id: 'line_pay', label: 'Line Pay', icon: '🟢' },
-    { id: 'apple_pay', label: 'Apple Pay', icon: '🍎' },
-    { id: 'jko_pay', label: '街口支付', icon: '🏪' },
-    { id: 'pxpay', label: 'PX Pay Plus', icon: '🛒' },
-  ]
+  // 預設 emoji icon（後台沒設 icon 時使用）
+  const defaultIcons: Record<string, string> = {
+    credit_card: '💳', line_pay: '🟢', apple_pay: '🍎', jko_pay: '🏪', pxpay: '🛒',
+  }
 
-  const visibleOptions = allOptions.filter((o) => enabledMethods[o.id])
+  const visibleOptions = methodOptions.filter((o) => o.enabled)
   const canSubmit = selectedMethod === 'credit_card' ? canGetPrime : sdkReady
 
   return (
@@ -142,14 +141,18 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
           <button
             key={opt.id}
             type="button"
-            onClick={() => { setSelectedMethod(opt.id); setCardError('') }}
+            onClick={() => { setSelectedMethod(opt.id as PaymentMethod); setCardError('') }}
             className={`flex items-center gap-2 p-3 border rounded-lg text-sm font-medium transition-all text-left ${
               selectedMethod === opt.id
                 ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary'
                 : 'border-border hover:border-primary/50'
             }`}
           >
-            <span className="text-lg">{opt.icon}</span>
+            {opt.icon ? (
+              <img src={opt.icon} alt={opt.label} className="w-6 h-6 object-contain" />
+            ) : (
+              <span className="text-lg">{defaultIcons[opt.id] || '💰'}</span>
+            )}
             {opt.label}
           </button>
         ))}

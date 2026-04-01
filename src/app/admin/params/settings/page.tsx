@@ -164,19 +164,50 @@ export default function AdminSettingsPage() {
         </h2>
         <p className="text-xs text-gray-500 mt-1">啟用的支付方式將顯示在結帳頁面</p>
 
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-4">
           {PAYMENT_METHODS.map((pm) => (
-            <div key={pm.key} className="flex items-center justify-between py-2">
-              <div>
-                <div className="text-sm font-medium">{pm.label}</div>
-                <div className="text-xs text-gray-400">{pm.desc}</div>
+            <div key={pm.key} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium">{pm.label}</div>
+                  <div className="text-xs text-gray-400">{pm.desc}</div>
+                </div>
+                <button
+                  onClick={() => handleChange(pm.key, getValue(pm.key) === 'true' ? 'false' : 'true')}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${getValue(pm.key) === 'true' ? 'bg-blue-600' : 'bg-gray-300'}`}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${getValue(pm.key) === 'true' ? 'left-6' : 'left-0.5'}`} />
+                </button>
               </div>
-              <button
-                onClick={() => handleChange(pm.key, getValue(pm.key) === 'true' ? 'false' : 'true')}
-                className={`relative w-12 h-6 rounded-full transition-colors ${getValue(pm.key) === 'true' ? 'bg-blue-600' : 'bg-gray-300'}`}
-              >
-                <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${getValue(pm.key) === 'true' ? 'left-6' : 'left-0.5'}`} />
-              </button>
+              {/* 自訂名稱和 Icon */}
+              {getValue(pm.key) === 'true' && (
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-gray-500">顯示名稱</label>
+                    <input
+                      value={getValue(`${pm.key}_label`)}
+                      onChange={(e) => handleChange(`${pm.key}_label`, e.target.value)}
+                      className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                      placeholder={pm.label}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500">Icon URL（選填）</label>
+                    <input
+                      value={getValue(`${pm.key}_icon`)}
+                      onChange={(e) => handleChange(`${pm.key}_icon`, e.target.value)}
+                      className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                      placeholder="https://example.com/icon.png"
+                    />
+                    {getValue(`${pm.key}_icon`) && (
+                      <div className="mt-1 flex items-center gap-2">
+                        <img src={getValue(`${pm.key}_icon`)} alt="icon" className="w-6 h-6 object-contain" />
+                        <span className="text-xs text-gray-400">預覽</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
