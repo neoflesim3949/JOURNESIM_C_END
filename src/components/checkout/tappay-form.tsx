@@ -21,6 +21,13 @@ declare global {
 
 type PaymentMethod = 'credit_card' | 'line_pay' | 'apple_pay' | 'jko_pay' | 'pxpay'
 
+interface SavedCard {
+  id: string
+  last_four: string
+  card_type: string
+  issuer: string
+}
+
 interface TapPayFormProps {
   onPrimeReady: (prime: string, method: string) => void
   loading: boolean
@@ -28,16 +35,23 @@ interface TapPayFormProps {
   saveCard: boolean
   onSaveCardChange: (checked: boolean) => void
   isInLineApp?: boolean
+  savedCards: SavedCard[]
+  selectedCardId: string | null
+  onSelectCard: (id: string | null) => void
 }
 
-export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCardChange, isInLineApp }: TapPayFormProps) {
+export function TapPayForm({
+  onPrimeReady, loading, disabled, saveCard, onSaveCardChange,
+  isInLineApp, savedCards, selectedCardId, onSelectCard,
+}: TapPayFormProps) {
   const [sdkReady, setSdkReady] = useState(false)
   const [canGetPrime, setCanGetPrime] = useState(false)
   const [cardError, setCardError] = useState('')
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(isInLineApp ? 'line_pay' : 'credit_card')
-  const [methodOptions, setMethodOptions] = useState<{ id: string; enabled: boolean; label: string; icons: string[] }[]>([
-    { id: 'credit_card', enabled: true, label: '信用卡', icons: [] },
+  const [methodOptions, setMethodOptions] = useState<{ id: string; enabled: boolean; label: string; icons: string[]; sort: number }[]>([
+    { id: 'credit_card', enabled: true, label: '信用卡', icons: [], sort: 0 },
   ])
+  const [cardTypeIcons, setCardTypeIcons] = useState<Record<string, string>>({})
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -47,7 +61,12 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
     fetch('/api/shop/tappay-config')
       .then((r) => r.json())
       .then((config) => {
-        setMethodOptions(config.methods || [{ id: 'credit_card', enabled: true, label: '信用卡', icon: '' }])
+        setCardTypeIcons(config.cardTypeIcons || {})
+        const methods = (config.methods || []).map((m: { id: string; enabled: boolean; label: string; icons: string[] }, i: number) => ({
+          ...m,
+          sort: i,
+        }))
+        setMethodOptions(methods.length > 0 ? methods : [{ id: 'credit_card', enabled: true, label: '信用卡', icons: [], sort: 0 }])
 
         const script = document.createElement('script')
         script.src = 'https://js.tappaysdk.com/sdk/tpdirect/v5.20.0'
@@ -57,15 +76,6 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
           const env = config.env === 'production' ? 'production' : 'sandbox'
 
           window.TPDirect.setupSDK(appId, appKey, env)
-
-          // Debug: 檢查 SDK 載入了哪些模組
-          console.log('TapPay SDK modules:', {
-            card: !!window.TPDirect.card,
-            linePay: !!window.TPDirect.linePay,
-            jkoPay: !!window.TPDirect.jkoPay,
-            pxPayPlus: !!(window.TPDirect as Record<string, unknown>).pxpayPlus,
-            applePay: !!(window.TPDirect as Record<string, unknown>).applePay,
-          })
 
           window.TPDirect.card.setup({
             fields: {
@@ -98,6 +108,12 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
   function handleSubmit() {
     setCardError('')
 
+    // 使用已儲存卡片
+    if (selectedMethod === 'credit_card' && selectedCardId) {
+      onPrimeReady('', 'credit_card')
+      return
+    }
+
     try {
       if (selectedMethod === 'credit_card') {
         if (!canGetPrime) return
@@ -121,111 +137,128 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
           onPrimeReady(result.prime, 'pxpay')
         })
       } else if (selectedMethod === 'apple_pay') {
-        setCardError('Apple Pay 需要 HTTPS + Safari 環境，請部署到正式環境後使用')
+        setCardError('Apple Pay 需要 HTTPS + Safari 環境')
       }
     } catch (err) {
       setCardError(`付款元件錯誤：${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
-  // 預設 emoji icon（後台沒設 icon 時使用）
   const defaultIcons: Record<string, string> = {
     credit_card: '💳', line_pay: '🟢', apple_pay: '🍎', jko_pay: '🏪', pxpay: '🛒',
   }
 
-  const visibleOptions = methodOptions.filter((o) => o.enabled)
-
-  // Line 內建瀏覽器只支援信用卡和 Line Pay
+  const visibleOptions = methodOptions.filter((o) => o.enabled).sort((a, b) => a.sort - b.sort)
   const lineAppAllowed = ['credit_card', 'line_pay']
   const isMethodBlockedByLine = isInLineApp && !lineAppAllowed.includes(selectedMethod)
-  const canSubmit = isMethodBlockedByLine ? false : (selectedMethod === 'credit_card' ? canGetPrime : sdkReady)
+  const canSubmit = isMethodBlockedByLine ? false
+    : selectedMethod === 'credit_card'
+      ? (selectedCardId ? true : canGetPrime)
+      : sdkReady
 
   return (
     <div>
       <label className="text-sm font-medium">付款方式</label>
       <div className="mt-2 space-y-2">
-        {visibleOptions.map((opt) => (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => { setSelectedMethod(opt.id as PaymentMethod); setCardError('') }}
-            className={`w-full flex items-center gap-3 p-3 border rounded-lg text-sm font-medium transition-all text-left ${
-              selectedMethod === opt.id
-                ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary'
-                : 'border-border hover:border-primary/50'
-            }`}
-          >
-            {opt.icons && opt.icons.length > 0 ? (
-              <span className="flex items-center gap-1">
-                {opt.icons.map((url, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img key={i} src={url} alt="" className="w-6 h-6 object-contain" />
-                ))}
-              </span>
-            ) : (
-              <span className="text-lg">{defaultIcons[opt.id] || '💰'}</span>
-            )}
-            {opt.label}
-          </button>
-        ))}
+        {visibleOptions.map((opt) => {
+          const isSelected = selectedMethod === opt.id
+          return (
+            <div key={opt.id}>
+              {/* 付款方式按鈕 */}
+              <button
+                type="button"
+                onClick={() => { setSelectedMethod(opt.id as PaymentMethod); setCardError(''); onSelectCard(null) }}
+                className={`w-full flex items-center gap-3 p-3 border rounded-lg text-sm font-medium transition-all text-left ${isSelected
+                    ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary'
+                    : 'border-border hover:border-primary/50'
+                  }`}
+              >
+                {opt.icons && opt.icons.length > 0 ? (
+                  <span className="flex items-center gap-1">
+                    {opt.icons.map((url, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={i} src={url} alt="" className="w-6 h-6 object-contain" />
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-lg">{defaultIcons[opt.id] || '💰'}</span>
+                )}
+                {opt.label}
+              </button>
+
+              {/* 信用卡展開區域：已儲存卡片 + 新卡片輸入 */}
+              {isSelected && opt.id === 'credit_card' && (
+                <div className="mt-2 p-4 bg-gray-50 rounded-lg space-y-3">
+                  {/* 已儲存的卡片 */}
+                  {savedCards.length > 0 && (
+                    <div className="space-y-2">
+                      {savedCards.map((card) => (
+                        <label key={card.id}
+                          className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all ${selectedCardId === card.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                            }`}>
+                          <input type="radio" name="card" checked={selectedCardId === card.id}
+                            onChange={() => onSelectCard(card.id)} className="accent-primary" />
+                          {cardTypeIcons[card.card_type] ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={cardTypeIcons[card.card_type]} alt="" className="w-8 h-6 object-contain" />
+                          ) : (
+                            <div className="w-8 h-6 bg-gray-100 rounded flex items-center justify-center">
+                              <CreditCard className="w-4 h-4 text-gray-500" />
+                            </div>
+                          )}
+                          <div>
+                            <div className="text-sm font-medium">•••• •••• •••• {card.last_four}</div>
+                            <div className="text-xs text-muted-foreground">{card.issuer || '信用卡'}</div>
+                          </div>
+                        </label>
+                      ))}
+                      <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all ${selectedCardId === null ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'
+                        }`}>
+                        <input type="radio" name="card" checked={selectedCardId === null}
+                          onChange={() => onSelectCard(null)} className="accent-primary" />
+                        <div className="w-8 h-6 bg-gray-100 rounded flex items-center justify-center text-gray-400 text-sm">+</div>
+                        <div className="text-sm font-medium">使用新卡片</div>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* 新卡片輸入（沒有已儲存卡片，或選了「使用新卡片」） */}
+                  {selectedCardId === null && (
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">卡號</div>
+                        <div id="card-number" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">到期日</div>
+                          <div id="card-expiry" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">CCV</div>
+                          <div id="card-ccv" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={saveCard} onChange={(e) => onSaveCardChange(e.target.checked)} className="accent-primary" />
+                        <span className="text-sm text-gray-500">儲存此卡片，下次免重新輸入</span>
+                      </label>
+                      <p className="text-xs text-gray-400">測試卡號：4242 4242 4242 4242 / 01/28 / 123</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
+          )
+        })}
       </div>
-
-      {selectedMethod === 'credit_card' && (
-        <div className="mt-4 space-y-3">
-          <div>
-            <div className="text-xs text-gray-500 mb-1">卡號</div>
-            <div id="card-number" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="text-xs text-gray-500 mb-1">到期日</div>
-              <div id="card-expiry" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
-            </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-1">CCV</div>
-              <div id="card-ccv" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
-            </div>
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={saveCard} onChange={(e) => onSaveCardChange(e.target.checked)} className="accent-primary" />
-            <span className="text-sm text-gray-500">儲存此卡片，下次免重新輸入</span>
-          </label>
-          <p className="text-xs text-gray-400">測試卡號：4242 4242 4242 4242 / 01/28 / 123</p>
-        </div>
-      )}
-
-      {selectedMethod === 'line_pay' && (
-        <div className="mt-4 p-4 bg-green-50 rounded-lg text-sm text-green-700">
-          <p className="font-medium">Line Pay</p>
-          <p className="mt-1 text-green-600">
-            {isInLineApp ? '偵測到您正在使用 Line，點擊下方按鈕直接付款' : '點擊下方按鈕後將跳轉至 Line Pay 完成付款'}
-          </p>
-        </div>
-      )}
-      {selectedMethod === 'apple_pay' && (
-        <div className="mt-4 p-4 bg-gray-50 rounded-lg text-sm text-gray-700">
-          <p className="font-medium">Apple Pay</p>
-          <p className="mt-1 text-gray-600">需要 HTTPS + Safari 瀏覽器</p>
-        </div>
-      )}
-      {selectedMethod === 'jko_pay' && (
-        <div className="mt-4 p-4 bg-orange-50 rounded-lg text-sm text-orange-700">
-          <p className="font-medium">街口支付</p>
-          <p className="mt-1 text-orange-600">點擊下方按鈕後將跳轉至街口支付完成付款</p>
-        </div>
-      )}
-      {selectedMethod === 'pxpay' && (
-        <div className="mt-4 p-4 bg-blue-50 rounded-lg text-sm text-blue-700">
-          <p className="font-medium">PX Pay Plus</p>
-          <p className="mt-1 text-blue-600">點擊下方按鈕後將跳轉至全聯支付完成付款</p>
-        </div>
-      )}
 
       {/* Line 瀏覽器限制提示 */}
       {isMethodBlockedByLine && (
         <div className="mt-4 p-4 bg-red-50 rounded-lg text-sm text-red-700">
           <p className="font-medium">Line 應用不支援此支付方式</p>
-          <p className="mt-1 text-red-600">請使用信用卡或 Line Pay，或點右上角「⋯」選擇「在瀏覽器中開啟」</p>
+          <p className="mt-1 text-red-600">請使用信用卡或 Line Pay，或點右下角「⋯」選擇「在瀏覽器中開啟」</p>
         </div>
       )}
 
@@ -239,7 +272,7 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
         className="mt-4 w-full flex items-center justify-center gap-2 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
       >
         {selectedMethod === 'credit_card' ? <CreditCard className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
-        {loading ? '處理中...' : '確認付款'}
+        {loading ? '處理中...' : selectedCardId ? `使用已儲存卡片付款` : '確認付款'}
       </button>
     </div>
   )

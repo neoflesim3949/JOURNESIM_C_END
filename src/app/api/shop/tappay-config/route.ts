@@ -21,38 +21,28 @@ export async function GET() {
   const env = nonEmpty(settings.get('tappay_env'), process.env.NEXT_PUBLIC_TAPPAY_ENV) || 'sandbox'
   const hasDbSettings = settings.size > 0
 
-  const methods = [
-    {
-      id: 'credit_card',
-      enabled: hasDbSettings ? settings.get('payment_credit_card') === 'true' : true,
-      label: nonEmpty(settings.get('payment_credit_card_label')) || '信用卡',
-      icons: (settings.get('payment_credit_card_icons') || '').split(',').filter(Boolean),
-    },
-    {
-      id: 'line_pay',
-      enabled: hasDbSettings ? settings.get('payment_line_pay') === 'true' : false,
-      label: nonEmpty(settings.get('payment_line_pay_label')) || 'Line Pay',
-      icons: (settings.get('payment_line_pay_icons') || '').split(',').filter(Boolean),
-    },
-    {
-      id: 'apple_pay',
-      enabled: hasDbSettings ? settings.get('payment_apple_pay') === 'true' : false,
-      label: nonEmpty(settings.get('payment_apple_pay_label')) || 'Apple Pay',
-      icons: (settings.get('payment_apple_pay_icons') || '').split(',').filter(Boolean),
-    },
-    {
-      id: 'jko_pay',
-      enabled: hasDbSettings ? settings.get('payment_jko_pay') === 'true' : false,
-      label: nonEmpty(settings.get('payment_jko_pay_label')) || '街口支付',
-      icons: (settings.get('payment_jko_pay_icons') || '').split(',').filter(Boolean),
-    },
-    {
-      id: 'pxpay',
-      enabled: hasDbSettings ? settings.get('payment_pxpay') === 'true' : false,
-      label: nonEmpty(settings.get('payment_pxpay_label')) || 'PX Pay Plus',
-      icons: (settings.get('payment_pxpay_icons') || '').split(',').filter(Boolean),
-    },
+  const defs = [
+    { id: 'credit_card', defaultLabel: '信用卡', defaultSort: 0 },
+    { id: 'line_pay', defaultLabel: 'Line Pay', defaultSort: 1 },
+    { id: 'apple_pay', defaultLabel: 'Apple Pay', defaultSort: 2 },
+    { id: 'jko_pay', defaultLabel: '街口支付', defaultSort: 3 },
+    { id: 'pxpay', defaultLabel: 'PX Pay Plus', defaultSort: 4 },
   ]
 
-  return NextResponse.json({ app_id: Number(appId || '0'), app_key: appKey, env, methods })
+  const methods = defs.map((d) => ({
+    id: d.id,
+    enabled: hasDbSettings ? settings.get(`payment_${d.id}`) === 'true' : d.id === 'credit_card',
+    label: nonEmpty(settings.get(`payment_${d.id}_label`)) || d.defaultLabel,
+    icons: (settings.get(`payment_${d.id}_icons`) || '').split(',').filter(Boolean),
+    sort: parseInt(nonEmpty(settings.get(`payment_${d.id}_sort`)) || String(d.defaultSort)),
+  })).sort((a, b) => a.sort - b.sort)
+
+  // 卡片種類 icon（1=VISA, 2=MasterCard, 3=JCB, 4=UnionPay, 5=AMEX）
+  const cardTypeIcons: Record<string, string> = {}
+  for (const t of ['1', '2', '3', '4', '5']) {
+    const url = nonEmpty(settings.get(`card_type_${t}_icon`))
+    if (url) cardTypeIcons[t] = url
+  }
+
+  return NextResponse.json({ app_id: Number(appId || '0'), app_key: appKey, env, methods, cardTypeIcons })
 }

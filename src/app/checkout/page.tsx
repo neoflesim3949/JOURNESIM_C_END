@@ -3,7 +3,7 @@
 import { Suspense, useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle } from 'lucide-react'
+import { ArrowLeft, CheckCircle, CreditCard } from 'lucide-react'
 import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 
@@ -36,7 +36,6 @@ function CheckoutContent() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [saveCard, setSaveCard] = useState(false)
 
-  // 偵測是否在 Line App 內建瀏覽器
   const isInLineApp = typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)
 
   const productId = searchParams.get('product')
@@ -45,17 +44,14 @@ function CheckoutContent() {
   const qty = Number(searchParams.get('qty') || 1)
   const priceParam = Number(searchParams.get('price') || 0)
 
-  // 載入已儲存的卡片
   useEffect(() => {
     fetch('/api/shop/saved-cards').then((r) => r.json()).then(setSavedCards)
   }, [])
 
-  // 載入商品資訊
   useEffect(() => {
     if (!productId) return
     fetch(`/api/shop/product?id=${productId}`).then((r) => r.json()).then((data) => {
       const product = data.product
-      // 找到對應的 plan 和 copies
       for (const plan of data.plans || []) {
         if (plan.plan_id === planId) {
           const cp = plan.copy_prices.find((c: { copies: string }) => c.copies === copies)
@@ -112,13 +108,11 @@ function CheckoutContent() {
 
       const data = await res.json()
 
-      // 跳轉型付款（Line Pay、JKO Pay、PX Pay）
       if (data.payment_url) {
         window.location.href = data.payment_url
         return
       }
 
-      // 直接型付款（信用卡、Apple Pay）
       setOrderId(data.order_id)
       setOrderNumber(data.order_number)
       setOrderComplete(true)
@@ -137,18 +131,10 @@ function CheckoutContent() {
         <p className="mt-2 text-muted-foreground">
           訂單編號：<span className="font-mono font-medium text-foreground">{orderNumber}</span>
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          我們將透過 Email 通知您 eSIM 安裝資訊
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">我們將透過 Email 通知您 eSIM 安裝資訊</p>
         <div className="mt-8 flex flex-col gap-3">
-          <Link href={`/orders/${orderId}`}
-            className="px-6 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors">
-            查看訂單
-          </Link>
-          <Link href="/shop"
-            className="px-6 py-2.5 border border-border font-medium rounded-lg hover:bg-muted transition-colors">
-            繼續購買
-          </Link>
+          <Link href={`/orders/${orderId}`} className="px-6 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors">查看訂單</Link>
+          <Link href="/shop" className="px-6 py-2.5 border border-border font-medium rounded-lg hover:bg-muted transition-colors">繼續購買</Link>
         </div>
       </div>
     )
@@ -201,60 +187,18 @@ function CheckoutContent() {
           />
         </div>
 
-        {/* Saved Cards */}
-        {savedCards.length > 0 && (
-          <div>
-            <label className="text-sm font-medium">使用已儲存的卡片</label>
-            <div className="mt-2 space-y-2">
-              {savedCards.map((card) => (
-                <label key={card.id}
-                  className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all ${
-                    selectedCardId === card.id ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
-                  }`}>
-                  <input type="radio" name="card" checked={selectedCardId === card.id}
-                    onChange={() => setSelectedCardId(card.id)} className="accent-primary" />
-                  <span className="text-lg">💳</span>
-                  <div>
-                    <div className="text-sm font-medium">•••• •••• •••• {card.last_four}</div>
-                    <div className="text-xs text-muted-foreground">{card.issuer || '信用卡'}</div>
-                  </div>
-                </label>
-              ))}
-              <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all ${
-                selectedCardId === null ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
-              }`}>
-                <input type="radio" name="card" checked={selectedCardId === null}
-                  onChange={() => setSelectedCardId(null)} className="accent-primary" />
-                <span className="text-lg">➕</span>
-                <div className="text-sm font-medium">使用新卡片</div>
-              </label>
-            </div>
-          </div>
-        )}
-
-        {/* Pay by saved card */}
-        {selectedCardId ? (
-          <button
-            type="button"
-            onClick={() => handlePrime('', 'credit_card')}
-            disabled={loading || !email || totalPrice <= 0}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
-          >
-            {loading ? '處理中...' : `使用已儲存卡片付款 ${formatPrice(totalPrice)}`}
-          </button>
-        ) : (
-          <>
-            {/* TapPay Card Form */}
-            <TapPayForm
-              onPrimeReady={handlePrime}
-              loading={loading}
-              disabled={!email || totalPrice <= 0}
-              saveCard={saveCard}
-              onSaveCardChange={setSaveCard}
-              isInLineApp={isInLineApp}
-            />
-          </>
-        )}
+        {/* TapPay Form — 包含付款方式選擇、已儲存卡片、信用卡輸入 */}
+        <TapPayForm
+          onPrimeReady={handlePrime}
+          loading={loading}
+          disabled={!email || totalPrice <= 0}
+          saveCard={saveCard}
+          onSaveCardChange={setSaveCard}
+          isInLineApp={isInLineApp}
+          savedCards={savedCards}
+          selectedCardId={selectedCardId}
+          onSelectCard={setSelectedCardId}
+        />
       </div>
     </div>
   )

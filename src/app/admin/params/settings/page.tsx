@@ -182,14 +182,26 @@ export default function AdminSettingsPage() {
               {/* 自訂名稱和 Icons */}
               {getValue(pm.key) === 'true' && (
                 <div className="mt-3 space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-500">顯示名稱</label>
-                    <input
-                      value={getValue(`${pm.key}_label`)}
-                      onChange={(e) => handleChange(`${pm.key}_label`, e.target.value)}
-                      className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
-                      placeholder={pm.label}
-                    />
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="col-span-3">
+                      <label className="text-xs text-gray-500">顯示名稱</label>
+                      <input
+                        value={getValue(`${pm.key}_label`)}
+                        onChange={(e) => handleChange(`${pm.key}_label`, e.target.value)}
+                        className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        placeholder={pm.label}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500">排序</label>
+                      <input
+                        type="number"
+                        value={getValue(`${pm.key}_sort`) || ''}
+                        onChange={(e) => handleChange(`${pm.key}_sort`, e.target.value)}
+                        className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="text-xs text-gray-500">Icons（可上傳多張，從圖片庫複製 URL 貼上）</label>
@@ -247,6 +259,49 @@ export default function AdminSettingsPage() {
                   </div>
                 </div>
               )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Card Type Icons */}
+      <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <CreditCard className="w-5 h-5" />
+          卡片種類圖示
+        </h2>
+        <p className="text-xs text-gray-500 mt-1">設定已儲存卡片顯示的圖示，從圖片庫複製 URL 貼上</p>
+
+        <div className="mt-4 space-y-3">
+          {[
+            { type: '1', label: 'VISA' },
+            { type: '2', label: 'MasterCard' },
+            { type: '3', label: 'JCB' },
+            { type: '4', label: 'Union Pay' },
+            { type: '5', label: 'AMEX' },
+          ].map((ct) => (
+            <div key={ct.type} className="flex items-center gap-3">
+              <label className="text-sm font-medium w-28 flex-shrink-0">{ct.label}</label>
+              <div className="flex items-center gap-2 flex-1">
+                {getValue(`card_type_${ct.type}_icon`) ? (
+                  <div className="flex items-center gap-2 flex-1 p-1.5 border border-gray-300 rounded">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={getValue(`card_type_${ct.type}_icon`)} alt={ct.label} className="w-8 h-5 object-contain" />
+                    <span className="text-xs text-gray-500 truncate flex-1">{getValue(`card_type_${ct.type}_icon`).split('/').pop()}</span>
+                    <button onClick={() => handleChange(`card_type_${ct.type}_icon`, '')} className="text-xs text-red-400 hover:text-red-600">移除</button>
+                  </div>
+                ) : (
+                  <input
+                    value={getValue(`card_type_${ct.type}_icon`)}
+                    onChange={(e) => handleChange(`card_type_${ct.type}_icon`, e.target.value)}
+                    className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm"
+                    placeholder="貼上圖片 URL"
+                  />
+                )}
+                <a href="/admin/media" target="_blank" className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs text-gray-600 rounded transition-colors whitespace-nowrap">
+                  圖片庫
+                </a>
+              </div>
             </div>
           ))}
         </div>
