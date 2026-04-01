@@ -25,13 +25,16 @@ interface TapPayFormProps {
   onPrimeReady: (prime: string, method: string) => void
   loading: boolean
   disabled: boolean
+  saveCard: boolean
+  onSaveCardChange: (checked: boolean) => void
+  isInLineApp?: boolean
 }
 
-export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps) {
+export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCardChange, isInLineApp }: TapPayFormProps) {
   const [sdkReady, setSdkReady] = useState(false)
   const [canGetPrime, setCanGetPrime] = useState(false)
   const [cardError, setCardError] = useState('')
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('credit_card')
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(isInLineApp ? 'line_pay' : 'credit_card')
   const [methodOptions, setMethodOptions] = useState<{ id: string; enabled: boolean; label: string; icon: string }[]>([
     { id: 'credit_card', enabled: true, label: '信用卡', icon: '' },
   ])
@@ -131,7 +134,11 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
   }
 
   const visibleOptions = methodOptions.filter((o) => o.enabled)
-  const canSubmit = selectedMethod === 'credit_card' ? canGetPrime : sdkReady
+
+  // Line 內建瀏覽器只支援信用卡和 Line Pay
+  const lineAppAllowed = ['credit_card', 'line_pay']
+  const isMethodBlockedByLine = isInLineApp && !lineAppAllowed.includes(selectedMethod)
+  const canSubmit = isMethodBlockedByLine ? false : (selectedMethod === 'credit_card' ? canGetPrime : sdkReady)
 
   return (
     <div>
@@ -174,6 +181,10 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
               <div id="card-ccv" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
             </div>
           </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={saveCard} onChange={(e) => onSaveCardChange(e.target.checked)} className="accent-primary" />
+            <span className="text-sm text-gray-500">儲存此卡片，下次免重新輸入</span>
+          </label>
           <p className="text-xs text-gray-400">測試卡號：4242 4242 4242 4242 / 01/28 / 123</p>
         </div>
       )}
@@ -181,7 +192,9 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
       {selectedMethod === 'line_pay' && (
         <div className="mt-4 p-4 bg-green-50 rounded-lg text-sm text-green-700">
           <p className="font-medium">Line Pay</p>
-          <p className="mt-1 text-green-600">點擊下方按鈕後將跳轉至 Line Pay 完成付款</p>
+          <p className="mt-1 text-green-600">
+            {isInLineApp ? '偵測到您正在使用 Line，點擊下方按鈕直接付款' : '點擊下方按鈕後將跳轉至 Line Pay 完成付款'}
+          </p>
         </div>
       )}
       {selectedMethod === 'apple_pay' && (
@@ -200,6 +213,14 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
         <div className="mt-4 p-4 bg-blue-50 rounded-lg text-sm text-blue-700">
           <p className="font-medium">PX Pay Plus</p>
           <p className="mt-1 text-blue-600">點擊下方按鈕後將跳轉至全聯支付完成付款</p>
+        </div>
+      )}
+
+      {/* Line 瀏覽器限制提示 */}
+      {isMethodBlockedByLine && (
+        <div className="mt-4 p-4 bg-red-50 rounded-lg text-sm text-red-700">
+          <p className="font-medium">Line 應用不支援此支付方式</p>
+          <p className="mt-1 text-red-600">請使用信用卡或 Line Pay，或點右上角「⋯」選擇「在瀏覽器中開啟」</p>
         </div>
       )}
 

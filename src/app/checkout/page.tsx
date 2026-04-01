@@ -36,6 +36,9 @@ function CheckoutContent() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [saveCard, setSaveCard] = useState(false)
 
+  // 偵測是否在 Line App 內建瀏覽器
+  const isInLineApp = typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)
+
   const productId = searchParams.get('product')
   const planId = searchParams.get('planId')
   const copies = searchParams.get('copies')
@@ -246,13 +249,10 @@ function CheckoutContent() {
               onPrimeReady={handlePrime}
               loading={loading}
               disabled={!email || totalPrice <= 0}
+              saveCard={saveCard}
+              onSaveCardChange={setSaveCard}
+              isInLineApp={isInLineApp}
             />
-
-            {/* Save card checkbox */}
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={saveCard} onChange={(e) => setSaveCard(e.target.checked)} className="accent-primary" />
-              <span className="text-sm text-muted-foreground">儲存此卡片，下次免重新輸入</span>
-            </label>
           </>
         )}
       </div>
