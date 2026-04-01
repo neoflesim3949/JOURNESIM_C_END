@@ -53,6 +53,15 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
 
           window.TPDirect.setupSDK(appId, appKey, env)
 
+          // Debug: 檢查 SDK 載入了哪些模組
+          console.log('TapPay SDK modules:', {
+            card: !!window.TPDirect.card,
+            linePay: !!window.TPDirect.linePay,
+            jkoPay: !!window.TPDirect.jkoPay,
+            pxPayPlus: !!(window.TPDirect as Record<string, unknown>).pxpayPlus,
+            applePay: !!(window.TPDirect as Record<string, unknown>).applePay,
+          })
+
           window.TPDirect.card.setup({
             fields: {
               number: { element: '#card-number', placeholder: '4242 4242 4242 4242' },
