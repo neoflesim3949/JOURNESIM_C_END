@@ -32,10 +32,23 @@ interface PayByTokenResponse {
   amount: number
 }
 
+// 取非空值的 helper
+function nonEmpty(...values: (string | undefined | null)[]): string {
+  for (const v of values) {
+    if (v && v.trim()) return v.trim()
+  }
+  return ''
+}
+
 async function getTapPayConfig() {
-  const settings = await getSettings()
-  const partnerKey = settings.get('tappay_partner_key') || process.env.TAPPAY_PARTNER_KEY
-  const env = settings.get('tappay_env') || process.env.NEXT_PUBLIC_TAPPAY_ENV || 'sandbox'
+  let settings = new Map<string, string>()
+  try {
+    settings = await getSettings()
+  } catch {
+    // system_settings 表可能不存在，用 env fallback
+  }
+  const partnerKey = nonEmpty(settings.get('tappay_partner_key'), process.env.TAPPAY_PARTNER_KEY)
+  const env = nonEmpty(settings.get('tappay_env'), process.env.NEXT_PUBLIC_TAPPAY_ENV) || 'sandbox'
   const baseUrl = env === 'production' ? TAPPAY_PROD : TAPPAY_SANDBOX
 
   if (!partnerKey) throw new Error('缺少 Partner Key，請到後台「參數管理 → 系統設定」填入')
@@ -51,9 +64,12 @@ function getMerchantId(settings: Map<string, string>, method: string): string {
     jko_pay: 'tappay_merchant_id_jko_pay',
     pxpay: 'tappay_merchant_id_pxpay',
   }
-  const merchantId = settings.get(keys[method] || 'tappay_merchant_id')
-    || settings.get('tappay_merchant_id')
-    || process.env.TAPPAY_MERCHANT_ID
+  // 優先用該付款方式的專屬 Merchant ID，沒有就用通用的
+  const merchantId = nonEmpty(
+    settings.get(keys[method]),
+    settings.get('tappay_merchant_id'),
+    process.env.TAPPAY_MERCHANT_ID,
+  )
 
   if (!merchantId) throw new Error(`缺少 ${method} 的 Merchant ID`)
   return merchantId
