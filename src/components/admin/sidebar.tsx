@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, ShoppingCart, RefreshCw, LogOut,
-  Users, Wifi, UserCog, Globe, ChevronDown
+  Users, Wifi, UserCog, Globe, ChevronDown, Image
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -36,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/params/countries', label: '國家 MCC 管理' },
     ],
   },
+  { href: '/admin/media', label: '圖片庫', icon: Image },
   { href: '/admin/accounts', label: '帳號管理', icon: UserCog },
 ]
 
