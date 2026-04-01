@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Save, CreditCard, Smartphone, Shield } from 'lucide-react'
+import { RichEditor } from '@/components/admin/rich-editor'
 
 interface Setting {
   key: string
@@ -68,6 +69,85 @@ export default function AdminSettingsPage() {
             <Save className="w-4 h-4" /> {saving ? '儲存中...' : `儲存（${edited.size} 項）`}
           </button>
         )}
+      </div>
+
+      {/* Popular Countries */}
+      <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
+        <h2 className="font-semibold">熱門目的地</h2>
+        <p className="text-xs text-gray-500 mt-1">設定首頁顯示的熱門國家，用逗號分隔國家代碼（MCC），順序即為顯示順序</p>
+        <div className="mt-3">
+          <input
+            value={getValue('popular_countries')}
+            onChange={(e) => handleChange('popular_countries', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono"
+            placeholder="JP,KR,TH,VN,SG,MY,US,GB"
+          />
+          <p className="text-xs text-gray-400 mt-1">範例：JP,KR,TH,VN,SG,MY,US,GB,AU,FR,DE,IT（桌面版顯示 8 個，超過可左右滑動）</p>
+        </div>
+        {/* Preview */}
+        {getValue('popular_countries') && (
+          <div className="mt-3 flex flex-wrap gap-1">
+            {getValue('popular_countries').split(',').filter(Boolean).map((mcc, i) => (
+              <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded font-mono">{i + 1}. {mcc.trim()}</span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Site Branding */}
+      <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
+        <h2 className="font-semibold">品牌設定</h2>
+
+        <div className="mt-4 space-y-4">
+          {/* Header Logo */}
+          {[
+            { key: 'site_logo', label: '導航列 Logo', desc: '顯示在頁面頂部導航列' },
+            { key: 'footer_logo', label: 'Footer Logo', desc: '顯示在頁面底部，留空則使用導航列 Logo（反色）' },
+          ].map((item) => (
+            <div key={item.key}>
+              <label className="text-sm font-medium">{item.label}</label>
+              <p className="text-xs text-gray-400">{item.desc}</p>
+              <div className="mt-1 flex items-center gap-3">
+                {getValue(item.key) ? (
+                  <div className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg flex-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={getValue(item.key)} alt="" className="h-8 object-contain" />
+                    <span className="text-xs text-gray-400 truncate flex-1">{getValue(item.key).split('/').pop()}</span>
+                    <button onClick={() => handleChange(item.key, '')} className="text-xs text-red-400 hover:text-red-600">移除</button>
+                  </div>
+                ) : (
+                  <input value={getValue(item.key)} onChange={(e) => handleChange(item.key, e.target.value)}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="貼上圖片 URL" />
+                )}
+                <a href="/admin/media" target="_blank" className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-xs text-gray-600 rounded-lg transition-colors whitespace-nowrap">圖片庫</a>
+              </div>
+            </div>
+          ))}
+
+          {/* Brand Description */}
+          <div>
+            <label className="text-sm font-medium">品牌描述</label>
+            <div className="mt-1">
+              <RichEditor
+                value={getValue('brand_desc')}
+                onChange={(html) => handleChange('brand_desc', html)}
+                placeholder="旅遊 eSIM 輕鬆買，出國上網不斷線"
+              />
+            </div>
+          </div>
+
+          {/* Company Info */}
+          <div>
+            <label className="text-sm font-medium">公司資訊</label>
+            <div className="mt-1">
+              <RichEditor
+                value={getValue('company_info')}
+                onChange={(html) => handleChange('company_info', html)}
+                placeholder="公司名稱、統一編號、地址..."
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Test Mode */}

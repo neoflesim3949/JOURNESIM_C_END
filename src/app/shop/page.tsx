@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import Link from 'next/link'
 import Image from 'next/image'
-import { Search, X, ChevronRight } from 'lucide-react'
-import { formatPrice } from '@/lib/utils'
+import { Search } from 'lucide-react'
+import { CountryModal } from '@/components/shop/country-modal'
 
 interface BCCountry {
   mcc: string
@@ -135,9 +134,9 @@ export default function ShopPage() {
                       className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-primary hover:shadow-sm transition-all text-left"
                     >
                       {country.flag_url ? (
-                        <Image src={country.flag_url} alt={country.name} width={32} height={24} className="rounded shadow-sm flex-shrink-0" />
+                        <Image src={country.flag_url} alt={country.name} width={32} height={32} className="w-8 h-8 rounded-full object-cover shadow-sm flex-shrink-0" />
                       ) : (
-                        <div className="w-8 h-6 bg-muted rounded flex-shrink-0" />
+                        <div className="w-8 h-8 bg-muted rounded-full flex-shrink-0" />
                       )}
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{country.name}</div>
@@ -157,56 +156,12 @@ export default function ShopPage() {
 
       {/* Country Modal */}
       {selectedCountry && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedCountry(null)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[70vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {selectedCountry.flag_url ? (
-                    <Image src={selectedCountry.flag_url} alt={selectedCountry.name} width={40} height={30} className="rounded shadow" />
-                  ) : (
-                    <div className="w-10 h-7 bg-muted rounded" />
-                  )}
-                  <h2 className="text-xl font-bold">{selectedCountry.name}</h2>
-                </div>
-                <button onClick={() => setSelectedCountry(null)} className="p-1 hover:bg-gray-100 rounded">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Products */}
-              <div className="mt-6">
-                {productsLoading ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">載入中...</div>
-                ) : products.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground text-sm">此國家尚無上架方案</div>
-                ) : (
-                  <div className="space-y-3">
-                    {products.map((p) => (
-                      <Link
-                        key={p.id}
-                        href={`/shop/${selectedCountry.mcc}/${p.id}`}
-                        onClick={() => setSelectedCountry(null)}
-                        className="flex items-center justify-between p-4 border border-border rounded-xl hover:border-primary hover:shadow-sm transition-all"
-                      >
-                        <div>
-                          <div className="font-semibold">{p.name}</div>
-                          {p.lowest_price && p.lowest_price > 0 && (
-                            <div className="text-sm text-muted-foreground mt-0.5">
-                              起價 {formatPrice(p.lowest_price)}
-                            </div>
-                          )}
-                        </div>
-                        <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <CountryModal
+          country={selectedCountry}
+          products={products}
+          loading={productsLoading}
+          onClose={() => setSelectedCountry(null)}
+        />
       )}
     </div>
   )
