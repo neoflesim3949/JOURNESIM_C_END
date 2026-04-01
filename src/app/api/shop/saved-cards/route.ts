@@ -17,3 +17,23 @@ export async function GET() {
 
   return NextResponse.json(data || [])
 }
+
+export async function DELETE(request: Request) {
+  const serverSupabase = await createClient()
+  const { data: { user } } = await serverSupabase.auth.getUser()
+
+  if (!user) return NextResponse.json({ error: '請先登入' }, { status: 401 })
+
+  const { id } = await request.json()
+  const supabase = createAdminClient()
+
+  const { error } = await supabase
+    .from('member_cards')
+    .delete()
+    .eq('id', id)
+    .eq('member_id', user.id)
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true })
+}
