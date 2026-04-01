@@ -45,7 +45,7 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
         setEnabledMethods(config.methods || { credit_card: true })
 
         const script = document.createElement('script')
-        script.src = 'https://js.tappaysdk.com/sdk/tpdirect/v5.18.0'
+        script.src = 'https://js.tappaysdk.com/sdk/tpdirect/v5.20.0'
         script.onload = () => {
           const appId = config.app_id || Number(process.env.NEXT_PUBLIC_TAPPAY_APP_ID)
           const appKey = config.app_key || process.env.NEXT_PUBLIC_TAPPAY_APP_KEY!
