@@ -149,7 +149,7 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
             key={opt.id}
             type="button"
             onClick={() => { setSelectedMethod(opt.id as PaymentMethod); setCardError('') }}
-            className={`flex items-center gap-2 p-3 border rounded-lg text-sm font-medium transition-all text-left ${
+            className={`w-full flex items-center gap-3 p-3 border rounded-lg text-sm font-medium transition-all text-left ${
               selectedMethod === opt.id
                 ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary'
                 : 'border-border hover:border-primary/50'
