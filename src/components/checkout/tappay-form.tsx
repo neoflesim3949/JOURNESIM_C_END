@@ -91,9 +91,21 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
           if (result.status !== 0) { setCardError(result.msg || '取得付款資訊失敗'); return }
           onPrimeReady(result.card.prime, 'credit_card')
         })
-      } else if (selectedMethod === 'line_pay' || selectedMethod === 'jko_pay' || selectedMethod === 'pxpay') {
-        // 跳轉型付款：不需要前端 getPrime，直接通知後端用特殊 prime 處理
-        onPrimeReady(`redirect_${selectedMethod}`, selectedMethod)
+      } else if (selectedMethod === 'line_pay') {
+        window.TPDirect.linePay.getPrime((result: { status: number; prime: string; msg: string }) => {
+          if (result.status !== 0) { setCardError(result.msg || 'Line Pay 啟動失敗'); return }
+          onPrimeReady(result.prime, 'line_pay')
+        })
+      } else if (selectedMethod === 'jko_pay') {
+        window.TPDirect.jkoPay.getPrime((result: { status: number; prime: string; msg: string }) => {
+          if (result.status !== 0) { setCardError(result.msg || '街口支付啟動失敗'); return }
+          onPrimeReady(result.prime, 'jko_pay')
+        })
+      } else if (selectedMethod === 'pxpay') {
+        window.TPDirect.pxpayPlus.getPrime((result: { status: number; prime: string; msg: string }) => {
+          if (result.status !== 0) { setCardError(result.msg || 'PX Pay 啟動失敗'); return }
+          onPrimeReady(result.prime, 'pxpay')
+        })
       } else if (selectedMethod === 'apple_pay') {
         setCardError('Apple Pay 需要 HTTPS + Safari 環境，請部署到正式環境後使用')
       }

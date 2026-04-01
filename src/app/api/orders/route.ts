@@ -95,13 +95,9 @@ export async function POST(request: Request) {
   let tappayRaw = null
 
   if (prime) {
-    // 跳轉型付款（Line Pay / JKO Pay / PX Pay）用特殊 prime 格式
-    const isRedirectPayment = prime.startsWith('redirect_')
-    const actualPrime = isRedirectPayment ? '' : prime
-
     try {
       const tappayResult = await payByPrime({
-        prime: actualPrime || `${payment_method}_prime`,
+        prime,
         amount: verifiedPrice,
         orderNumber,
         email,
