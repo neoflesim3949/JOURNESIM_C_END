@@ -95,9 +95,13 @@ export async function POST(request: Request) {
   let tappayRaw = null
 
   if (prime) {
+    // 跳轉型付款（Line Pay / JKO Pay / PX Pay）用特殊 prime 格式
+    const isRedirectPayment = prime.startsWith('redirect_')
+    const actualPrime = isRedirectPayment ? '' : prime
+
     try {
       const tappayResult = await payByPrime({
-        prime,
+        prime: actualPrime || `${payment_method}_prime`,
         amount: verifiedPrice,
         orderNumber,
         email,
@@ -108,18 +112,24 @@ export async function POST(request: Request) {
 
       tappayTradeId = tappayResult.trade_id
       tappayRaw = tappayResult.raw
-      paymentStatus = tappayResult.success ? 'paid' : 'failed'
 
-      if (!tappayResult.success) {
+      // 跳轉型付款回傳 payment_url，狀態暫時是 pending
+      if (tappayResult.payment_url) {
+        paymentStatus = 'pending_payment'
+      } else {
+        paymentStatus = tappayResult.success ? 'paid' : 'failed'
+      }
+
+      if (!tappayResult.success && !tappayResult.payment_url) {
         console.error('TapPay payment failed:', tappayResult.raw)
         return NextResponse.json({
-          error: `付款失敗：${tappayResult.raw.msg || '請確認信用卡資訊'}`,
+          error: `付款失敗：${tappayResult.raw.msg || '請確認付款資訊'}`,
         }, { status: 400 })
       }
     } catch (err) {
       console.error('TapPay API error:', err)
       return NextResponse.json({
-        error: '付款處理異常，請稍後再試',
+        error: `付款處理異常：${err instanceof Error ? err.message : '請稍後再試'}`,
       }, { status: 500 })
     }
   }

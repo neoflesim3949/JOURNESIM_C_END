@@ -91,26 +91,11 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
           if (result.status !== 0) { setCardError(result.msg || '取得付款資訊失敗'); return }
           onPrimeReady(result.card.prime, 'credit_card')
         })
-      } else if (selectedMethod === 'line_pay') {
-        if (!window.TPDirect.linePay?.getPrime) { setCardError('Line Pay 尚未就緒，請確認後台已設定 Merchant ID'); return }
-        window.TPDirect.linePay.getPrime((result) => {
-          if (result.status !== 0) { setCardError(result.msg || 'Line Pay 啟動失敗'); return }
-          onPrimeReady(result.prime, 'line_pay')
-        })
-      } else if (selectedMethod === 'jko_pay') {
-        if (!window.TPDirect.jkoPay?.getPrime) { setCardError('街口支付尚未就緒，請確認後台已設定 Merchant ID'); return }
-        window.TPDirect.jkoPay.getPrime((result) => {
-          if (result.status !== 0) { setCardError(result.msg || '街口支付啟動失敗'); return }
-          onPrimeReady(result.prime, 'jko_pay')
-        })
+      } else if (selectedMethod === 'line_pay' || selectedMethod === 'jko_pay' || selectedMethod === 'pxpay') {
+        // 跳轉型付款：不需要前端 getPrime，直接通知後端用特殊 prime 處理
+        onPrimeReady(`redirect_${selectedMethod}`, selectedMethod)
       } else if (selectedMethod === 'apple_pay') {
         setCardError('Apple Pay 需要 HTTPS + Safari 環境，請部署到正式環境後使用')
-      } else if (selectedMethod === 'pxpay') {
-        if (!window.TPDirect.pxpayPlus?.getPrime) { setCardError('PX Pay Plus 尚未就緒，請確認後台已設定 Merchant ID'); return }
-        window.TPDirect.pxpayPlus.getPrime((result) => {
-          if (result.status !== 0) { setCardError(result.msg || 'PX Pay 啟動失敗'); return }
-          onPrimeReady(result.prime, 'pxpay')
-        })
       }
     } catch (err) {
       setCardError(`付款元件錯誤：${err instanceof Error ? err.message : String(err)}`)
