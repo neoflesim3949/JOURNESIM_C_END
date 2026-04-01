@@ -32,12 +32,20 @@ function CheckoutContent() {
   const [orderId, setOrderId] = useState('')
   const [orderNumber, setOrderNumber] = useState('')
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null)
+  const [savedCards, setSavedCards] = useState<{ id: string; last_four: string; card_type: string; issuer: string }[]>([])
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const [saveCard, setSaveCard] = useState(false)
 
   const productId = searchParams.get('product')
   const planId = searchParams.get('planId')
   const copies = searchParams.get('copies')
   const qty = Number(searchParams.get('qty') || 1)
   const priceParam = Number(searchParams.get('price') || 0)
+
+  // 載入已儲存的卡片
+  useEffect(() => {
+    fetch('/api/shop/saved-cards').then((r) => r.json()).then(setSavedCards)
+  }, [])
 
   // 載入商品資訊
   useEffect(() => {
@@ -82,11 +90,13 @@ function CheckoutContent() {
           plan_id: planId,
           copies,
           quantity: qty,
-          prime,
+          prime: selectedCardId ? undefined : prime,
           total_amount: totalPrice,
           bc_sku_id: planInfo?.bc_sku_id,
           payment_method: method,
           result_url: resultUrl,
+          save_card: saveCard,
+          card_id: selectedCardId || undefined,
         }),
       })
 
@@ -188,12 +198,63 @@ function CheckoutContent() {
           />
         </div>
 
-        {/* TapPay Card Form */}
-        <TapPayForm
-          onPrimeReady={handlePrime}
-          loading={loading}
-          disabled={!email || totalPrice <= 0}
-        />
+        {/* Saved Cards */}
+        {savedCards.length > 0 && (
+          <div>
+            <label className="text-sm font-medium">使用已儲存的卡片</label>
+            <div className="mt-2 space-y-2">
+              {savedCards.map((card) => (
+                <label key={card.id}
+                  className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all ${
+                    selectedCardId === card.id ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
+                  }`}>
+                  <input type="radio" name="card" checked={selectedCardId === card.id}
+                    onChange={() => setSelectedCardId(card.id)} className="accent-primary" />
+                  <span className="text-lg">💳</span>
+                  <div>
+                    <div className="text-sm font-medium">•••• •••• •••• {card.last_four}</div>
+                    <div className="text-xs text-muted-foreground">{card.issuer || '信用卡'}</div>
+                  </div>
+                </label>
+              ))}
+              <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-all ${
+                selectedCardId === null ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
+              }`}>
+                <input type="radio" name="card" checked={selectedCardId === null}
+                  onChange={() => setSelectedCardId(null)} className="accent-primary" />
+                <span className="text-lg">➕</span>
+                <div className="text-sm font-medium">使用新卡片</div>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Pay by saved card */}
+        {selectedCardId ? (
+          <button
+            type="button"
+            onClick={() => handlePrime('', 'credit_card')}
+            disabled={loading || !email || totalPrice <= 0}
+            className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
+          >
+            {loading ? '處理中...' : `使用已儲存卡片付款 ${formatPrice(totalPrice)}`}
+          </button>
+        ) : (
+          <>
+            {/* TapPay Card Form */}
+            <TapPayForm
+              onPrimeReady={handlePrime}
+              loading={loading}
+              disabled={!email || totalPrice <= 0}
+            />
+
+            {/* Save card checkbox */}
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={saveCard} onChange={(e) => setSaveCard(e.target.checked)} className="accent-primary" />
+              <span className="text-sm text-muted-foreground">儲存此卡片，下次免重新輸入</span>
+            </label>
+          </>
+        )}
       </div>
     </div>
   )

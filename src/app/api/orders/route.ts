@@ -3,11 +3,11 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 // import { createEsimOrder } from '@/lib/billionconnect'  // 測試階段暫不使用
 import { generateOrderId } from '@/lib/utils'
-import { payByPrime } from '@/lib/tappay'
+import { payByPrime, payByToken } from '@/lib/tappay'
 
 export async function POST(request: Request) {
   const body = await request.json()
-  const { email, product_id, plan_id, copies, quantity = 1, prime, total_amount, bc_sku_id, payment_method = 'credit_card', result_url } = body
+  const { email, product_id, plan_id, copies, quantity = 1, prime, total_amount, bc_sku_id, payment_method = 'credit_card', result_url, save_card = false, card_id } = body
 
   if (!email || !product_id) {
     return NextResponse.json({ error: '缺少必要欄位' }, { status: 400 })
@@ -89,12 +89,48 @@ export async function POST(request: Request) {
 
   const orderNumber = generateOrderId()
 
-  // TapPay Pay by Prime 扣款
+  // TapPay 扣款
   let paymentStatus = 'pending_payment'
   let tappayTradeId = null
   let tappayRaw = null
+  let paymentUrl = null
 
-  if (prime) {
+  if (card_id) {
+    // Pay by Token（使用已儲存的卡片）
+    try {
+      const { data: card } = await supabase
+        .from('member_cards')
+        .select('card_token, card_key')
+        .eq('id', card_id)
+        .eq('member_id', memberId)
+        .single()
+
+      if (!card) {
+        return NextResponse.json({ error: '找不到已儲存的卡片' }, { status: 404 })
+      }
+
+      const tokenResult = await payByToken({
+        cardToken: card.card_token,
+        cardKey: card.card_key,
+        amount: verifiedPrice,
+        orderNumber,
+        email,
+        details: `FLESIM - ${product.name}`,
+      })
+
+      tappayTradeId = tokenResult.trade_id
+      tappayRaw = tokenResult.raw
+      paymentStatus = tokenResult.success ? 'paid' : 'failed'
+
+      if (!tokenResult.success) {
+        return NextResponse.json({ error: `付款失敗：${tokenResult.raw.msg || '卡片授權失敗'}` }, { status: 400 })
+      }
+    } catch (err) {
+      console.error('Pay by Token error:', err)
+      return NextResponse.json({ error: `付款處理異常：${err instanceof Error ? err.message : '請稍後再試'}` }, { status: 500 })
+    }
+  } else if (prime) {
+    // Pay by Prime（新卡付款）
     try {
       const tappayResult = await payByPrime({
         prime,
@@ -104,29 +140,38 @@ export async function POST(request: Request) {
         details: `FLESIM - ${product.name}`,
         paymentMethod: payment_method,
         resultUrl: result_url,
+        remember: save_card && memberId ? true : false,
       })
 
       tappayTradeId = tappayResult.trade_id
       tappayRaw = tappayResult.raw
 
-      // 跳轉型付款回傳 payment_url，狀態暫時是 pending
       if (tappayResult.payment_url) {
         paymentStatus = 'pending_payment'
+        paymentUrl = tappayResult.payment_url
       } else {
         paymentStatus = tappayResult.success ? 'paid' : 'failed'
       }
 
       if (!tappayResult.success && !tappayResult.payment_url) {
-        console.error('TapPay payment failed:', tappayResult.raw)
-        return NextResponse.json({
-          error: `付款失敗：${tappayResult.raw.msg || '請確認付款資訊'}`,
-        }, { status: 400 })
+        return NextResponse.json({ error: `付款失敗：${tappayResult.raw.msg || '請確認付款資訊'}` }, { status: 400 })
+      }
+
+      // 儲存卡片 Token
+      if (save_card && memberId && tappayResult.card_secret && tappayResult.card_info) {
+        await supabase.from('member_cards').upsert({
+          member_id: memberId,
+          card_token: tappayResult.card_secret.card_token,
+          card_key: tappayResult.card_secret.card_key,
+          last_four: tappayResult.card_info.last_four,
+          bin_code: tappayResult.card_info.bin_code,
+          card_type: String(tappayResult.card_info.type),
+          issuer: tappayResult.card_info.issuer,
+        }, { onConflict: 'member_id,card_token' })
       }
     } catch (err) {
       console.error('TapPay API error:', err)
-      return NextResponse.json({
-        error: `付款處理異常：${err instanceof Error ? err.message : '請稍後再試'}`,
-      }, { status: 500 })
+      return NextResponse.json({ error: `付款處理異常：${err instanceof Error ? err.message : '請稍後再試'}` }, { status: 500 })
     }
   }
 
@@ -212,6 +257,6 @@ export async function POST(request: Request) {
   return NextResponse.json({
     order_id: order.id,
     order_number: orderNumber,
-    payment_url: tappayRaw?.payment_url || null,
+    payment_url: paymentUrl || null,
   })
 }
