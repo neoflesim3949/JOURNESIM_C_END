@@ -1,3 +1,5 @@
+import { getSettings } from '@/lib/settings'
+
 const TAPPAY_SANDBOX_URL = 'https://sandbox.tappaysdk.com/tpc/payment/pay-by-prime'
 const TAPPAY_PROD_URL = 'https://prod.tappaysdk.com/tpc/payment/pay-by-prime'
 
@@ -8,7 +10,7 @@ interface PayByPrimeResponse {
   bank_transaction_id: string
   order_number: string
   amount: number
-  payment_url?: string  // Line Pay / JKO Pay 跳轉 URL
+  payment_url?: string
   card_info?: {
     bin_code: string
     last_four: string
@@ -24,24 +26,32 @@ export async function payByPrime(params: {
   email: string
   details?: string
   paymentMethod?: string
-  merchantId?: string
-  resultUrl?: string  // 跳轉型付款的回調 URL
+  resultUrl?: string
 }): Promise<{ success: boolean; trade_id: string; payment_url?: string; raw: PayByPrimeResponse }> {
-  const partnerKey = process.env.TAPPAY_PARTNER_KEY
-  const env = process.env.NEXT_PUBLIC_TAPPAY_ENV || 'sandbox'
+
+  // 從 DB system_settings 讀取，fallback 到環境變數
+  const settings = await getSettings()
+  const partnerKey = settings.get('tappay_partner_key') || process.env.TAPPAY_PARTNER_KEY
+  const env = settings.get('tappay_env') || process.env.NEXT_PUBLIC_TAPPAY_ENV || 'sandbox'
 
   // 根據付款方式選擇對應的 Merchant ID
-  const merchantIdMap: Record<string, string | undefined> = {
-    credit_card: params.merchantId || process.env.TAPPAY_MERCHANT_ID,
-    line_pay: params.merchantId || process.env.TAPPAY_MERCHANT_ID_LINE_PAY || process.env.TAPPAY_MERCHANT_ID,
-    apple_pay: params.merchantId || process.env.TAPPAY_MERCHANT_ID_APPLE_PAY || process.env.TAPPAY_MERCHANT_ID,
-    jko_pay: params.merchantId || process.env.TAPPAY_MERCHANT_ID_JKO_PAY || process.env.TAPPAY_MERCHANT_ID,
-    pxpay: params.merchantId || process.env.TAPPAY_MERCHANT_ID_PXPAY || process.env.TAPPAY_MERCHANT_ID,
+  const method = params.paymentMethod || 'credit_card'
+  const merchantIdKeys: Record<string, string> = {
+    credit_card: 'tappay_merchant_id',
+    line_pay: 'tappay_merchant_id_line_pay',
+    apple_pay: 'tappay_merchant_id_apple_pay',
+    jko_pay: 'tappay_merchant_id_jko_pay',
+    pxpay: 'tappay_merchant_id_pxpay',
   }
-  const merchantId = merchantIdMap[params.paymentMethod || 'credit_card'] || process.env.TAPPAY_MERCHANT_ID
+  const merchantId = settings.get(merchantIdKeys[method] || 'tappay_merchant_id')
+    || settings.get('tappay_merchant_id')
+    || process.env.TAPPAY_MERCHANT_ID
 
   if (!partnerKey) {
-    throw new Error('缺少 TAPPAY_PARTNER_KEY')
+    throw new Error('缺少 Partner Key，請到後台「參數管理 → 系統設定」填入')
+  }
+  if (!merchantId) {
+    throw new Error(`缺少 ${method} 的 Merchant ID，請到後台「參數管理 → 系統設定」填入`)
   }
 
   const url = env === 'production' ? TAPPAY_PROD_URL : TAPPAY_SANDBOX_URL
@@ -62,9 +72,9 @@ export async function payByPrime(params: {
     remember: false,
   }
 
-  // 只有跳轉型付款才需要 result_url（Line Pay、JKO Pay、PX Pay）
+  // 只有跳轉型付款才需要 result_url
   const redirectMethods = ['line_pay', 'jko_pay', 'pxpay']
-  if (params.resultUrl && redirectMethods.includes(params.paymentMethod || '')) {
+  if (params.resultUrl && redirectMethods.includes(method)) {
     body.result_url = {
       frontend_redirect_url: params.resultUrl,
       backend_notify_url: params.resultUrl.replace('/payment/result', '/api/payment/notify'),

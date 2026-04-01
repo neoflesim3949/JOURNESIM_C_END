@@ -12,39 +12,14 @@ declare global {
         onUpdate: (cb: (update: { canGetPrime: boolean; status: { number: number; expiry: number; ccv: number } }) => void) => void
         getPrime: (cb: (result: { status: number; card: { prime: string }; msg: string }) => void) => void
       }
-      linePay: {
-        getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void
-      }
-      jkoPay: {
-        getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void
-      }
-      applePay: {
-        setupApplePay: (config: Record<string, unknown>) => void
-        getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void
-      }
-      pxpayPlus: {
-        getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void
-      }
+      linePay: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
+      jkoPay: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
+      pxpayPlus: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
     }
   }
 }
 
 type PaymentMethod = 'credit_card' | 'line_pay' | 'apple_pay' | 'jko_pay' | 'pxpay'
-
-interface PaymentOption {
-  id: PaymentMethod
-  label: string
-  icon: string
-  enabled: boolean
-}
-
-const PAYMENT_OPTIONS: PaymentOption[] = [
-  { id: 'credit_card', label: '信用卡', icon: '💳', enabled: true },
-  { id: 'line_pay', label: 'Line Pay', icon: '🟢', enabled: true },
-  { id: 'apple_pay', label: 'Apple Pay', icon: '🍎', enabled: true },
-  { id: 'jko_pay', label: '街口支付', icon: '🏪', enabled: true },
-  { id: 'pxpay', label: 'PX Pay Plus', icon: '🛒', enabled: true },
-]
 
 interface TapPayFormProps {
   onPrimeReady: (prime: string, method: string) => void
@@ -57,98 +32,100 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
   const [canGetPrime, setCanGetPrime] = useState(false)
   const [cardError, setCardError] = useState('')
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('credit_card')
+  const [enabledMethods, setEnabledMethods] = useState<Record<string, boolean>>({ credit_card: true })
   const initialized = useRef(false)
 
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
 
-    const script = document.createElement('script')
-    script.src = 'https://js.tappaysdk.com/sdk/tpdirect/v5.18.0'
-    script.onload = () => {
-      const appId = Number(process.env.NEXT_PUBLIC_TAPPAY_APP_ID)
-      const appKey = process.env.NEXT_PUBLIC_TAPPAY_APP_KEY!
-      const env = process.env.NEXT_PUBLIC_TAPPAY_ENV === 'production' ? 'production' : 'sandbox'
+    fetch('/api/shop/tappay-config')
+      .then((r) => r.json())
+      .then((config) => {
+        setEnabledMethods(config.methods || { credit_card: true })
 
-      window.TPDirect.setupSDK(appId, appKey, env)
+        const script = document.createElement('script')
+        script.src = 'https://js.tappaysdk.com/sdk/tpdirect/v5.18.0'
+        script.onload = () => {
+          const appId = config.app_id || Number(process.env.NEXT_PUBLIC_TAPPAY_APP_ID)
+          const appKey = config.app_key || process.env.NEXT_PUBLIC_TAPPAY_APP_KEY!
+          const env = config.env === 'production' ? 'production' : 'sandbox'
 
-      // 信用卡表單
-      window.TPDirect.card.setup({
-        fields: {
-          number: { element: '#card-number', placeholder: '4242 4242 4242 4242' },
-          expirationDate: { element: '#card-expiry', placeholder: 'MM / YY' },
-          ccv: { element: '#card-ccv', placeholder: 'CCV' },
-        },
-        styles: {
-          'input': { 'font-size': '14px', 'color': '#333' },
-          ':focus': { 'color': '#333' },
-          '.valid': { 'color': '#333' },
-          '.invalid': { 'color': '#ef4444' },
-        },
+          window.TPDirect.setupSDK(appId, appKey, env)
+
+          window.TPDirect.card.setup({
+            fields: {
+              number: { element: '#card-number', placeholder: '4242 4242 4242 4242' },
+              expirationDate: { element: '#card-expiry', placeholder: 'MM / YY' },
+              ccv: { element: '#card-ccv', placeholder: 'CCV' },
+            },
+            styles: {
+              'input': { 'font-size': '14px', 'color': '#333' },
+              ':focus': { 'color': '#333' },
+              '.valid': { 'color': '#333' },
+              '.invalid': { 'color': '#ef4444' },
+            },
+          })
+
+          window.TPDirect.card.onUpdate((update) => {
+            setCanGetPrime(update.canGetPrime)
+            if (update.status.number === 2) setCardError('卡號格式錯誤')
+            else if (update.status.expiry === 2) setCardError('到期日格式錯誤')
+            else if (update.status.ccv === 2) setCardError('CCV 格式錯誤')
+            else setCardError('')
+          })
+
+          setSdkReady(true)
+        }
+        document.head.appendChild(script)
       })
-
-      window.TPDirect.card.onUpdate((update) => {
-        setCanGetPrime(update.canGetPrime)
-        if (update.status.number === 2) setCardError('卡號格式錯誤')
-        else if (update.status.expiry === 2) setCardError('到期日格式錯誤')
-        else if (update.status.ccv === 2) setCardError('CCV 格式錯誤')
-        else setCardError('')
-      })
-
-      setSdkReady(true)
-    }
-    document.head.appendChild(script)
   }, [])
 
   function handleSubmit() {
+    setCardError('')
+
     if (selectedMethod === 'credit_card') {
       if (!canGetPrime) return
       window.TPDirect.card.getPrime((result) => {
-        if (result.status !== 0) {
-          setCardError(result.msg || '取得付款資訊失敗')
-          return
-        }
+        if (result.status !== 0) { setCardError(result.msg || '取得付款資訊失敗'); return }
         onPrimeReady(result.card.prime, 'credit_card')
       })
     } else if (selectedMethod === 'line_pay') {
       window.TPDirect.linePay.getPrime((result) => {
-        if (result.status !== 0) {
-          setCardError(result.msg || 'Line Pay 啟動失敗')
-          return
-        }
+        if (result.status !== 0) { setCardError(result.msg || 'Line Pay 啟動失敗'); return }
         onPrimeReady(result.prime, 'line_pay')
       })
     } else if (selectedMethod === 'jko_pay') {
       window.TPDirect.jkoPay.getPrime((result) => {
-        if (result.status !== 0) {
-          setCardError(result.msg || '街口支付啟動失敗')
-          return
-        }
+        if (result.status !== 0) { setCardError(result.msg || '街口支付啟動失敗'); return }
         onPrimeReady(result.prime, 'jko_pay')
       })
     } else if (selectedMethod === 'apple_pay') {
-      // Apple Pay 需要 HTTPS + Safari，localhost 無法使用
-      setCardError('Apple Pay 僅支援 Safari 瀏覽器（HTTPS 環境），本地開發環境無法使用')
-      return
+      setCardError('Apple Pay 需要 HTTPS + Safari 環境，請部署到正式環境後使用')
     } else if (selectedMethod === 'pxpay') {
       window.TPDirect.pxpayPlus.getPrime((result) => {
-        if (result.status !== 0) {
-          setCardError(result.msg || 'PX Pay 啟動失敗')
-          return
-        }
+        if (result.status !== 0) { setCardError(result.msg || 'PX Pay 啟動失敗'); return }
         onPrimeReady(result.prime, 'pxpay')
       })
     }
   }
 
+  const allOptions: { id: PaymentMethod; label: string; icon: string }[] = [
+    { id: 'credit_card', label: '信用卡', icon: '💳' },
+    { id: 'line_pay', label: 'Line Pay', icon: '🟢' },
+    { id: 'apple_pay', label: 'Apple Pay', icon: '🍎' },
+    { id: 'jko_pay', label: '街口支付', icon: '🏪' },
+    { id: 'pxpay', label: 'PX Pay Plus', icon: '🛒' },
+  ]
+
+  const visibleOptions = allOptions.filter((o) => enabledMethods[o.id])
   const canSubmit = selectedMethod === 'credit_card' ? canGetPrime : sdkReady
 
   return (
     <div>
-      {/* Payment Method Selector */}
       <label className="text-sm font-medium">付款方式</label>
       <div className="mt-2 grid grid-cols-2 gap-2">
-        {PAYMENT_OPTIONS.filter((o) => o.enabled).map((opt) => (
+        {visibleOptions.map((opt) => (
           <button
             key={opt.id}
             type="button"
@@ -165,7 +142,6 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
         ))}
       </div>
 
-      {/* Credit Card Form */}
       {selectedMethod === 'credit_card' && (
         <div className="mt-4 space-y-3">
           <div>
@@ -182,13 +158,10 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
               <div id="card-ccv" className="h-10 px-3 py-2 border border-gray-300 rounded-lg bg-white" />
             </div>
           </div>
-          <p className="text-xs text-gray-400">
-            測試卡號：4242 4242 4242 4242 / 01/28 / 123
-          </p>
+          <p className="text-xs text-gray-400">測試卡號：4242 4242 4242 4242 / 01/28 / 123</p>
         </div>
       )}
 
-      {/* Other methods info */}
       {selectedMethod === 'line_pay' && (
         <div className="mt-4 p-4 bg-green-50 rounded-lg text-sm text-green-700">
           <p className="font-medium">Line Pay</p>
@@ -198,7 +171,7 @@ export function TapPayForm({ onPrimeReady, loading, disabled }: TapPayFormProps)
       {selectedMethod === 'apple_pay' && (
         <div className="mt-4 p-4 bg-gray-50 rounded-lg text-sm text-gray-700">
           <p className="font-medium">Apple Pay</p>
-          <p className="mt-1 text-gray-600">需要 HTTPS 環境 + Safari 瀏覽器（iOS / macOS），部署到正式環境後可使用</p>
+          <p className="mt-1 text-gray-600">需要 HTTPS + Safari 瀏覽器</p>
         </div>
       )}
       {selectedMethod === 'jko_pay' && (
