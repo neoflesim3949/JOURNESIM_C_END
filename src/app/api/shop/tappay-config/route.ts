@@ -26,31 +26,31 @@ export async function GET() {
       id: 'credit_card',
       enabled: hasDbSettings ? settings.get('payment_credit_card') === 'true' : true,
       label: nonEmpty(settings.get('payment_credit_card_label')) || '信用卡',
-      icon: nonEmpty(settings.get('payment_credit_card_icon')) || '',
+      icons: (settings.get('payment_credit_card_icons') || '').split(',').filter(Boolean),
     },
     {
       id: 'line_pay',
       enabled: hasDbSettings ? settings.get('payment_line_pay') === 'true' : false,
       label: nonEmpty(settings.get('payment_line_pay_label')) || 'Line Pay',
-      icon: nonEmpty(settings.get('payment_line_pay_icon')) || '',
+      icons: (settings.get('payment_line_pay_icons') || '').split(',').filter(Boolean),
     },
     {
       id: 'apple_pay',
       enabled: hasDbSettings ? settings.get('payment_apple_pay') === 'true' : false,
       label: nonEmpty(settings.get('payment_apple_pay_label')) || 'Apple Pay',
-      icon: nonEmpty(settings.get('payment_apple_pay_icon')) || '',
+      icons: (settings.get('payment_apple_pay_icons') || '').split(',').filter(Boolean),
     },
     {
       id: 'jko_pay',
       enabled: hasDbSettings ? settings.get('payment_jko_pay') === 'true' : false,
       label: nonEmpty(settings.get('payment_jko_pay_label')) || '街口支付',
-      icon: nonEmpty(settings.get('payment_jko_pay_icon')) || '',
+      icons: (settings.get('payment_jko_pay_icons') || '').split(',').filter(Boolean),
     },
     {
       id: 'pxpay',
       enabled: hasDbSettings ? settings.get('payment_pxpay') === 'true' : false,
       label: nonEmpty(settings.get('payment_pxpay_label')) || 'PX Pay Plus',
-      icon: nonEmpty(settings.get('payment_pxpay_icon')) || '',
+      icons: (settings.get('payment_pxpay_icons') || '').split(',').filter(Boolean),
     },
   ]
 

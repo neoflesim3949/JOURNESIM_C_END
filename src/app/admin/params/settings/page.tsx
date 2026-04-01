@@ -179,9 +179,9 @@ export default function AdminSettingsPage() {
                   <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${getValue(pm.key) === 'true' ? 'left-6' : 'left-0.5'}`} />
                 </button>
               </div>
-              {/* 自訂名稱和 Icon */}
+              {/* 自訂名稱和 Icons */}
               {getValue(pm.key) === 'true' && (
-                <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="mt-3 space-y-3">
                   <div>
                     <label className="text-xs text-gray-500">顯示名稱</label>
                     <input
@@ -192,23 +192,54 @@ export default function AdminSettingsPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-gray-500">Icon（選填，可從圖片庫選擇）</label>
-                    <div className="mt-1 flex items-center gap-2">
-                      {getValue(`${pm.key}_icon`) ? (
-                        <div className="flex items-center gap-2 flex-1 p-1.5 border border-gray-300 rounded">
+                    <label className="text-xs text-gray-500">Icons（可上傳多張，從圖片庫複製 URL 貼上）</label>
+                    {/* 已有的 icons */}
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {(getValue(`${pm.key}_icons`) || '').split(',').filter(Boolean).map((url, idx) => (
+                        <div key={idx} className="flex items-center gap-1 p-1 border border-gray-200 rounded bg-gray-50">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={getValue(`${pm.key}_icon`)} alt="icon" className="w-6 h-6 object-contain" />
-                          <span className="text-xs text-gray-500 truncate flex-1">{getValue(`${pm.key}_icon`).split('/').pop()}</span>
-                          <button onClick={() => handleChange(`${pm.key}_icon`, '')} className="text-xs text-red-400 hover:text-red-600">移除</button>
+                          <img src={url.trim()} alt="" className="w-8 h-8 object-contain" />
+                          <button
+                            onClick={() => {
+                              const urls = (getValue(`${pm.key}_icons`) || '').split(',').filter(Boolean)
+                              urls.splice(idx, 1)
+                              handleChange(`${pm.key}_icons`, urls.join(','))
+                            }}
+                            className="text-gray-400 hover:text-red-500 p-0.5"
+                          >×</button>
                         </div>
-                      ) : (
-                        <input
-                          value={getValue(`${pm.key}_icon`)}
-                          onChange={(e) => handleChange(`${pm.key}_icon`, e.target.value)}
-                          className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm"
-                          placeholder="貼上 URL 或到圖片庫複製"
-                        />
-                      )}
+                      ))}
+                    </div>
+                    {/* 新增 icon */}
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        id={`icon-input-${pm.key}`}
+                        className="flex-1 px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        placeholder="貼上圖片 URL"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const input = e.currentTarget
+                            const url = input.value.trim()
+                            if (!url) return
+                            const existing = (getValue(`${pm.key}_icons`) || '').split(',').filter(Boolean)
+                            existing.push(url)
+                            handleChange(`${pm.key}_icons`, existing.join(','))
+                            input.value = ''
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const input = document.getElementById(`icon-input-${pm.key}`) as HTMLInputElement
+                          const url = input?.value.trim()
+                          if (!url) return
+                          const existing = (getValue(`${pm.key}_icons`) || '').split(',').filter(Boolean)
+                          existing.push(url)
+                          handleChange(`${pm.key}_icons`, existing.join(','))
+                          if (input) input.value = ''
+                        }}
+                        className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-xs text-blue-600 rounded transition-colors"
+                      >新增</button>
                       <a href="/admin/media" target="_blank" className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 text-xs text-gray-600 rounded transition-colors whitespace-nowrap">
                         圖片庫
                       </a>

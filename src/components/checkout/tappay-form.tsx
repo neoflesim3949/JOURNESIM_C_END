@@ -35,8 +35,8 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
   const [canGetPrime, setCanGetPrime] = useState(false)
   const [cardError, setCardError] = useState('')
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(isInLineApp ? 'line_pay' : 'credit_card')
-  const [methodOptions, setMethodOptions] = useState<{ id: string; enabled: boolean; label: string; icon: string }[]>([
-    { id: 'credit_card', enabled: true, label: '信用卡', icon: '' },
+  const [methodOptions, setMethodOptions] = useState<{ id: string; enabled: boolean; label: string; icons: string[] }[]>([
+    { id: 'credit_card', enabled: true, label: '信用卡', icons: [] },
   ])
   const initialized = useRef(false)
 
@@ -143,7 +143,7 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
   return (
     <div>
       <label className="text-sm font-medium">付款方式</label>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="mt-2 space-y-2">
         {visibleOptions.map((opt) => (
           <button
             key={opt.id}
@@ -155,8 +155,13 @@ export function TapPayForm({ onPrimeReady, loading, disabled, saveCard, onSaveCa
                 : 'border-border hover:border-primary/50'
             }`}
           >
-            {opt.icon ? (
-              <img src={opt.icon} alt={opt.label} className="w-6 h-6 object-contain" />
+            {opt.icons && opt.icons.length > 0 ? (
+              <span className="flex items-center gap-1">
+                {opt.icons.map((url, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img key={i} src={url} alt="" className="w-6 h-6 object-contain" />
+                ))}
+              </span>
             ) : (
               <span className="text-lg">{defaultIcons[opt.id] || '💰'}</span>
             )}

@@ -25,8 +25,12 @@ export async function PATCH(request: Request) {
   for (const u of updates) {
     await supabase
       .from('system_settings')
-      .update({ value: u.value, updated_at: new Date().toISOString() })
-      .eq('key', u.key)
+      .upsert({
+        key: u.key,
+        value: u.value,
+        description: '',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'key' })
   }
 
   return NextResponse.json({ ok: true })
