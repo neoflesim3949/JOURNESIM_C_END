@@ -33,7 +33,7 @@ export function Header() {
 
             <nav className="hidden lg:flex items-center gap-6">
               <Link href="/" className="text-sm font-medium text-foreground hover:text-primary transition-colors">首頁</Link>
-              <Link href="/shop" className="text-sm font-medium text-foreground hover:text-primary transition-colors">eSIM</Link>
+              <Link href="/shop?type=esim" className="text-sm font-medium text-foreground hover:text-primary transition-colors">eSIM</Link>
               <Link href="/shop?type=sim" className="text-sm font-medium text-foreground hover:text-primary transition-colors">實體 SIM 卡</Link>
               <Link href="/guide" className="text-sm font-medium text-foreground hover:text-primary transition-colors">幫助中心</Link>
               <Link href="/guide#install" className="text-sm font-medium text-foreground hover:text-primary transition-colors">安裝教學</Link>
@@ -79,7 +79,7 @@ export function Header() {
         <div className="lg:hidden border-t border-border bg-white">
           <nav className="px-4 py-4 space-y-3">
             <Link href="/" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>首頁</Link>
-            <Link href="/shop" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>eSIM</Link>
+            <Link href="/shop?type=esim" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>eSIM</Link>
             <Link href="/shop?type=sim" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>實體 SIM 卡</Link>
             <Link href="/guide" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>幫助中心</Link>
             <Link href="/guide#install" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>安裝教學</Link>

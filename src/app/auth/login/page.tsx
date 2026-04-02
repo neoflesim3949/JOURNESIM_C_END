@@ -1,9 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react'
+
+interface SocialProvider {
+  id: string
+  label: string
+  provider: string
+  icon: string
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -11,6 +18,11 @@ export default function LoginPage() {
   const [showPw, setShowPw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [socialProviders, setSocialProviders] = useState<SocialProvider[]>([])
+
+  useEffect(() => {
+    fetch('/api/shop/auth-config').then((r) => r.json()).then(setSocialProviders).catch(() => {})
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -29,12 +41,25 @@ export default function LoginPage() {
     window.location.href = '/account'
   }
 
-  async function handleOAuth(provider: 'google') {
+  async function handleOAuth(provider: string) {
     const supabase = createClient()
-    await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    })
+
+    // 判斷是否為自訂 OIDC provider（如 LINE）
+    const builtIn = ['google', 'apple', 'facebook', 'github', 'twitter', 'discord']
+    const isBuiltIn = builtIn.includes(provider)
+
+    if (isBuiltIn) {
+      await supabase.auth.signInWithOAuth({
+        provider: provider as 'google' | 'apple' | 'facebook',
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      })
+    } else {
+      // Custom OIDC provider (e.g. LINE)
+      await supabase.auth.signInWithOAuth({
+        provider: provider as 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      })
+    }
   }
 
   return (
@@ -46,7 +71,37 @@ export default function LoginPage() {
         <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg">{error}</div>
       )}
 
-      <form onSubmit={handleLogin} className="mt-8 space-y-4">
+      {/* Social Login Buttons */}
+      {socialProviders.length > 0 && (
+        <div className="mt-8 space-y-3">
+          {socialProviders.map((sp) => (
+            <button
+              key={sp.id}
+              onClick={() => handleOAuth(sp.provider)}
+              className="w-full flex items-center justify-center gap-3 py-2.5 border border-border rounded-lg text-sm font-medium hover:bg-muted transition-colors"
+            >
+              {sp.icon ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={sp.icon} alt="" className="w-5 h-5 object-contain" />
+              ) : (
+                <span className="w-5 h-5 bg-gray-200 rounded-full" />
+              )}
+              {sp.label}
+            </button>
+          ))}
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-2 bg-background text-muted-foreground">或使用 Email</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleLogin} className="mt-6 space-y-4">
         <div>
           <label className="text-sm font-medium">Email</label>
           <div className="mt-1 relative">
@@ -92,22 +147,6 @@ export default function LoginPage() {
           {loading ? '登入中...' : '登入'}
         </button>
       </form>
-
-      <div className="mt-6 relative">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-border" />
-        </div>
-        <div className="relative flex justify-center text-xs">
-          <span className="px-2 bg-background text-muted-foreground">或</span>
-        </div>
-      </div>
-
-      <button
-        onClick={() => handleOAuth('google')}
-        className="mt-6 w-full flex items-center justify-center gap-2 py-2.5 border border-border rounded-lg text-sm font-medium hover:bg-muted transition-colors"
-      >
-        使用 Google 登入
-      </button>
 
       <p className="mt-8 text-center text-sm text-muted-foreground">
         還沒有帳號？{' '}

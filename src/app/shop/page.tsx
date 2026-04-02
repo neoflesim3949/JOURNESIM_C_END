@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { Search } from 'lucide-react'
 import { CountryModal } from '@/components/shop/country-modal'
@@ -20,6 +21,17 @@ interface ProductSummary {
 }
 
 export default function ShopPage() {
+  return (
+    <Suspense fallback={<div className="max-w-7xl mx-auto px-4 py-16 text-center text-muted-foreground">載入中...</div>}>
+      <ShopContent />
+    </Suspense>
+  )
+}
+
+function ShopContent() {
+  const searchParams = useSearchParams()
+  const typeParam = searchParams.get('type') as 'esim' | 'sim' | null
+
   const [countries, setCountries] = useState<BCCountry[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -29,6 +41,7 @@ export default function ShopPage() {
   const [selectedCountry, setSelectedCountry] = useState<BCCountry | null>(null)
   const [products, setProducts] = useState<ProductSummary[]>([])
   const [productsLoading, setProductsLoading] = useState(false)
+  const [defaultTab, setDefaultTab] = useState<'esim' | 'sim'>(typeParam || 'esim')
 
   useEffect(() => {
     fetch('/api/countries')
@@ -64,8 +77,9 @@ export default function ShopPage() {
 
   const groupKeys = useMemo(() => Array.from(grouped.keys()).sort(), [grouped])
 
-  async function openCountry(country: BCCountry) {
+  async function openCountry(country: BCCountry, tab?: 'esim' | 'sim') {
     setSelectedCountry(country)
+    setDefaultTab(tab || typeParam || 'esim')
     setProducts([])
     setProductsLoading(true)
     const res = await fetch(`/api/shop/country-products?mcc=${country.mcc}`)
@@ -161,6 +175,7 @@ export default function ShopPage() {
           products={products}
           loading={productsLoading}
           onClose={() => setSelectedCountry(null)}
+          defaultTab={defaultTab}
         />
       )}
     </div>

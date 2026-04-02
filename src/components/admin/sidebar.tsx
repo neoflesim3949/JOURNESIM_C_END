@@ -34,6 +34,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: '/admin/params/settings', label: '系統設定' },
       { href: '/admin/params/countries', label: '國家 MCC 管理' },
+      { href: '/admin/params/login', label: '登入管理' },
     ],
   },
   { href: '/admin/media', label: '圖片庫', icon: Image },

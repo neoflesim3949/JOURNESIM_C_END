@@ -24,9 +24,10 @@ interface CountryModalProps {
   products: ProductSummary[]
   loading: boolean
   onClose: () => void
+  defaultTab?: 'esim' | 'sim'
 }
 
-export function CountryModal({ country, products, loading, onClose }: CountryModalProps) {
+export function CountryModal({ country, products, loading, onClose, defaultTab = 'esim' }: CountryModalProps) {
   const esimProducts = useMemo(() => products.filter((p) => p.product_type === 'esim'), [products])
   const simProducts = useMemo(() => products.filter((p) => p.product_type === 'sim'), [products])
 
@@ -34,7 +35,7 @@ export function CountryModal({ country, products, loading, onClose }: CountryMod
   const hasSim = simProducts.length > 0
   const hasBothTypes = hasEsim && hasSim
 
-  const [activeTab, setActiveTab] = useState<'esim' | 'sim'>(hasEsim ? 'esim' : 'sim')
+  const [activeTab, setActiveTab] = useState<'esim' | 'sim'>(defaultTab)
 
   const displayProducts = activeTab === 'esim' ? esimProducts : simProducts
 

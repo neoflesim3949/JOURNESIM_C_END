@@ -35,8 +35,11 @@ function CheckoutContent() {
   const [savedCards, setSavedCards] = useState<{ id: string; last_four: string; card_type: string; issuer: string }[]>([])
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [saveCard, setSaveCard] = useState(false)
+  const [isInLineApp, setIsInLineApp] = useState(false)
 
-  const isInLineApp = typeof navigator !== 'undefined' && /Line/i.test(navigator.userAgent)
+  useEffect(() => {
+    setIsInLineApp(/Line/i.test(navigator.userAgent))
+  }, [])
 
   const productId = searchParams.get('product')
   const planId = searchParams.get('planId')
