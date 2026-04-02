@@ -15,7 +15,10 @@ export async function PATCH(request: Request) {
   const supabase = createAdminClient()
 
   for (const u of updates) {
-    await supabase.from('package_plan_prices').update({ sell_price: u.sell_price }).eq('id', u.id)
+    await supabase.from('package_plan_prices').update({
+      sell_price: u.sell_price,
+      price_changed: false,  // 儲存後清除異動標記
+    }).eq('id', u.id)
   }
 
   return NextResponse.json({ ok: true, updated: updates.length })

@@ -17,14 +17,24 @@ export async function GET() {
     .select('mcc, name, continent, flag_url')
     .order('name')
 
-  // 取得每個國家的商品數量
+  // 取得每個國家實際綁定的套餐數量（product_packages count）
   const { data: products } = await supabase
     .from('products')
-    .select('country_code')
+    .select('id, country_code')
+
+  const productIdToCountry = new Map<string, string>()
+  for (const p of products || []) {
+    productIdToCountry.set(p.id, p.country_code)
+  }
+
+  const { data: links } = await supabase
+    .from('product_packages')
+    .select('product_id')
 
   const countMap = new Map<string, number>()
-  for (const p of products || []) {
-    countMap.set(p.country_code, (countMap.get(p.country_code) || 0) + 1)
+  for (const l of links || []) {
+    const cc = productIdToCountry.get(l.product_id)
+    if (cc) countMap.set(cc, (countMap.get(cc) || 0) + 1)
   }
 
   const result = (countries || []).map((c) => ({

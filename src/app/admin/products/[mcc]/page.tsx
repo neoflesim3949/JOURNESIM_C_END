@@ -4,102 +4,119 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
-import { ArrowLeft, Plus, Pencil, Trash2, Package } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Package, X, Search, Zap } from 'lucide-react'
 
-interface Country {
-  mcc: string
-  name: string
-  continent: string
-  flag_url: string | null
-}
-
-interface Product {
-  id: string
-  name: string
-  description: string | null
-  product_type: string
-  is_active: boolean
-  sort_order: number
-  _plan_count?: number
-}
+interface Country { mcc: string; name: string; continent: string; flag_url: string | null }
+interface PkgInfo { id: string; name: string; description: string | null; product_type: string; is_active: boolean; _plan_count?: number }
 
 export default function AdminCountryProductsPage() {
   const { mcc } = useParams() as { mcc: string }
   const [country, setCountry] = useState<Country | null>(null)
-  const [products, setProducts] = useState<Product[]>([])
+  const [linkedPackages, setLinkedPackages] = useState<PkgInfo[]>([])
+  const [allPackages, setAllPackages] = useState<PkgInfo[]>([])
   const [loading, setLoading] = useState(true)
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', product_type: 'esim' })
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', description: '', product_type: 'esim' })
+  const [showAddPkg, setShowAddPkg] = useState(false)
+  const [pkgSearch, setPkgSearch] = useState('')
+  const [searchResults, setSearchResults] = useState<PkgInfo[]>([])
+  const [searching, setSearching] = useState(false)
+  const [quickLoading, setQuickLoading] = useState(false)
+
+  // 這個國家用一個隱藏的 product 作為方案載體
+  const [productId, setProductId] = useState<string | null>(null)
 
   async function loadData() {
-    const res = await fetch(`/api/admin/products/countries/${mcc}`)
-    if (res.ok) {
-      const data = await res.json()
-      setCountry(data.country)
-      setProducts(data.products)
+    const [countryRes, packagesRes] = await Promise.all([
+      fetch(`/api/admin/products/countries/${mcc}`).then((r) => r.json()),
+      fetch('/api/admin/packages').then((r) => r.json()),
+    ])
+    setCountry(countryRes.country)
+    setAllPackages(packagesRes || [])
+
+    // 取得或建立此國家的方案
+    const products = countryRes.products || []
+    let pid = products[0]?.id || null
+
+    if (!pid) {
+      // 自動建立一個方案
+      const res = await fetch('/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: countryRes.country?.name || mcc, country_code: mcc, country_name: countryRes.country?.name || '', product_type: 'esim' }),
+      })
+      if (res.ok) {
+        const newProduct = await res.json()
+        pid = newProduct.id
+      }
     }
+    setProductId(pid)
+
+    // 取得已加入的套餐
+    if (pid) {
+      const pkgsRes = await fetch(`/api/admin/products/countries/${mcc}/packages`).then((r) => r.json())
+      const match = Array.isArray(pkgsRes) ? pkgsRes.find((p: { id: string }) => p.id === pid) : null
+      setLinkedPackages(match?.packages || [])
+    }
+
     setLoading(false)
   }
 
   useEffect(() => { loadData() }, [mcc])
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    const res = await fetch('/api/admin/products', {
+  async function handleAddPackage(packageId: string) {
+    if (!productId) return
+    await fetch(`/api/admin/products/countries/${mcc}/packages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...form,
-        country_code: mcc,
-        country_name: country?.name || '',
-      }),
+      body: JSON.stringify({ product_id: productId, package_id: packageId }),
     })
-    if (res.ok) {
-      setShowCreate(false)
-      setForm({ name: '', description: '', product_type: 'esim' })
-      loadData()
-    }
+    setShowAddPkg(false)
+    await loadData()
   }
 
-  function startEdit(p: Product) {
-    setEditingId(p.id)
-    setEditForm({ name: p.name, description: p.description || '', product_type: p.product_type })
-  }
-
-  async function handleSaveEdit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!editingId) return
-    await fetch('/api/admin/products', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: editingId, name: editForm.name, description: editForm.description || null }),
-    })
-    setEditingId(null)
-    loadData()
-  }
-
-  async function handleDelete(id: string) {
-    if (!confirm('確定要刪除此方案？綁定的套餐也會一併刪除。')) return
-    await fetch('/api/admin/products', {
+  async function handleRemovePackage(packageId: string) {
+    if (!productId) return
+    if (!confirm('確定移除此方案？')) return
+    await fetch(`/api/admin/products/countries/${mcc}/packages`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ product_id: productId, package_id: packageId }),
     })
-    loadData()
+    await loadData()
   }
 
-  async function handleToggle(id: string, isActive: boolean) {
-    await fetch('/api/admin/products', {
-      method: 'PATCH',
+  async function handleQuickAdd() {
+    if (!productId) return
+    setQuickLoading(true)
+
+    // 用 MCC 代碼查詢含有此國家的套餐
+    const res = await fetch(`/api/admin/products/countries/${mcc}/quick-add`, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, is_active: !isActive }),
+      body: JSON.stringify({ product_id: productId }),
     })
-    loadData()
+    const data = await res.json()
+
+    setQuickLoading(false)
+    if (data.added === 0) {
+      alert(`沒有找到覆蓋 ${mcc} 的套餐`)
+    }
+    await loadData()
   }
 
   if (loading) return <div className="text-gray-500">載入中...</div>
+
+  const linkedIds = new Set(linkedPackages.map((p) => p.id))
+
+  async function handleSearchPkgs(query: string) {
+    setPkgSearch(query)
+    if (query.length < 1) { setSearchResults(allPackages); return }
+    setSearching(true)
+    const res = await fetch(`/api/admin/packages/search?q=${encodeURIComponent(query)}`)
+    if (res.ok) setSearchResults(await res.json())
+    setSearching(false)
+  }
+
+  const availablePackages = (pkgSearch ? searchResults : allPackages).filter((pkg) => !linkedIds.has(pkg.id))
 
   return (
     <div>
@@ -110,140 +127,102 @@ export default function AdminCountryProductsPage() {
       {/* Country Header */}
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {country?.flag_url ? (
-            <Image src={country.flag_url} alt={country.name} width={48} height={36} className="rounded shadow" />
-          ) : (
-            <div className="w-12 h-9 bg-gray-100 rounded" />
-          )}
+          {country?.flag_url ? <Image src={country.flag_url} alt={country.name} width={48} height={36} className="rounded shadow" /> : <div className="w-12 h-9 bg-gray-100 rounded" />}
           <div>
             <h1 className="text-2xl font-bold">{country?.name || mcc}</h1>
             <p className="text-sm text-gray-500">{country?.continent} · {mcc}</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" />
-          新增方案
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handleQuickAdd} disabled={quickLoading}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">
+            <Zap className="w-4 h-4" /> {quickLoading ? '加入中...' : '快捷加入'}
+          </button>
+          <button onClick={() => { setShowAddPkg(true); setPkgSearch('') }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
+            <Plus className="w-4 h-4" /> 加入方案
+          </button>
+        </div>
       </div>
 
-      {/* Create Form */}
-      {showCreate && (
-        <form onSubmit={handleCreate} className="mt-4 bg-white p-6 rounded-xl border border-gray-200 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium">方案名稱</label>
-              <input
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                placeholder={`例：${country?.name || ''} eSIM`}
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium">類型</label>
-              <select
-                value={form.product_type}
-                onChange={(e) => setForm({ ...form, product_type: e.target.value })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-              >
-                <option value="esim">eSIM</option>
-                <option value="sim">SIM 卡</option>
-              </select>
-            </div>
-            <div className="col-span-2">
-              <label className="text-sm font-medium">描述（選填）</label>
-              <input
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                placeholder="方案描述"
-              />
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <button type="submit" className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">建立</button>
-            <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
-          </div>
-        </form>
-      )}
+      {/* Linked Packages */}
+      <div className="mt-6">
+        <h2 className="text-sm font-medium text-gray-500">已加入的方案（{linkedPackages.length}）</h2>
 
-      {/* Product List */}
-      {products.length === 0 ? (
-        <div className="mt-8 text-center py-16 bg-white rounded-xl border border-gray-200">
-          <Package className="mx-auto w-12 h-12 text-gray-300" />
-          <p className="mt-4 text-gray-500">尚無方案，點擊「新增方案」開始建立</p>
-        </div>
-      ) : (
-        <div className="mt-6 space-y-3">
-          {products.map((p) => (
-            <div key={p.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition-all">
-              {editingId === p.id ? (
-                <form onSubmit={handleSaveEdit} className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-medium">方案名稱</label>
-                      <input required value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium">類型</label>
-                      <select value={editForm.product_type} onChange={(e) => setEditForm({ ...editForm, product_type: e.target.value })}
-                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                        <option value="esim">eSIM</option>
-                        <option value="sim">SIM 卡</option>
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <label className="text-xs font-medium">描述</label>
-                      <input value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="方案描述" />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="submit" className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">儲存</button>
-                    <button type="button" onClick={() => setEditingId(null)} className="px-3 py-1.5 border border-gray-300 text-xs rounded-lg hover:bg-gray-50">取消</button>
-                  </div>
-                </form>
-              ) : (
-                <div className="flex items-center justify-between">
+        {linkedPackages.length === 0 ? (
+          <div className="mt-4 text-center py-16 bg-white rounded-xl border border-gray-200">
+            <Package className="mx-auto w-12 h-12 text-gray-300" />
+            <p className="mt-4 text-gray-500">尚未加入方案</p>
+            <p className="mt-1 text-xs text-gray-400">請先到「套餐管理」建立套餐，再回來加入</p>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {linkedPackages.map((pkg) => (
+              <div key={pkg.id} className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-gray-300 transition-all">
+                <div className="flex items-center gap-3">
+                  <Package className="w-5 h-5 text-blue-500" />
                   <div>
-                    <div className="flex items-center gap-3">
-                      <h3 className="font-semibold">{p.name}</h3>
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{p.product_type}</span>
-                      <button
-                        onClick={() => handleToggle(p.id, p.is_active)}
-                        className={`px-2 py-0.5 text-xs rounded-full ${p.is_active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}
-                      >
-                        {p.is_active ? '上架中' : '已下架'}
-                      </button>
+                    <div className="font-semibold">{pkg.name}</div>
+                    <div className="text-xs text-gray-400">
+                      {pkg.product_type} · {pkg._plan_count || 0} 個 BC 商品
+                      {pkg.description && ` · ${pkg.description}`}
                     </div>
-                    {p.description && <p className="mt-1 text-sm text-gray-500">{p.description}</p>}
-                    <p className="mt-1 text-xs text-gray-400">
-                      {p._plan_count ? `已綁定 ${p._plan_count} 個套餐` : '尚未綁定套餐'}
-                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(p)}
-                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
-                      <Pencil className="w-4 h-4" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link href={`/admin/packages/${pkg.id}`}
+                    className="px-3 py-1.5 bg-gray-50 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-100">
+                    查看套餐
+                  </Link>
+                  <button onClick={() => handleRemovePackage(pkg.id)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add Package Modal */}
+      {showAddPkg && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowAddPkg(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[60vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="font-bold">加入方案</h2>
+              <button onClick={() => setShowAddPkg(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 border-b border-gray-100">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input type="text" value={pkgSearch} onChange={(e) => handleSearchPkgs(e.target.value)}
+                  placeholder="搜尋套餐名稱或國家代碼（如 CN、JP）..." className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" autoFocus />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {searching ? (
+                <p className="text-sm text-gray-500 text-center py-4">搜尋中...</p>
+              ) : availablePackages.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">
+                  {allPackages.length === 0 ? '尚無套餐，請先到「套餐管理」建立' : pkgSearch ? '找不到符合的套餐' : '所有套餐都已加入'}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {availablePackages.map((pkg) => (
+                    <button key={pkg.id} onClick={() => handleAddPackage(pkg.id)}
+                      className="w-full flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50/50 transition-all text-left">
+                      <div>
+                        <div className="text-sm font-medium">{pkg.name}</div>
+                        <div className="text-xs text-gray-400">{pkg.product_type} · {pkg._plan_count || 0} 個 BC 商品</div>
+                      </div>
+                      <Plus className="w-4 h-4 text-blue-500" />
                     </button>
-                    <Link href={`/admin/products/${mcc}/${p.id}`}
-                      className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">
-                      管理套餐
-                    </Link>
-                    <button onClick={() => handleDelete(p.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  ))}
                 </div>
               )}
             </div>
-          ))}
+          </div>
         </div>
       )}
     </div>

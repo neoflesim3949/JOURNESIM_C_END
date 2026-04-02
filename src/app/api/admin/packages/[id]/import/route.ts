@@ -77,15 +77,39 @@ export async function POST(
   const { data: createdPlans } = await supabase.from('package_plans').select('id, bc_sku_id').eq('package_id', id)
   const planIdMap = new Map((createdPlans || []).map((p) => [p.bc_sku_id, p.id]))
 
-  // 建立 copies 價格
-  const priceRecords: { package_plan_id: string; copies: string; cost_price: number }[] = []
+  // 取得現有價格（用於偵測異動）
+  const existingPlanIds = Array.from(planIdMap.values())
+  const { data: existingPrices } = existingPlanIds.length > 0
+    ? await supabase.from('package_plan_prices').select('package_plan_id, copies, cost_price').in('package_plan_id', existingPlanIds)
+    : { data: [] }
+
+  const existingPriceMap = new Map<string, number>()
+  for (const ep of existingPrices || []) {
+    existingPriceMap.set(`${ep.package_plan_id}_${ep.copies}`, ep.cost_price)
+  }
+
+  // 建立 copies 價格（偵測異動）
+  const priceRecords: { package_plan_id: string; copies: string; cost_price: number; original_cost_price?: number; price_changed?: boolean; changed_at?: string }[] = []
   for (const bc of matched) {
     const planId = planIdMap.get(bc.sku_id)
     if (!planId) continue
     const prices = bc.prices as { copies: string; settlementPrice: string }[] | null
     if (!prices) continue
     for (const p of prices) {
-      priceRecords.push({ package_plan_id: planId, copies: p.copies, cost_price: Number(p.settlementPrice) || 0 })
+      const newCost = Number(p.settlementPrice) || 0
+      const key = `${planId}_${p.copies}`
+      const oldCost = existingPriceMap.get(key)
+
+      const record: typeof priceRecords[0] = { package_plan_id: planId, copies: p.copies, cost_price: newCost }
+
+      if (oldCost !== undefined && oldCost !== newCost) {
+        // 價格異動：舊價放 original_cost_price
+        record.original_cost_price = oldCost
+        record.price_changed = true
+        record.changed_at = new Date().toISOString()
+      }
+
+      priceRecords.push(record)
     }
   }
 

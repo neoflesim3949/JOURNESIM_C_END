@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     .select('sku_id, name, type, plan_type, high_flow_size')
     .ilike('name', `%${q}%`)
     .in('type', allowedTypes)
-    .limit(50)
+    .limit(500)
 
   for (const p of byName || []) map.set(p.sku_id, p)
 
@@ -38,27 +38,24 @@ export async function GET(request: Request) {
     .select('sku_id, name, type, plan_type, high_flow_size')
     .ilike('sku_id', `%${q}%`)
     .in('type', allowedTypes)
-    .limit(50)
+    .limit(500)
 
   for (const p of bySku || []) map.set(p.sku_id, p)
 
-  // 3. 如果輸入像是 MCC（2-3 個大寫字母），先查國家名稱再用名稱搜商品
+  // 3. 如果輸入像是 MCC（2-3 個大寫字母），搜 country_data 包含此 MCC 的所有商品
   if (/^[A-Za-z]{2,3}$/.test(q)) {
-    const { data: countries } = await supabase
-      .from('bc_countries')
-      .select('name')
-      .ilike('mcc', q)
+    const code = q.toUpperCase()
 
-    if (countries && countries.length > 0) {
-      for (const country of countries) {
-        const { data: byCountry } = await supabase
-          .from('bc_products')
-          .select('sku_id, name, type, plan_type, high_flow_size')
-          .ilike('name', `%${country.name}%`)
-          .in('type', allowedTypes)
-          .limit(50)
+    // 從 bc_products 的 country_data JSONB 搜尋包含此 MCC 的商品
+    const { data: allBc } = await supabase
+      .from('bc_products')
+      .select('sku_id, name, type, plan_type, high_flow_size, country_data')
+      .in('type', allowedTypes)
 
-        for (const p of byCountry || []) map.set(p.sku_id, p)
+    for (const p of allBc || []) {
+      const countries = p.country_data as { mcc: string }[] | null
+      if (countries?.some((c) => c.mcc.toUpperCase() === code)) {
+        map.set(p.sku_id, { sku_id: p.sku_id, name: p.name, type: p.type, plan_type: p.plan_type, high_flow_size: p.high_flow_size })
       }
     }
   }
@@ -69,5 +66,5 @@ export async function GET(request: Request) {
     return !n.includes('加速') && !n.includes('accel') && !n.includes('boost')
   })
 
-  return NextResponse.json(results.slice(0, 50))
+  return NextResponse.json(results)
 }

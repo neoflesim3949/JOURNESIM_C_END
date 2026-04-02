@@ -38,10 +38,25 @@ export async function GET() {
     }
   }
 
+  // 檢查哪些套餐有價格異動
+  const changedPkgIds = new Set<string>()
+  if (packageIds.length > 0) {
+    const { data: allPlans } = await supabase.from('package_plans').select('id, package_id').in('package_id', packageIds)
+    const planIds = (allPlans || []).map((p) => p.id)
+    if (planIds.length > 0) {
+      const { data: changedPrices } = await supabase.from('package_plan_prices').select('package_plan_id').in('package_plan_id', planIds).eq('price_changed', true)
+      const changedPlanIds = new Set((changedPrices || []).map((p) => p.package_plan_id))
+      for (const plan of allPlans || []) {
+        if (changedPlanIds.has(plan.id)) changedPkgIds.add(plan.package_id)
+      }
+    }
+  }
+
   const result = (packages || []).map((p) => ({
     ...p,
     _plan_count: planCounts.get(p.id) || 0,
     _product_count: productCounts.get(p.id) || 0,
+    _has_price_changes: changedPkgIds.has(p.id),
   }))
 
   return NextResponse.json(result)
