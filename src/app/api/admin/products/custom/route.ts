@@ -11,12 +11,22 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const scope = searchParams.get('scope') || 'regional'
 
+  const group = searchParams.get('group')
+
   const supabase = createAdminClient()
-  const { data: products } = await supabase
-    .from('products')
-    .select('*')
-    .eq('scope', scope)
-    .order('created_at', { ascending: false })
+
+  let query = supabase.from('products').select('*').order('created_at', { ascending: false })
+
+  if (group) {
+    // 按 country_code 過濾（取得特定分組的方案）
+    query = query.eq('country_code', group)
+  } else if (scope !== 'all') {
+    query = query.eq('scope', scope)
+  } else {
+    query = query.in('scope', ['regional', 'global'])
+  }
+
+  const { data: products } = await query
 
   // 計算每個方案的套餐數
   const productIds = (products || []).map((p) => p.id)

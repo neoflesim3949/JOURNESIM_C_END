@@ -11,7 +11,7 @@ interface CountryWithCount {
 
 interface RegionalProduct {
   id: string; name: string; description: string | null; scope: string; product_type: string; is_active: boolean
-  _package_count?: number
+  country_code: string; country_name: string; _package_count?: number
 }
 
 type ScopeTab = 'local' | 'regional' | 'global'
@@ -63,26 +63,43 @@ export default function AdminProductsPage() {
   const withProducts = filtered.filter((c) => c.product_count > 0)
   const withoutProducts = filtered.filter((c) => c.product_count === 0)
 
-  async function handleCreateCustom(e: React.FormEvent) {
+  // 建立新區域/全球分組（建立一個 placeholder product 作為分組）
+  async function handleCreateGroup(e: React.FormEvent) {
     e.preventDefault()
+    const groupCode = `${activeTab}_${Date.now()}`
     await fetch('/api/admin/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, scope: activeTab, country_code: activeTab, country_name: form.name }),
+      body: JSON.stringify({ name: `${form.name} eSIM`, scope: activeTab, country_code: groupCode, country_name: form.name, product_type: 'esim' }),
     })
     setShowCreate(false)
     setForm({ name: '', description: '', product_type: 'esim' })
-    // reload
     const res = await fetch(`/api/admin/products/custom?scope=${activeTab}`)
     if (res.ok) setCustomProducts(await res.json())
   }
 
-  async function handleDeleteCustom(id: string) {
-    if (!confirm('確定刪除此方案？')) return
-    await fetch('/api/admin/products', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+  async function handleDeleteGroup(countryCode: string) {
+    if (!confirm('確定刪除此分組及其下所有方案？')) return
+    // 刪除此 country_code 下的所有 products
+    const toDelete = customProducts.filter((p) => p.country_code === countryCode)
+    for (const p of toDelete) {
+      await fetch('/api/admin/products', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id }) })
+    }
     const res = await fetch(`/api/admin/products/custom?scope=${activeTab}`)
     if (res.ok) setCustomProducts(await res.json())
   }
+
+  // 按 country_code 分組
+  const groupedCustom = useMemo(() => {
+    const map = new Map<string, { name: string; code: string; products: RegionalProduct[] }>()
+    for (const p of customProducts) {
+      if (!map.has(p.country_code)) {
+        map.set(p.country_code, { name: p.country_name || p.country_code, code: p.country_code, products: [] })
+      }
+      map.get(p.country_code)!.products.push(p)
+    }
+    return Array.from(map.values())
+  }, [customProducts])
 
   const tabLabels: Record<ScopeTab, string> = { local: '本地', regional: '區域', global: '全球' }
 
@@ -152,32 +169,17 @@ export default function AdminProductsPage() {
             </p>
             <button onClick={() => setShowCreate(!showCreate)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">
-              <Plus className="w-4 h-4" /> 新增{tabLabels[activeTab]}方案
+              <Plus className="w-4 h-4" /> 新增{activeTab === 'regional' ? '區域' : '全球分類'}
             </button>
           </div>
 
           {showCreate && (
-            <form onSubmit={handleCreateCustom} className="mt-4 bg-white p-6 rounded-xl border border-gray-200 space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
-                  <label className="text-sm font-medium">方案名稱</label>
-                  <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                    placeholder={activeTab === 'regional' ? '例：東南亞 10 國 eSIM' : '例：全球 45 國 eSIM'} />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">類型</label>
-                  <select value={form.product_type} onChange={(e) => setForm({ ...form, product_type: e.target.value })}
-                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                    <option value="esim">eSIM</option>
-                    <option value="sim">SIM 卡</option>
-                  </select>
-                </div>
-              </div>
+            <form onSubmit={handleCreateGroup} className="mt-4 bg-white p-6 rounded-xl border border-gray-200 space-y-4">
               <div>
-                <label className="text-sm font-medium">描述（選填）</label>
-                <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="方案描述" />
+                <label className="text-sm font-medium">{activeTab === 'regional' ? '區域名稱' : '全球分類名稱'}</label>
+                <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  placeholder={activeTab === 'regional' ? '例：東南亞、歐洲、北美洲' : '例：全球'} />
               </div>
               <div className="flex gap-3">
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">建立</button>
@@ -186,39 +188,29 @@ export default function AdminProductsPage() {
             </form>
           )}
 
-          {customLoading ? <p className="mt-8 text-sm text-gray-500">載入中...</p> : customProducts.length === 0 ? (
+          {customLoading ? <p className="mt-8 text-sm text-gray-500">載入中...</p> : groupedCustom.length === 0 ? (
             <div className="mt-8 text-center py-16 bg-white rounded-xl border border-gray-200">
               <Package className="mx-auto w-12 h-12 text-gray-300" />
-              <p className="mt-4 text-gray-500">尚無{tabLabels[activeTab]}方案</p>
+              <p className="mt-4 text-gray-500">尚無{tabLabels[activeTab]}分類</p>
             </div>
           ) : (
             <div className="mt-6 space-y-3">
-              {customProducts.map((p) => (
-                <div key={p.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition-all">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <h3 className="font-semibold">{p.name}</h3>
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{p.product_type}</span>
-                        <span className={`px-2 py-0.5 text-xs rounded-full ${p.scope === 'global' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
-                          {p.scope === 'global' ? '全球' : '區域'}
-                        </span>
-                      </div>
-                      {p.description && <p className="mt-1 text-sm text-gray-500">{p.description}</p>}
-                      <p className="mt-1 text-xs text-gray-400">{p._package_count || 0} 個套餐</p>
+              {groupedCustom.map((group) => (
+                <Link key={group.code} href={`/admin/products/_custom/${group.code}`}
+                  className="flex items-center justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-semibold">{group.name}</h3>
+                      <span className={`px-2 py-0.5 text-xs rounded-full ${activeTab === 'global' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
+                        {activeTab === 'global' ? '全球' : '區域'}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Link href={`/admin/products/_custom/${p.id}`}
-                        className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">
-                        管理套餐
-                      </Link>
-                      <button onClick={() => handleDeleteCustom(p.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <p className="mt-1 text-xs text-gray-400">{group.products.length} 個方案</p>
                   </div>
-                </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-400">&rsaquo;</span>
+                  </div>
+                </Link>
               ))}
             </div>
           )}
