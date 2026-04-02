@@ -159,6 +159,21 @@ export default function AdminLoginSettingsPage() {
             </div>
           </div>
 
+          {/* 加好友設定 */}
+          <div>
+            <label className="text-sm font-medium">登入時加好友</label>
+            <p className="text-xs text-gray-400 mt-0.5">需在 LINE Developers Console 將 LINE Login channel 連結到 LINE 官方帳號</p>
+            <select
+              value={getValue('line_bot_prompt') || 'normal'}
+              onChange={(e) => handleChange('line_bot_prompt', e.target.value)}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
+              <option value="normal">normal — 顯示加好友勾選框（預設勾選）</option>
+              <option value="aggressive">aggressive — 強制顯示加好友提示</option>
+              <option value="off">關閉 — 不顯示加好友</option>
+            </select>
+          </div>
+
           {/* 狀態 */}
           <div className="p-3 bg-gray-50 rounded-lg">
             <div className="text-xs font-medium text-gray-500 mb-2">設定狀態</div>
