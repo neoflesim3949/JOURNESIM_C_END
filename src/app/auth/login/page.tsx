@@ -42,24 +42,18 @@ export default function LoginPage() {
   }
 
   async function handleOAuth(provider: string) {
-    const supabase = createClient()
-
-    // 判斷是否為自訂 OIDC provider（如 LINE）
-    const builtIn = ['google', 'apple', 'facebook', 'github', 'twitter', 'discord']
-    const isBuiltIn = builtIn.includes(provider)
-
-    if (isBuiltIn) {
-      await supabase.auth.signInWithOAuth({
-        provider: provider as 'google' | 'apple' | 'facebook',
-        options: { redirectTo: `${window.location.origin}/auth/callback` },
-      })
-    } else {
-      // Custom OIDC provider (e.g. LINE)
-      await supabase.auth.signInWithOAuth({
-        provider: provider as 'google',
-        options: { redirectTo: `${window.location.origin}/auth/callback` },
-      })
+    if (provider === 'line') {
+      // LINE 用自建 OAuth 流程
+      window.location.href = '/auth/line?next=/account'
+      return
     }
+
+    // 其他用 Supabase 內建 OAuth
+    const supabase = createClient()
+    await supabase.auth.signInWithOAuth({
+      provider: provider as 'google' | 'apple' | 'facebook',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    })
   }
 
   return (
