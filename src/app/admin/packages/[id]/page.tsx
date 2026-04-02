@@ -31,9 +31,10 @@ export default function PackageDetailPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [selectedPlanIds, setSelectedPlanIds] = useState<Set<string>>(new Set())
   const [showBatchPrice, setShowBatchPrice] = useState(false)
-  const [batchMode, setBatchMode] = useState<'fixed' | 'markup'>('fixed')
+  const [batchMode, setBatchMode] = useState<'fixed' | 'markup' | 'formula'>('formula')
   const [batchPrice, setBatchPrice] = useState('')
-  const [batchMarkup, setBatchMarkup] = useState('')
+  const [batchMarkup, setBatchMarkup] = useState('1.5')
+  const [batchAdd, setBatchAdd] = useState('3')
   const [showPreview, setShowPreview] = useState(false)
   const [showManual, setShowManual] = useState(false)
   const [bcSearch, setBcSearch] = useState('')
@@ -139,12 +140,19 @@ export default function PackageDetailPage() {
         if (batchMode === 'fixed') {
           const price = parseFloat(batchPrice)
           if (!isNaN(price)) newPrices.set(cp.id, price)
-        } else {
-          // 用成本價 TWD 加成
+        } else if (batchMode === 'markup') {
           const markup = parseFloat(batchMarkup)
           if (!isNaN(markup) && cp.cost_price > 0 && exchangeRate > 0) {
             const costTwd = cp.cost_price / exchangeRate
             newPrices.set(cp.id, Math.ceil(costTwd * markup))
+          }
+        } else if (batchMode === 'formula') {
+          // 混合公式：(成本TWD + 加價) × 倍率
+          const add = parseFloat(batchAdd) || 0
+          const markup = parseFloat(batchMarkup) || 1
+          if (cp.cost_price > 0 && exchangeRate > 0) {
+            const costTwd = cp.cost_price / exchangeRate
+            newPrices.set(cp.id, Math.ceil((costTwd + add) * markup))
           }
         }
       }
@@ -275,14 +283,44 @@ export default function PackageDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
             <h2 className="text-lg font-bold">批量定價</h2>
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-wrap gap-3">
+              <label className="flex items-center gap-2"><input type="radio" checked={batchMode === 'formula'} onChange={() => setBatchMode('formula')} className="accent-blue-600" /><span className="text-sm">混合公式</span></label>
+              <label className="flex items-center gap-2"><input type="radio" checked={batchMode === 'markup'} onChange={() => setBatchMode('markup')} className="accent-blue-600" /><span className="text-sm">倍率加成</span></label>
               <label className="flex items-center gap-2"><input type="radio" checked={batchMode === 'fixed'} onChange={() => setBatchMode('fixed')} className="accent-blue-600" /><span className="text-sm">固定價格</span></label>
-              <label className="flex items-center gap-2"><input type="radio" checked={batchMode === 'markup'} onChange={() => setBatchMode('markup')} className="accent-blue-600" /><span className="text-sm">成本加成</span></label>
             </div>
-            {batchMode === 'fixed' ? (
-              <input type="number" value={batchPrice} onChange={(e) => setBatchPrice(e.target.value)} placeholder="統一售價" className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            ) : (
-              <div className="mt-3"><input type="number" step="0.1" value={batchMarkup} onChange={(e) => setBatchMarkup(e.target.value)} placeholder="例：1.5" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" /><p className="text-xs text-gray-400 mt-1">售價(TWD) = 成本價(TWD) × 倍率（無條件進位）</p></div>
+            {batchMode === 'fixed' && (
+              <div className="mt-3">
+                <input type="number" value={batchPrice} onChange={(e) => setBatchPrice(e.target.value)} placeholder="統一售價 (TWD)" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                <p className="text-xs text-gray-400 mt-1">所有規格統一設為此售價</p>
+              </div>
+            )}
+            {batchMode === 'markup' && (
+              <div className="mt-3">
+                <input type="number" step="0.1" value={batchMarkup} onChange={(e) => setBatchMarkup(e.target.value)} placeholder="例：1.5" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                <p className="text-xs text-gray-400 mt-1">售價 = 成本價(TWD) × 倍率</p>
+              </div>
+            )}
+            {batchMode === 'formula' && (
+              <div className="mt-3 space-y-3">
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <div className="text-sm font-medium text-blue-700">公式：( 成本TWD + 加價 ) × 倍率</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium">加價 (TWD)</label>
+                    <input type="number" step="1" value={batchAdd} onChange={(e) => setBatchAdd(e.target.value)} placeholder="0"
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium">倍率</label>
+                    <input type="number" step="0.1" value={batchMarkup} onChange={(e) => setBatchMarkup(e.target.value)} placeholder="1.5"
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400">
+                  範例：成本 NT$28 + 加價 3 = NT$31，× 1.5 = NT$47（無條件進位）
+                </p>
+              </div>
             )}
             <div className="mt-4 flex gap-3">
               <button onClick={handleBatchPriceApply} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">套用</button>

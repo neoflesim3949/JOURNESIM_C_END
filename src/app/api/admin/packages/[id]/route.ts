@@ -67,14 +67,16 @@ export async function GET(
       limit_flow_speed: bc?.limit_flow_speed || null,
       plan_type: bc?.plan_type || null,
       is_active: p.is_active,
-      copy_prices: (priceMap.get(p.id) || []).map((pr) => ({
-        id: pr.id,
-        copies: pr.copies,
-        cost_price: pr.cost_price,
-        original_cost_price: pr.original_cost_price || null,
-        sell_price: pr.sell_price,
-        price_changed: pr.price_changed || false,
-      })),
+      copy_prices: (priceMap.get(p.id) || [])
+        .sort((a, b) => parseInt(a.copies) - parseInt(b.copies))
+        .map((pr) => ({
+          id: pr.id,
+          copies: pr.copies,
+          cost_price: pr.cost_price,
+          original_cost_price: pr.original_cost_price || null,
+          sell_price: pr.sell_price,
+          price_changed: pr.price_changed || false,
+        })),
     }
   })
 

@@ -13,7 +13,7 @@ function getSimColor(type: string) {
 }
 
 interface Pkg {
-  id: string; name: string; description: string | null; product_type: string
+  id: string; name: string; description: string | null; product_type: string; scope?: string
   is_active: boolean; _plan_count: number; _product_count: number; _has_price_changes?: boolean
 }
 
