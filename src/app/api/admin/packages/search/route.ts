@@ -45,7 +45,7 @@ export async function GET(request: Request) {
       // 找包含這些 SKU 的套餐
       const { data: packagePlans } = await supabase
         .from('package_plans')
-        .select('package_id')
+        .select('package_id, bc_sku_id')
 
       const matchingPkgIds = new Set<string>()
       for (const pp of packagePlans || []) {
