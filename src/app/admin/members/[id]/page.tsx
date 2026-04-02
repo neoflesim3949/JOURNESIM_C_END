@@ -56,6 +56,16 @@ export default function AdminMemberDetailPage() {
     await loadData()
   }
 
+  async function handleUnbind(provider: string) {
+    if (!confirm(`確定要解除 ${provider} 綁定？解除後用戶將無法用 ${provider} 登入。`)) return
+    await fetch(`/api/admin/members/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [`${provider}_user_id`]: null }),
+    })
+    await loadData()
+  }
+
   async function handleDeleteCard(cardId: string) {
     if (!confirm('確定要刪除此卡片？')) return
     await fetch(`/api/admin/members/${id}/cards`, {
@@ -70,10 +80,10 @@ export default function AdminMemberDetailPage() {
   if (!member) return <div>找不到此會員</div>
 
   const socialIds = [
-    { label: 'LINE', value: member.line_user_id, color: 'bg-green-500' },
-    { label: 'Google', value: member.google_user_id, color: 'bg-blue-500' },
-    { label: 'Apple', value: member.apple_user_id, color: 'bg-black' },
-    { label: 'Facebook', value: member.facebook_user_id, color: 'bg-blue-600' },
+    { label: 'LINE', key: 'line', value: member.line_user_id, color: 'bg-green-500' },
+    { label: 'Google', key: 'google', value: member.google_user_id, color: 'bg-blue-500' },
+    { label: 'Apple', key: 'apple', value: member.apple_user_id, color: 'bg-black' },
+    { label: 'Facebook', key: 'facebook', value: member.facebook_user_id, color: 'bg-blue-600' },
   ].filter((s) => s.value)
 
   return (
@@ -156,7 +166,11 @@ export default function AdminMemberDetailPage() {
                     {s.label[0]}
                   </span>
                   <span className="font-medium">{s.label}</span>
-                  <span className="font-mono text-xs text-gray-400 truncate">{s.value}</span>
+                  <span className="font-mono text-xs text-gray-400 truncate flex-1">{s.value}</span>
+                  <button onClick={() => handleUnbind(s.key)}
+                    className="text-xs text-red-400 hover:text-red-600 px-2 py-1 hover:bg-red-50 rounded transition-colors">
+                    解除綁定
+                  </button>
                 </div>
               ))}
             </div>

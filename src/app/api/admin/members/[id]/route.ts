@@ -46,6 +46,11 @@ export async function PATCH(
   const updates: Record<string, unknown> = {}
   if (body.display_name !== undefined) updates.display_name = body.display_name
   if (body.email !== undefined) updates.email = body.email
+  // 社群帳號綁定/解綁（傳 null 解綁）
+  const socialFields = ['line_user_id', 'google_user_id', 'apple_user_id', 'facebook_user_id']
+  for (const field of socialFields) {
+    if (field in body) updates[field] = body[field]
+  }
 
   const { error } = await supabase.from('members').update(updates).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

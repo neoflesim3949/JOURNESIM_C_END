@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { getSettings } from '@/lib/settings'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -60,7 +61,38 @@ export async function GET(request: Request) {
     } catch {}
   }
 
-  // 暫存到 cookie，跳轉到綁定頁面
+  const supabase = createAdminClient()
+
+  // 查詢此 LINE ID 是否已綁定過帳號
+  const { data: existingMember } = await supabase
+    .from('members')
+    .select('id, email')
+    .eq('line_user_id', profile.userId)
+    .single()
+
+  if (existingMember) {
+    // 已綁定 → 更新頭像/名稱，直接登入
+    await supabase.from('members').update({
+      display_name: profile.displayName || undefined,
+      avatar_url: profile.pictureUrl || undefined,
+    }).eq('id', existingMember.id)
+
+    // 用 magic link 登入
+    const { data: link } = await supabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email: existingMember.email,
+    })
+
+    if (link?.properties?.hashed_token) {
+      return NextResponse.redirect(
+        `${origin}/auth/line/verify?token=${link.properties.hashed_token}&type=magiclink&next=${encodeURIComponent(next)}`
+      )
+    }
+
+    return NextResponse.redirect(`${origin}${next}`)
+  }
+
+  // 未綁定 → 暫存資料，跳轉到綁定頁面
   const socialData = {
     provider: 'line',
     provider_id: profile.userId,

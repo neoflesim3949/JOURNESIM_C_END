@@ -29,6 +29,8 @@ export async function GET(request: Request) {
   authUrl.searchParams.set('redirect_uri', redirectUri)
   authUrl.searchParams.set('state', state)
   authUrl.searchParams.set('scope', 'openid profile email')
+  // 首次登入一定顯示授權頁面
+  authUrl.searchParams.set('prompt', 'consent')
 
   // 加好友功能（需要 LINE Login channel 連結到官方帳號）
   if (botPrompt && botPrompt !== 'off') {
