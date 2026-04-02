@@ -17,7 +17,13 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/admin', label: '總覽', icon: LayoutDashboard },
-  { href: '/admin/products', label: '商品管理', icon: Package },
+  {
+    href: '/admin/products', label: '商品管理', icon: Package,
+    children: [
+      { href: '/admin/products', label: '方案管理' },
+      { href: '/admin/packages', label: '套餐管理' },
+    ],
+  },
   {
     href: '/admin/plans', label: '套餐列表', icon: Wifi,
     children: [
