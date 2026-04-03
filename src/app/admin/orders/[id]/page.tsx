@@ -1,31 +1,86 @@
-import { createAdminClient } from '@/lib/supabase/admin'
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Wifi, CreditCard, Truck, Save } from 'lucide-react'
 
-export const dynamic = 'force-dynamic'
-
-interface Props {
-  params: Promise<{ id: string }>
+interface Order {
+  id: string; order_number: string; email: string; status: string
+  total_amount: number; payment_method: string; tappay_trade_id: string | null
+  member_id: string | null; created_at: string
+  shipping_name: string | null; shipping_phone: string | null; shipping_address: string | null
 }
 
-export default async function AdminOrderDetailPage({ params }: Props) {
-  const { id } = await params
-  const supabase = createAdminClient()
+interface OrderSku {
+  id: string; bc_sku_id: string; bc_sku_name: string | null; copies: string
+  days: number | null; unit_price: number; quantity: number; subtotal: number
+  iccid: string | null; qr_code_url: string | null; lpa_code: string | null
+  sim_iccid: string | null; bc_sub_order_id: string | null; status: string
+}
 
-  const [{ data: order }, { data: items }] = await Promise.all([
-    supabase.from('orders').select('*').eq('id', id).single(),
-    supabase.from('order_items').select('*').eq('order_id', id),
-  ])
+interface SubOrder {
+  id: string; sub_order_number: string; category: string; status: string
+  bc_order_id: string | null; subtotal: number
+  tracking_number: string | null; shipping_status: string | null
+  skus: OrderSku[]
+}
 
-  if (!order) {
-    return <div>找不到訂單</div>
+const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  pending: { label: '待處理', color: 'bg-yellow-100 text-yellow-700' },
+  processing: { label: '處理中', color: 'bg-blue-100 text-blue-700' },
+  awaiting_card: { label: '待配卡', color: 'bg-orange-100 text-orange-700' },
+  card_assigned: { label: '已配卡', color: 'bg-cyan-100 text-cyan-700' },
+  shipping: { label: '配送中', color: 'bg-purple-100 text-purple-700' },
+  completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
+  paid: { label: '已付款', color: 'bg-green-100 text-green-700' },
+  pending_payment: { label: '待付款', color: 'bg-yellow-100 text-yellow-700' },
+  failed: { label: '失敗', color: 'bg-red-100 text-red-700' },
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_LABELS[status] || { label: status, color: 'bg-gray-100 text-gray-700' }
+  return <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${s.color}`}>{s.label}</span>
+}
+
+export default function AdminOrderDetailPage() {
+  const { id } = useParams() as { id: string }
+  const [order, setOrder] = useState<Order | null>(null)
+  const [subOrders, setSubOrders] = useState<SubOrder[]>([])
+  const [loading, setLoading] = useState(true)
+
+  async function load() {
+    const res = await fetch(`/api/admin/orders/${id}`)
+    if (res.ok) {
+      const data = await res.json()
+      setOrder(data.order)
+      setSubOrders(data.sub_orders || [])
+    }
+    setLoading(false)
   }
 
-  // 取得 eSIM profiles
-  const itemIds = (items || []).map((i) => i.id)
-  const { data: profiles } = itemIds.length > 0
-    ? await supabase.from('esim_profiles').select('*').in('order_item_id', itemIds)
-    : { data: [] }
+  useEffect(() => { load() }, [id])
+
+  async function updateSubOrder(subOrderId: string, updates: Record<string, unknown>) {
+    await fetch(`/api/admin/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub_order_id: subOrderId, ...updates }),
+    })
+    load()
+  }
+
+  async function updateSku(skuId: string, updates: Record<string, unknown>) {
+    await fetch(`/api/admin/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sku_id: skuId, ...updates }),
+    })
+    load()
+  }
+
+  if (loading) return <div className="text-gray-500">載入中...</div>
+  if (!order) return <div>找不到訂單</div>
+
+  const hasOldItems = subOrders.length === 0
 
   return (
     <div>
@@ -33,115 +88,167 @@ export default async function AdminOrderDetailPage({ params }: Props) {
         <ArrowLeft className="w-4 h-4" /> 返回訂單列表
       </Link>
 
-      <div className="mt-4">
-        <h1 className="text-2xl font-bold">訂單詳情</h1>
-      </div>
+      <h1 className="mt-4 text-2xl font-bold">訂單詳情</h1>
 
-      {/* Order Info */}
+      {/* L1: 主訂單資訊 */}
       <div className="mt-6 bg-white p-6 rounded-xl border border-gray-200">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div>
-            <div className="text-gray-500">訂單編號</div>
-            <div className="font-mono font-medium">{order.order_number}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">Email</div>
-            <div>{order.email}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">金額</div>
-            <div className="font-semibold">NT$ {order.total_amount}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">狀態</div>
-            <div className="font-medium">{order.status}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">BC 訂單 ID</div>
-            <div className="font-mono text-xs">{order.bc_order_id || '-'}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">付款方式</div>
-            <div>{order.payment_method || '-'}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">建立時間</div>
-            <div>{new Date(order.created_at).toLocaleString('zh-TW')}</div>
-          </div>
-          <div>
-            <div className="text-gray-500">會員 ID</div>
-            <div className="font-mono text-xs">{order.member_id || '訪客'}</div>
-          </div>
+          <div><div className="text-gray-500">訂單編號</div><div className="font-mono font-medium">{order.order_number}</div></div>
+          <div><div className="text-gray-500">Email</div><div>{order.email}</div></div>
+          <div><div className="text-gray-500">金額</div><div className="font-semibold">NT$ {order.total_amount}</div></div>
+          <div><div className="text-gray-500">狀態</div><StatusBadge status={order.status} /></div>
+          <div><div className="text-gray-500">付款方式</div><div>{order.payment_method || '-'}</div></div>
+          <div><div className="text-gray-500">建立時間</div><div>{new Date(order.created_at).toLocaleString('zh-TW')}</div></div>
+          <div><div className="text-gray-500">會員</div><div className="text-xs font-mono">{order.member_id || '訪客'}</div></div>
+          <div><div className="text-gray-500">TapPay</div><div className="text-xs font-mono">{order.tappay_trade_id || '-'}</div></div>
         </div>
+
+        {/* 收件資訊 */}
+        {(order.shipping_name || order.shipping_phone || order.shipping_address) && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="text-xs font-medium text-gray-500 mb-2">收件資訊</div>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div><span className="text-gray-400">姓名：</span>{order.shipping_name || '-'}</div>
+              <div><span className="text-gray-400">電話：</span>{order.shipping_phone || '-'}</div>
+              <div><span className="text-gray-400">地址：</span>{order.shipping_address || '-'}</div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Order Items */}
-      <div className="mt-6">
-        <h2 className="text-lg font-semibold">訂單明細</h2>
-        <div className="mt-3 bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500">
-              <tr>
-                <th className="text-left px-4 py-2 font-medium">商品</th>
-                <th className="text-left px-4 py-2 font-medium">套餐</th>
-                <th className="text-left px-4 py-2 font-medium">數量</th>
-                <th className="text-left px-4 py-2 font-medium">小計</th>
-                <th className="text-left px-4 py-2 font-medium">ICCID</th>
-                <th className="text-left px-4 py-2 font-medium">狀態</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {(items || []).map((item) => (
-                <tr key={item.id}>
-                  <td className="px-4 py-2 font-medium">{item.product_name}</td>
-                  <td className="px-4 py-2">{item.plan_label}</td>
-                  <td className="px-4 py-2">{item.quantity}</td>
-                  <td className="px-4 py-2">NT$ {item.subtotal}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
-                    {item.iccid?.join(', ') || '-'}
-                  </td>
-                  <td className="px-4 py-2 text-xs">{item.plan_status || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* L2/L3: 子訂單 */}
+      {subOrders.length > 0 ? (
+        <div className="mt-6 space-y-6">
+          {subOrders.map((sub) => (
+            <SubOrderCard key={sub.id} sub={sub} onUpdateSub={updateSubOrder} onUpdateSku={updateSku} />
+          ))}
         </div>
-      </div>
-
-      {/* eSIM Profiles */}
-      {profiles && profiles.length > 0 && (
-        <div className="mt-6">
-          <h2 className="text-lg font-semibold">eSIM Profiles</h2>
-          <div className="mt-3 space-y-3">
-            {profiles.map((p) => (
-              <div key={p.id} className="bg-white p-4 rounded-xl border border-gray-200 text-sm">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <span className="text-gray-500">ICCID: </span>
-                    <span className="font-mono">{p.iccid}</span>
-                  </div>
-                  <div>
-                    <span className="text-gray-500">狀態: </span>
-                    <span className="font-medium">{p.status}</span>
-                  </div>
-                  {p.sm_dp_address && (
-                    <div className="col-span-2">
-                      <span className="text-gray-500">SM-DP+: </span>
-                      <span className="font-mono text-xs">{p.sm_dp_address}</span>
-                    </div>
-                  )}
-                  {p.activation_code && (
-                    <div className="col-span-2">
-                      <span className="text-gray-500">啟用碼: </span>
-                      <span className="font-mono text-xs">{p.activation_code}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+      ) : hasOldItems && (
+        <div className="mt-6 p-4 bg-yellow-50 rounded-lg text-sm text-yellow-700">
+          此訂單使用舊架構，無子訂單結構。請查看舊版訂單明細。
         </div>
       )}
     </div>
+  )
+}
+
+function SubOrderCard({ sub, onUpdateSub, onUpdateSku }: {
+  sub: SubOrder
+  onUpdateSub: (id: string, updates: Record<string, unknown>) => void
+  onUpdateSku: (id: string, updates: Record<string, unknown>) => void
+}) {
+  const isEsim = sub.category === 'esim'
+  const [trackingInput, setTrackingInput] = useState(sub.tracking_number || '')
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* Sub-order header */}
+      <div className="p-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {isEsim ? <Wifi className="w-5 h-5 text-blue-500" /> : <CreditCard className="w-5 h-5 text-green-500" />}
+          <div>
+            <div className="font-semibold text-sm">
+              {isEsim ? 'eSIM 子訂單' : 'SIM 卡子訂單'}
+              <span className="ml-2 text-xs text-gray-400 font-mono">{sub.sub_order_number}</span>
+            </div>
+            <div className="text-xs text-gray-500">
+              {sub.skus.length} 項 · NT$ {sub.subtotal}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge status={sub.status} />
+          <select value={sub.status} onChange={(e) => onUpdateSub(sub.id, { status: e.target.value })}
+            className="text-xs border border-gray-300 rounded px-2 py-1">
+            <option value="pending">待處理</option>
+            <option value="processing">處理中</option>
+            {isEsim && <option value="completed">已完成</option>}
+            {!isEsim && <option value="awaiting_card">待配卡</option>}
+            {!isEsim && <option value="card_assigned">已配卡</option>}
+            {!isEsim && <option value="shipping">配送中</option>}
+            <option value="completed">已完成</option>
+          </select>
+        </div>
+      </div>
+
+      {/* SIM 物流資訊 */}
+      {!isEsim && (
+        <div className="px-4 py-3 bg-orange-50/50 border-b border-gray-100 flex items-center gap-3">
+          <Truck className="w-4 h-4 text-orange-500 flex-shrink-0" />
+          <input value={trackingInput} onChange={(e) => setTrackingInput(e.target.value)}
+            placeholder="填入物流追蹤號碼..." className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm" />
+          <select value={sub.shipping_status || ''} onChange={(e) => onUpdateSub(sub.id, { shipping_status: e.target.value || null })}
+            className="text-xs border border-gray-300 rounded px-2 py-1.5">
+            <option value="">物流狀態</option>
+            <option value="preparing">備貨中</option>
+            <option value="shipped">已出貨</option>
+            <option value="delivered">已送達</option>
+          </select>
+          <button onClick={() => onUpdateSub(sub.id, { tracking_number: trackingInput })}
+            className="px-3 py-1.5 bg-orange-500 text-white text-xs rounded hover:bg-orange-600">
+            <Save className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* L3: SKU 列表 */}
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-gray-500">
+          <tr>
+            <th className="text-left px-4 py-2 font-medium">SKU</th>
+            <th className="text-left px-4 py-2 font-medium w-16">Copies</th>
+            <th className="text-left px-4 py-2 font-medium w-16">數量</th>
+            <th className="text-left px-4 py-2 font-medium w-20">小計</th>
+            <th className="text-left px-4 py-2 font-medium w-48">{isEsim ? 'ICCID / QR Code' : 'SIM ICCID'}</th>
+            <th className="text-left px-4 py-2 font-medium w-20">狀態</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {sub.skus.map((sku) => (
+            <SkuRow key={sku.id} sku={sku} isEsim={isEsim} onUpdate={onUpdateSku} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onUpdate: (id: string, updates: Record<string, unknown>) => void }) {
+  const [iccidInput, setIccidInput] = useState(isEsim ? (sku.iccid || '') : (sku.sim_iccid || ''))
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    setSaving(true)
+    if (isEsim) {
+      await onUpdate(sku.id, { iccid: iccidInput, status: iccidInput ? 'completed' : 'processing' })
+    } else {
+      await onUpdate(sku.id, { sim_iccid: iccidInput, status: iccidInput ? 'card_assigned' : 'pending' })
+    }
+    setSaving(false)
+  }
+
+  return (
+    <tr className="hover:bg-gray-50">
+      <td className="px-4 py-2">
+        <div className="font-medium text-xs">{sku.bc_sku_name || sku.bc_sku_id}</div>
+        <div className="text-[10px] text-gray-400 font-mono">{sku.bc_sku_id}</div>
+      </td>
+      <td className="px-4 py-2 text-xs">{sku.copies}</td>
+      <td className="px-4 py-2 text-xs">{sku.quantity}</td>
+      <td className="px-4 py-2 text-xs font-medium">NT$ {sku.subtotal}</td>
+      <td className="px-4 py-2">
+        <div className="flex items-center gap-1">
+          <input value={iccidInput} onChange={(e) => setIccidInput(e.target.value)}
+            placeholder={isEsim ? 'eSIM ICCID' : 'SIM 卡 ICCID'}
+            className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs font-mono" />
+          <button onClick={handleSave} disabled={saving}
+            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 disabled:opacity-50">
+            <Save className="w-3 h-3" />
+          </button>
+        </div>
+        {sku.bc_sub_order_id && <div className="text-[10px] text-gray-400 mt-0.5">BC: {sku.bc_sub_order_id}</div>}
+      </td>
+      <td className="px-4 py-2"><StatusBadge status={sku.status} /></td>
+    </tr>
   )
 }

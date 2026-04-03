@@ -26,6 +26,10 @@ function CheckoutContent() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [saveCard, setSaveCard] = useState(false)
   const [isInLineApp, setIsInLineApp] = useState(false)
+  const [shippingName, setShippingName] = useState('')
+  const [shippingPhone, setShippingPhone] = useState('')
+  const [shippingAddress, setShippingAddress] = useState('')
+  const hasSim = simItems.length > 0
 
   useEffect(() => {
     setIsInLineApp(/Line/i.test(navigator.userAgent))
@@ -53,6 +57,7 @@ function CheckoutContent() {
           result_url: resultUrl,
           save_card: saveCard,
           card_id: selectedCardId || undefined,
+          ...(hasSim ? { shipping_name: shippingName, shipping_phone: shippingPhone, shipping_address: shippingAddress } : {}),
         }),
       })
 
@@ -160,19 +165,45 @@ function CheckoutContent() {
           )}
         </div>
 
-        {/* Email */}
-        <div>
-          <label className="text-sm font-medium">Email（接收訂單通知）</label>
-          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-            placeholder="your@email.com"
-            className="mt-1 w-full px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+        {/* Contact Info */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold">聯絡資訊</h3>
+          <div>
+            <label className="text-sm font-medium">Email（接收訂單通知）</label>
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="your@email.com"
+              className="mt-1 w-full px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium">姓名 {hasSim && <span className="text-red-500">*</span>}</label>
+              <input value={shippingName} onChange={(e) => setShippingName(e.target.value)}
+                placeholder="收件人姓名" required={hasSim}
+                className="mt-1 w-full px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">電話 {hasSim && <span className="text-red-500">*</span>}</label>
+              <input value={shippingPhone} onChange={(e) => setShippingPhone(e.target.value)}
+                placeholder="0912-345-678" required={hasSim}
+                className="mt-1 w-full px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+            </div>
+          </div>
+          {hasSim && (
+            <div>
+              <label className="text-sm font-medium">寄送地址 <span className="text-red-500">*</span></label>
+              <input value={shippingAddress} onChange={(e) => setShippingAddress(e.target.value)}
+                placeholder="完整收件地址" required
+                className="mt-1 w-full px-4 py-2.5 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+              <p className="mt-1 text-xs text-muted-foreground">SIM 卡將寄送至此地址</p>
+            </div>
+          )}
         </div>
 
         {/* TapPay Form */}
         <TapPayForm
           onPrimeReady={handlePrime}
           loading={loading}
-          disabled={!email || totalPrice <= 0}
+          disabled={!email || totalPrice <= 0 || (hasSim && (!shippingName || !shippingPhone || !shippingAddress))}
           saveCard={saveCard}
           onSaveCardChange={setSaveCard}
           isInLineApp={isInLineApp}

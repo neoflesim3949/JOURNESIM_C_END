@@ -15,7 +15,7 @@ interface CartItem {
 
 export async function POST(request: Request) {
   const body = await request.json()
-  const { email, items, prime, payment_method = 'credit_card', result_url, save_card = false, card_id } = body as {
+  const { email, items, prime, payment_method = 'credit_card', result_url, save_card = false, card_id, shipping_name, shipping_phone, shipping_address } = body as {
     email: string
     items: CartItem[]
     prime?: string
@@ -23,6 +23,9 @@ export async function POST(request: Request) {
     result_url?: string
     save_card?: boolean
     card_id?: string
+    shipping_name?: string
+    shipping_phone?: string
+    shipping_address?: string
   }
 
   if (!email || !items || items.length === 0) {
@@ -130,6 +133,9 @@ export async function POST(request: Request) {
       payment_method,
       tappay_trade_id: tappayTradeId,
       cart_items: items,
+      shipping_name: shipping_name || null,
+      shipping_phone: shipping_phone || null,
+      shipping_address: shipping_address || null,
     })
     .select().single()
 
