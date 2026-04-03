@@ -278,26 +278,8 @@ export default function MyCardsPage() {
                   </div>
                 )}
 
-                {/* 當日使用流量（手動卡片） */}
-                {selectedIsManual && (
-                  <div className="bg-white border border-border rounded-xl p-5">
-                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
-                      <Database className="w-4 h-4 text-purple-500" /> 當日使用流量
-                    </div>
-                    {!detail?.today_traffic || detail.today_traffic.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">今日尚無流量記錄</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {detail.today_traffic.map((t, i) => (
-                          <div key={i} className="flex justify-between text-xs py-1 border-b border-border last:border-0">
-                            <span className="text-muted-foreground">{t.country}</span>
-                            <span className="font-medium">{t.usedAmount}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* 流量查詢 F023 */}
+                <TrafficQueryCard iccid={selectedIccid} />
 
                 {/* 以下僅訂單卡片顯示 */}
                 {!selectedIsManual && (
@@ -344,22 +326,6 @@ export default function MyCardsPage() {
                       </div>
                     )}
 
-                    {/* 近 7 日流量 F023 */}
-                    {detail?.traffic && detail.traffic.length > 0 && (
-                      <div className="bg-white border border-border rounded-xl p-5">
-                        <div className="flex items-center gap-2 text-sm font-medium mb-3">
-                          <Database className="w-4 h-4 text-purple-500" /> 近 7 日流量
-                        </div>
-                        <div className="space-y-1">
-                          {detail.traffic.map((t, i) => (
-                            <div key={i} className="flex justify-between text-xs py-1 border-b border-border last:border-0">
-                              <span className="text-muted-foreground">{t.usedDate}</span>
-                              <span>{t.usedAmount} · {t.country}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                     {/* 相關訂單 */}
                     <div className="bg-white border border-border rounded-xl p-5">
@@ -485,6 +451,110 @@ function CardListItem({ card, isSelected, onSelect, onRemove }: {
           className="p-1.5 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 mr-1">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
+      )}
+    </div>
+  )
+}
+
+// 流量查詢（F023 日流量，可選日期範圍，按國家分組）
+function TrafficQueryCard({ iccid }: { iccid: string }) {
+  const [beginDate, setBeginDate] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 7)
+    return d.toISOString().slice(0, 10)
+  })
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [traffic, setTraffic] = useState<{ usedDate: string; type: string; usedAmount: string; country: string }[]>([])
+  const [loading, setLoading] = useState(false)
+  const [queried, setQueried] = useState(false)
+
+  async function query() {
+    setLoading(true)
+    const res = await fetch(`/api/shop/cards?action=traffic&iccid=${iccid}&beginDate=${beginDate}&endDate=${endDate}`).then((r) => r.json()).catch(() => ({ traffic: [] }))
+    setTraffic(res.traffic || [])
+    setQueried(true)
+    setLoading(false)
+  }
+
+  // 按國家分組統計
+  const countryStats = (() => {
+    const map = new Map<string, number>()
+    let total = 0
+    for (const t of traffic) {
+      const mb = parseFloat(t.usedAmount) || 0
+      map.set(t.country, (map.get(t.country) || 0) + mb)
+      total += mb
+    }
+    return { countries: Array.from(map.entries()).sort((a, b) => b[1] - a[1]), totalMB: total }
+  })()
+
+  function formatMB(mb: number): string {
+    return mb >= 1024 ? `${(mb / 1024).toFixed(2)}GB` : `${mb.toFixed(2)}MB`
+  }
+
+  return (
+    <div className="bg-white border border-border rounded-xl p-5">
+      <div className="flex items-center gap-2 text-sm font-medium mb-3">
+        <Database className="w-4 h-4 text-purple-500" /> 流量查詢
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <input type="date" value={beginDate} onChange={(e) => setBeginDate(e.target.value)}
+          className="px-2 py-1.5 border border-border rounded text-xs" />
+        <span className="text-xs text-muted-foreground">至</span>
+        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+          className="px-2 py-1.5 border border-border rounded text-xs" />
+        <button onClick={query} disabled={loading}
+          className="px-3 py-1.5 bg-primary text-white text-xs rounded hover:bg-primary-hover disabled:opacity-50">
+          {loading ? '查詢中...' : '查詢'}
+        </button>
+      </div>
+
+      {queried && (
+        <>
+          {/* 國家用量統計 */}
+          {countryStats.countries.length > 0 && (
+            <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+              <div className="text-xs font-medium text-blue-700 mb-2">國家用量統計</div>
+              <div className="flex flex-wrap gap-2">
+                {countryStats.countries.map(([country, mb]) => (
+                  <div key={country} className="px-2 py-1 bg-white rounded border border-blue-200 text-xs">
+                    <div className="text-muted-foreground">{country}</div>
+                    <div className="font-semibold text-blue-600">{formatMB(mb)}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 text-xs">
+                <span className="text-muted-foreground">總用量：</span>
+                <span className="font-semibold">{formatMB(countryStats.totalMB)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* 每日明細 */}
+          {traffic.length > 0 ? (
+            <div className="mt-3">
+              <table className="w-full text-xs">
+                <thead className="text-muted-foreground">
+                  <tr>
+                    <th className="text-left py-1 font-medium">日期</th>
+                    <th className="text-left py-1 font-medium">地區/國家</th>
+                    <th className="text-right py-1 font-medium">用量</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {traffic.map((t, i) => (
+                    <tr key={i}>
+                      <td className="py-1.5 text-muted-foreground">{t.usedDate}</td>
+                      <td className="py-1.5">{t.country}</td>
+                      <td className="py-1.5 text-right font-medium">{t.usedAmount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">此區間無流量記錄</p>
+          )}
+        </>
       )}
     </div>
   )

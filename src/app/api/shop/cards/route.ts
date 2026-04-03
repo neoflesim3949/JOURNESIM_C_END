@@ -47,8 +47,8 @@ export async function GET(request: Request) {
       getPlanUsageV2({ iccid }).catch(() => null),
       getDailyTraffic({
         iccid,
-        beginDate: begin.toISOString().slice(0, 10).replace(/-/g, ''),
-        endDate: now.toISOString().slice(0, 10).replace(/-/g, ''),
+        beginDate: begin.toISOString().slice(0, 10),
+        endDate: now.toISOString().slice(0, 10),
       }).catch(() => []),
       verifyIccid(iccid).catch(() => null),
       getRealNameStatus(iccid).catch(() => null),
@@ -66,6 +66,29 @@ export async function GET(request: Request) {
       real_name: realName,
       recharge_products: rechargeProducts,
     })
+  }
+
+  // ─── traffic：自訂日期範圍流量查詢 ──────────────────────────
+  if (action === 'traffic' && iccid) {
+    const beginDate = searchParams.get('beginDate') || ''
+    const endDate = searchParams.get('endDate') || ''
+    if (!beginDate || !endDate) return NextResponse.json({ traffic: [] })
+    try {
+      const traffic = await getDailyTraffic({ iccid, beginDate, endDate }).catch(() => [])
+      return NextResponse.json({ traffic: Array.isArray(traffic) ? traffic : [] })
+    } catch {
+      return NextResponse.json({ traffic: [] })
+    }
+  }
+
+  // ─── usage：套餐使用資訊 ──────────────────────────────────
+  if (action === 'usage' && iccid) {
+    try {
+      const usage = await getPlanUsageV2({ iccid }).catch(() => null)
+      return NextResponse.json({ iccid, usage })
+    } catch {
+      return NextResponse.json({ iccid, usage: null })
+    }
   }
 
   // ─── list：列出所有卡片 ───────────────────────────────────
