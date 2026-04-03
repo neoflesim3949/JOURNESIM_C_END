@@ -79,8 +79,17 @@ export default function AdminOrderDetailPage() {
   }
 
   async function batchSave(subOrderId: string) {
-    // TODO: 收集所有有 ICCID 值的 SKU，批次儲存並呼叫 BC API
-    alert('批次儲存功能開發中 — 將收集所有已填入的 ICCID 並送出 BC 訂單')
+    if (!confirm('確定要批次儲存並送出 BC 訂單？')) return
+    const res = await fetch(`/api/admin/orders/${id}/bc-order`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub_order_id: subOrderId }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      alert(data.error || '送出失敗')
+    } else {
+      alert(`BC 訂單已送出！BC Order ID: ${data.bc_order_id}`)
+    }
     load()
   }
 

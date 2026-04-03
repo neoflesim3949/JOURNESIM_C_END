@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateOrderId, generateSubOrderId, generateSkuId } from '@/lib/utils'
 import { payByPrime, payByToken } from '@/lib/tappay'
+import { createEsimOrder } from '@/lib/billionconnect'
 
 interface CartItem {
   id: string; packageId: string; packageName: string
@@ -211,6 +212,50 @@ export async function POST(request: Request) {
         subtotal: item.unitPrice * item.quantity,
         bc_sku_id: item.bcSkuId,
       })
+    }
+
+    // =====================================================
+    // eSIM 自動下單：付款成功 → 呼叫 BC F040
+    // =====================================================
+    if (sub.category === 'esim' && paymentStatus === 'paid') {
+      try {
+        // 取回剛建立的 SKU 記錄（需要 sku_number）
+        const { data: createdSkus } = await supabase.from('order_skus')
+          .select('id, sku_number, bc_sku_id, copies, quantity')
+          .eq('sub_order_id', subOrder.id)
+
+        const bcSubOrderList = (createdSkus || []).map((sku) => ({
+          channelSubOrderId: sku.sku_number || sku.id,
+          deviceSkuId: sku.bc_sku_id,
+          planSkuCopies: sku.copies,
+          number: String(sku.quantity),
+        }))
+
+        const bcResult = await createEsimOrder({
+          channelOrderId: subNumber,
+          totalAmount: String(subTotal),
+          subOrderList: bcSubOrderList,
+        })
+
+        // 更新子訂單 BC 訂單號
+        await supabase.from('sub_orders').update({
+          bc_order_id: bcResult.orderId,
+          status: 'processing',
+        }).eq('id', subOrder.id)
+
+        // 更新每個 SKU 的 BC 子訂單號
+        for (const bcSub of bcResult.subOrderList || []) {
+          await supabase.from('order_skus').update({
+            bc_sub_order_id: bcSub.subOrderId,
+          }).eq('sku_number', bcSub.channelSubOrderId)
+        }
+      } catch (err) {
+        console.error('BC eSIM order failed:', err)
+        // 不阻塞結帳流程，僅記錄錯誤
+        await supabase.from('sub_orders').update({
+          status: 'pending',
+        }).eq('id', subOrder.id)
+      }
     }
   }
 
