@@ -261,7 +261,7 @@ function SubOrderCard({ sub, onUpdateSub, onUpdateSku, onBatchSave }: {
         </thead>
         <tbody className="divide-y divide-gray-100">
           {sub.skus.map((sku) => (
-            <SkuRow key={sku.id} sku={sku} isEsim={isEsim} onUpdate={onUpdateSku} />
+            <SkuRow key={sku.id} sku={sku} isEsim={isEsim} onUpdate={onUpdateSku} bcOrderId={sub.bc_order_id} />
           ))}
         </tbody>
       </table>
@@ -269,7 +269,7 @@ function SubOrderCard({ sub, onUpdateSub, onUpdateSku, onBatchSave }: {
   )
 }
 
-function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onUpdate: (id: string, updates: Record<string, unknown>) => void }) {
+function SkuRow({ sku, isEsim, onUpdate, bcOrderId }: { sku: OrderSku; isEsim: boolean; onUpdate: (id: string, updates: Record<string, unknown>) => void; bcOrderId: string | null }) {
   const existingIccids = isEsim ? (sku.iccid || []) : (sku.sim_iccid || [])
   const [iccids, setIccids] = useState<string[]>(() => {
     const arr = [...existingIccids]
@@ -336,8 +336,8 @@ function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onU
       </td>
       <td className="px-4 py-2"><StatusBadge status={sku.status} /></td>
       <td className="px-4 py-2">
-        {sku.bc_sub_order_id ? (
-          <span className="text-[10px] text-green-600 font-mono">{sku.bc_sub_order_id}</span>
+        {bcOrderId ? (
+          <span className="text-[10px] text-green-600 font-mono">{bcOrderId}</span>
         ) : (
           <span className="text-[10px] text-gray-300">—</span>
         )}
