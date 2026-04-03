@@ -60,9 +60,12 @@ export default function AdminCardsPage() {
 
   function handleSearch() { setPage(1); load() }
 
-  async function openDetail(iccid: string, type: 'expiry' | 'usage' | 'traffic') {
+  const [detailSubOrderNumber, setDetailSubOrderNumber] = useState<string | null>(null)
+
+  async function openDetail(iccid: string, type: 'expiry' | 'usage' | 'traffic', subOrderNumber?: string | null) {
     setDetailIccid(iccid)
     setDetailType(type)
+    setDetailSubOrderNumber(subOrderNumber || null)
     setDetailLoading(true)
     setExpiry(null); setUsage(null); setTraffic([])
 
@@ -70,7 +73,9 @@ export default function AdminCardsPage() {
       const res = await fetch(`/api/admin/cards?action=expiry&iccid=${iccid}`).then((r) => r.json()).catch(() => ({}))
       setExpiry(res.expiry || null)
     } else if (type === 'usage') {
-      const res = await fetch(`/api/admin/cards?action=usage&iccid=${iccid}`).then((r) => r.json()).catch(() => ({}))
+      const params = new URLSearchParams({ action: 'usage', iccid })
+      if (subOrderNumber) params.set('channelOrderId', subOrderNumber)
+      const res = await fetch(`/api/admin/cards?${params}`).then((r) => r.json()).catch(() => ({}))
       setUsage(res.usage || null)
     } else if (type === 'traffic') {
       await loadTraffic(iccid)
@@ -143,15 +148,15 @@ export default function AdminCardsPage() {
                     <td className="px-4 py-2 text-xs">{card.status}</td>
                     <td className="px-4 py-2 text-center">
                       <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => openDetail(card.iccid, 'expiry')} title="卡片有效期"
+                        <button onClick={() => openDetail(card.iccid, 'expiry', card.sub_order_number)} title="卡片有效期"
                           className="px-2 py-1 text-xs text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded">
                           <Calendar className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => openDetail(card.iccid, 'usage')} title="套餐詳情"
+                        <button onClick={() => openDetail(card.iccid, 'usage', card.sub_order_number)} title="套餐詳情"
                           className="px-2 py-1 text-xs text-gray-500 hover:text-green-600 hover:bg-green-50 rounded">
                           <CreditCard className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => openDetail(card.iccid, 'traffic')} title="用量詳情"
+                        <button onClick={() => openDetail(card.iccid, 'traffic', card.sub_order_number)} title="用量詳情"
                           className="px-2 py-1 text-xs text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded">
                           <Database className="w-3.5 h-3.5" />
                         </button>
@@ -200,7 +205,7 @@ export default function AdminCardsPage() {
               <div className="flex items-center gap-2">
                 <div className="flex rounded-lg border border-gray-200 overflow-hidden">
                   {(['expiry', 'usage', 'traffic'] as const).map((t) => (
-                    <button key={t} onClick={() => openDetail(detailIccid, t)}
+                    <button key={t} onClick={() => openDetail(detailIccid, t, detailSubOrderNumber)}
                       className={`px-3 py-1 text-xs font-medium ${detailType === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
                       {t === 'expiry' ? '有效期' : t === 'usage' ? '套餐' : '用量'}
                     </button>

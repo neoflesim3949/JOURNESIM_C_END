@@ -111,10 +111,11 @@ export async function GET(request: Request) {
     }
   }
 
-  // ─── usage：F046 套餐使用資訊 ──────────────────────────────
+  // ─── usage：F046 套餐使用資訊（帶 channelOrderId 查特定訂單）──
   if (action === 'usage' && iccid) {
+    const channelOrderId = searchParams.get('channelOrderId') || ''
     try {
-      const result = await getPlanUsageV2({ iccid })
+      const result = await getPlanUsageV2({ iccid, ...(channelOrderId ? { channelOrderId } : {}) })
       return NextResponse.json({ usage: result })
     } catch {
       return NextResponse.json({ usage: null })
