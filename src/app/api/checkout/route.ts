@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { generateOrderId } from '@/lib/utils'
+import { generateOrderId, generateSubOrderId, generateSkuId } from '@/lib/utils'
 import { payByPrime, payByToken } from '@/lib/tappay'
 
 interface CartItem {
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
 
   for (const sub of subOrders) {
     const subTotal = sub.items.reduce((s, i) => s + i.unitPrice * i.quantity, 0)
-    const subNumber = `${orderNumber}-${sub.category === 'esim' ? 'E' : 'S'}1`
+    const subNumber = generateSubOrderId(sub.category as 'esim' | 'sim')
 
     const { data: subOrder } = await supabase.from('sub_orders').insert({
       order_id: order.id,
@@ -177,10 +177,11 @@ export async function POST(request: Request) {
     sub.subOrderId = subOrder.id
 
     // =====================================================
-    // L3: 建立 SKU 單號（按 SKU + copies 拆分）
+    // L3: 建立 SKU 單號（按 SKU + copies 拆分，每個 SKU 有獨立編號）
     // =====================================================
-    const skuRecords = sub.items.map((item) => ({
+    const skuRecords = sub.items.map((item, idx) => ({
       sub_order_id: subOrder.id,
+      sku_number: generateSkuId(subNumber, idx + 1),
       bc_sku_id: item.bcSkuId,
       bc_sku_name: item.bcSkuName,
       package_plan_id: item.planId,
