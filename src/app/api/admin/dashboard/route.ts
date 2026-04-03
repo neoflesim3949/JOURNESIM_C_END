@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   try {
     const bcBalance = await getBalance()
     // NOTE: 重點記錄 - 用於排查餘額顯示問題
-    console.log('[BC_BALANCE_RESPONSE_FULL]', JSON.stringify(bcBalance))
+    // bcBalance 已取得
     
     // BC API F014 可能回傳 availableBalance 或 saleBalance
     const rawBal = bcBalance.availableBalance || bcBalance.saleBalance
