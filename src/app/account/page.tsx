@@ -55,7 +55,7 @@ export default function AccountPage() {
     {
       items: [
         { href: '/orders', icon: Package, label: '我的訂單', desc: '查看訂單記錄與狀態' },
-        { href: '/account/esims', icon: Smartphone, label: '我的 eSIM', desc: '管理已購買的 eSIM' },
+        { href: '/account/esims', icon: Smartphone, label: '我的卡片', desc: '查看 eSIM / SIM 卡狀態與用量' },
         { href: '/account/cards', icon: CreditCard, label: '卡片', desc: `已儲存 ${cardCount} 張卡片`, badge: cardCount > 0 ? String(cardCount) : undefined },
       ],
     },

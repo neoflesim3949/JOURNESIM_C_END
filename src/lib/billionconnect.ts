@@ -183,6 +183,20 @@ export async function getPlanUsageV2(params: {
 }
 
 // =====================================================
+// F042 — 查詢 eSIM 服務狀態
+// =====================================================
+export async function getEsimServiceStatus(iccid: string) {
+  return callBC<BCEsimServiceStatus>('F042', { iccid })
+}
+
+// =====================================================
+// F054 — 查詢實名認證狀態
+// =====================================================
+export async function getRealNameStatus(iccid: string) {
+  return callBC<BCRealNameStatus>('F054', { iccid })
+}
+
+// =====================================================
 // F052 — 查詢 eSIM 充值商品
 // =====================================================
 export async function getEsimRechargeProducts(iccid: string) {
@@ -425,6 +439,22 @@ export interface BCPlanUsageV2 {
   orderId: string
   channelOrderId: string
   subOrderList: BCPlanUsageV2Sub[]
+}
+
+export interface BCEsimServiceStatus {
+  iccid: string
+  esimStatus?: string
+  profileStatus?: string
+  smdpAddress?: string
+  activationCode?: string
+  qrCodeUrl?: string
+  qrCodeContent?: string
+}
+
+export interface BCRealNameStatus {
+  iccid: string
+  realNameStatus?: string
+  realNameType?: string
 }
 
 export interface BCEsimRechargeResult {
