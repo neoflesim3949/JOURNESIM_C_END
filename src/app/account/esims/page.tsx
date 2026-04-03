@@ -13,13 +13,22 @@ interface CardItem {
 
 interface CardDetail {
   iccid: string
-  expiry: { iccid: string; status: string; expirationDate: string; type: string; usageCount?: string } | null
-  service_status: { esimStatus?: string; profileStatus?: string; qrCodeUrl?: string; qrCodeContent?: string } | null
+  expiry: {
+    iccid: string; type: string; status: string; expirationDate: string
+    postponedMonth: string; maxDelayMonth: string; usageCount: string
+    supportUpgradeMultiCard?: string
+  } | null
+  service_status: {
+    status?: string; esimStatus?: string; profileStatus?: string
+    recordTime?: string; eid?: string
+    qrCodeUrl?: string; qrCodeContent?: string
+  } | null
   usage: {
     orderId: string; channelOrderId: string
     subOrderList: {
       skuName: string; planStatus: string; planStartTime?: string; planEndTime?: string
-      totalDays?: string; totalTraffic?: string; highFlowSize?: string; planType?: string
+      totalDays?: string; remainingDays?: string; totalTraffic?: string; remainingTraffic?: string
+      highFlowSize?: string; planType?: string
       usageInfoList?: { useDate: string; useageAmt: string }[]
     }[]
   } | null
@@ -160,6 +169,10 @@ export default function MyCardsPage() {
                       <div><span className="text-muted-foreground">到期日：</span>{detail.expiry.expirationDate || '-'}</div>
                       <div><span className="text-muted-foreground">狀態：</span>{detail.expiry.status || '-'}</div>
                       <div><span className="text-muted-foreground">類型：</span>{detail.expiry.type || '-'}</div>
+                      <div><span className="text-muted-foreground">已延期月數：</span>{detail.expiry.postponedMonth || '0'}</div>
+                      <div><span className="text-muted-foreground">最大可延期：</span>{detail.expiry.maxDelayMonth || '-'} 月</div>
+                      <div><span className="text-muted-foreground">使用次數：</span>{detail.expiry.usageCount || '-'}</div>
+                      {detail.expiry.supportUpgradeMultiCard && <div><span className="text-muted-foreground">多卡升級：</span>{detail.expiry.supportUpgradeMultiCard === '1' ? '支持' : '不支持'}</div>}
                     </div>
                   </div>
                 )}
@@ -171,8 +184,10 @@ export default function MyCardsPage() {
                       <Signal className="w-4 h-4 text-blue-500" /> eSIM 服務狀態
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div><span className="text-muted-foreground">eSIM：</span>{detail.service_status.esimStatus || '-'}</div>
+                      <div><span className="text-muted-foreground">狀態：</span>{detail.service_status.status || detail.service_status.esimStatus || '-'}</div>
                       <div><span className="text-muted-foreground">Profile：</span>{detail.service_status.profileStatus || '-'}</div>
+                      {detail.service_status.eid && <div><span className="text-muted-foreground">EID：</span><span className="font-mono text-xs">{detail.service_status.eid}</span></div>}
+                      {detail.service_status.recordTime && <div><span className="text-muted-foreground">記錄時間：</span>{detail.service_status.recordTime}</div>}
                     </div>
                   </div>
                 )}
@@ -189,10 +204,10 @@ export default function MyCardsPage() {
                           <div className="font-medium">{plan.skuName}</div>
                           <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                             <div><span className="text-muted-foreground">狀態：</span>{plan.planStatus || '-'}</div>
-                            <div><span className="text-muted-foreground">總天數：</span>{plan.totalDays || '-'} 天</div>
+                            <div><span className="text-muted-foreground">天數：</span>{plan.remainingDays || '-'} / {plan.totalDays || '-'} 天</div>
                             {plan.planStartTime && <div><span className="text-muted-foreground">開始：</span>{plan.planStartTime}</div>}
                             {plan.planEndTime && <div><span className="text-muted-foreground">結束：</span>{plan.planEndTime}</div>}
-                            {plan.totalTraffic && <div><span className="text-muted-foreground">總流量：</span>{plan.totalTraffic}</div>}
+                            {plan.totalTraffic && <div><span className="text-muted-foreground">流量：</span>{plan.remainingTraffic || '-'} / {plan.totalTraffic}</div>}
                             {plan.highFlowSize && <div><span className="text-muted-foreground">高速流量：</span>{plan.highFlowSize}</div>}
                           </div>
                           {plan.usageInfoList && plan.usageInfoList.length > 0 && (

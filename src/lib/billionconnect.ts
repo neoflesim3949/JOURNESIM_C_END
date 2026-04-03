@@ -368,6 +368,7 @@ export interface BCCardExpiry {
   postponedMonth: string
   maxDelayMonth: string
   usageCount: string
+  supportUpgradeMultiCard?: string
 }
 
 export interface BCPlanUsage {
@@ -457,8 +458,11 @@ export interface BCIccidVerify {
 
 export interface BCEsimServiceStatus {
   iccid: string
+  status?: string
   esimStatus?: string
   profileStatus?: string
+  recordTime?: string
+  eid?: string
   smdpAddress?: string
   activationCode?: string
   qrCodeUrl?: string
