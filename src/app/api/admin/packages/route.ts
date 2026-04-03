@@ -96,12 +96,30 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ ok: true })
 }
 
-// DELETE — 刪除套餐
+// DELETE — 刪除套餐（級聯刪除關聯資料）
 export async function DELETE(request: Request) {
   if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await request.json()
   const supabase = createAdminClient()
+
+  // 1. 取得此套餐下的所有 package_plans
+  const { data: plans } = await supabase.from('package_plans').select('id').eq('package_id', id)
+  const planIds = (plans || []).map((p) => p.id)
+
+  // 2. 刪除 package_plan_prices
+  if (planIds.length > 0) {
+    await supabase.from('package_plan_prices').delete().in('package_plan_id', planIds)
+  }
+
+  // 3. 刪除 package_plans
+  await supabase.from('package_plans').delete().eq('package_id', id)
+
+  // 4. 刪除 product_packages 關聯
+  await supabase.from('product_packages').delete().eq('package_id', id)
+
+  // 5. 刪除套餐本身
   await supabase.from('packages').delete().eq('id', id)
+
   return NextResponse.json({ ok: true })
 }

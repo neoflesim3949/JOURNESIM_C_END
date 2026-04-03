@@ -65,6 +65,9 @@ export async function PATCH(request: Request) {
   if (body.description !== undefined) updates.description = body.description
   if (body.is_active !== undefined) updates.is_active = body.is_active
   if (body.sort_order !== undefined) updates.sort_order = body.sort_order
+  if (body.country_code !== undefined) updates.country_code = body.country_code
+  if (body.country_name !== undefined) updates.country_name = body.country_name
+  if (body.icon_url !== undefined) updates.icon_url = body.icon_url
   updates.updated_at = new Date().toISOString()
 
   const { error } = await supabase
@@ -86,6 +89,9 @@ export async function DELETE(request: Request) {
 
   const { id } = await request.json()
   const supabase = createAdminClient()
+
+  // 刪除關聯
+  await supabase.from('product_packages').delete().eq('product_id', id)
 
   const { error } = await supabase.from('products').delete().eq('id', id)
 

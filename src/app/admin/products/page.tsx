@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
-import { Search, Package, Plus, Trash2, Pencil } from 'lucide-react'
+import { Search, Package, Plus, Trash2, Pencil, ImageIcon } from 'lucide-react'
 
 interface CountryWithCount {
   mcc: string; name: string; continent: string; flag_url: string | null; product_count: number
@@ -11,7 +11,7 @@ interface CountryWithCount {
 
 interface RegionalProduct {
   id: string; name: string; description: string | null; scope: string; product_type: string; is_active: boolean
-  country_code: string; country_name: string; _package_count?: number
+  country_code: string; country_name: string; icon_url: string | null; _package_count?: number
 }
 
 type ScopeTab = 'local' | 'regional' | 'global'
@@ -30,6 +30,8 @@ export default function AdminProductsPage() {
   const [customLoading, setCustomLoading] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState({ name: '', description: '', product_type: 'esim' })
+  const [editingGroup, setEditingGroup] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', icon_url: '', country_code: '' })
 
   useEffect(() => {
     fetch('/api/admin/products/countries')
@@ -89,12 +91,30 @@ export default function AdminProductsPage() {
     if (res.ok) setCustomProducts(await res.json())
   }
 
+  async function handleEditGroup(code: string, name: string, iconUrl: string, newCode: string) {
+    const toUpdate = customProducts.filter((p) => p.country_code === code)
+    for (const p of toUpdate) {
+      await fetch('/api/admin/products', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: p.id,
+          country_name: name,
+          icon_url: iconUrl || null,
+          ...(newCode && newCode !== code ? { country_code: newCode } : {}),
+        }),
+      })
+    }
+    setEditingGroup(null)
+    const res = await fetch(`/api/admin/products/custom?scope=${activeTab}`)
+    if (res.ok) setCustomProducts(await res.json())
+  }
+
   // 按 country_code 分組
   const groupedCustom = useMemo(() => {
-    const map = new Map<string, { name: string; code: string; products: RegionalProduct[] }>()
+    const map = new Map<string, { name: string; code: string; icon_url: string | null; products: RegionalProduct[] }>()
     for (const p of customProducts) {
       if (!map.has(p.country_code)) {
-        map.set(p.country_code, { name: p.country_name || p.country_code, code: p.country_code, products: [] })
+        map.set(p.country_code, { name: p.country_name || p.country_code, code: p.country_code, icon_url: p.icon_url, products: [] })
       }
       map.get(p.country_code)!.products.push(p)
     }
@@ -195,23 +215,73 @@ export default function AdminProductsPage() {
             </div>
           ) : (
             <div className="mt-6 space-y-3">
-              {groupedCustom.map((group) => (
-                <Link key={group.code} href={`/admin/products/_custom/${group.code}`}
-                  className="flex items-center justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <h3 className="font-semibold">{group.name}</h3>
-                      <span className={`px-2 py-0.5 text-xs rounded-full ${activeTab === 'global' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
-                        {activeTab === 'global' ? '全球' : '區域'}
-                      </span>
+              {groupedCustom.map((group) => {
+                const isEditing = editingGroup === group.code
+                return isEditing ? (
+                  <div key={group.code} className="p-5 bg-white border border-blue-300 rounded-xl space-y-3">
+                    <div className="grid grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-500">分組名稱</label>
+                        <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                          className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-500">Country Code</label>
+                        <input value={editForm.country_code} onChange={(e) => setEditForm({ ...editForm, country_code: e.target.value })}
+                          className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-500">圖示 URL</label>
+                        <div className="mt-1 flex items-center gap-2">
+                          <input value={editForm.icon_url} onChange={(e) => setEditForm({ ...editForm, icon_url: e.target.value })}
+                            placeholder="https://..." className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                          {editForm.icon_url && <Image src={editForm.icon_url} alt="" width={32} height={32} className="rounded w-8 h-8 object-cover border" />}
+                        </div>
+                      </div>
                     </div>
-                    <p className="mt-1 text-xs text-gray-400">{group.products.length} 個方案</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleEditGroup(group.code, editForm.name, editForm.icon_url, editForm.country_code)}
+                        className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
+                      <button onClick={() => setEditingGroup(null)}
+                        className="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400">&rsaquo;</span>
+                ) : (
+                  <div key={group.code} className="flex items-center justify-between p-5 bg-white border border-gray-200 rounded-xl hover:border-gray-300 transition-all">
+                    <Link href={`/admin/products/groups/${group.code}`} className="flex items-center gap-3 flex-1 min-w-0">
+                      {group.icon_url ? (
+                        <Image src={group.icon_url} alt={group.name} width={40} height={40} className="rounded-lg w-10 h-10 object-cover shadow-sm flex-shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <ImageIcon className="w-5 h-5 text-gray-300" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <h3 className="font-semibold">{group.name}</h3>
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${activeTab === 'global' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
+                            {activeTab === 'global' ? '全球' : '區域'}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400">{group.products.length} 個方案</p>
+                      </div>
+                    </Link>
+                    <div className="flex items-center gap-1 ml-3">
+                      <button onClick={() => { setEditingGroup(group.code); setEditForm({ name: group.name, icon_url: group.icon_url || '', country_code: group.code }) }}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleDeleteGroup(group.code)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      <Link href={`/admin/products/groups/${group.code}`} className="p-2 text-gray-400 hover:text-gray-600">
+                        <span>&rsaquo;</span>
+                      </Link>
+                    </div>
                   </div>
-                </Link>
-              ))}
+                )
+              })}
             </div>
           )}
         </>

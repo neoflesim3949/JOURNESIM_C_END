@@ -1,52 +1,77 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getProducts, getProductPrices, getAccelerationProducts } from '@/lib/billionconnect'
+import { getProducts, getProductPrices, getAccelerationProducts, type BCProductPrice } from '@/lib/billionconnect'
 
-const BATCH_SIZE = 30 // 每批寫入筆數，避免 Nano 方案超載
+const BATCH_SIZE = 30
 
 export async function POST() {
   try {
     const supabase = createAdminClient()
-    const salesMethod = '5'
 
-    // 並行呼叫 5 個 BC API
-    const [products, prices, accelerationProducts, enProducts, enAccel] = await Promise.all([
-      getProducts({ salesMethod, language: '1', networkOperatorScope: '2' }),
-      getProductPrices(salesMethod),
+    // 拉取所有銷售方式的商品（1-6），確保商品總數與 BC 一致
+    const salesMethods = ['1', '2', '3', '4', '5', '6']
+
+    // 並行呼叫所有 salesMethod 的 F002（簡中）
+    const allProductsArrays = await Promise.all(
+      salesMethods.map((sm) =>
+        getProducts({ salesMethod: sm, language: '1', networkOperatorScope: '2' }).catch(() => [])
+      )
+    )
+
+    // 並行呼叫所有 salesMethod 的 F003（價格）
+    const allPricesArrays = await Promise.all(
+      salesMethods.map((sm) =>
+        getProductPrices(sm).catch(() => [])
+      )
+    )
+
+    // 並行呼叫所有 salesMethod 的 F002（英文）
+    const allEnProductsArrays = await Promise.all(
+      salesMethods.map((sm) =>
+        getProducts({ salesMethod: sm, language: '2', networkOperatorScope: '2' }).catch(() => [])
+      )
+    )
+
+    // 加速包
+    const [accelCn, accelEn] = await Promise.all([
       getAccelerationProducts({ language: '1' }).catch(() => []),
-      getProducts({ salesMethod, language: '2', networkOperatorScope: '2' }).catch(() => []),
       getAccelerationProducts({ language: '2' }).catch(() => []),
     ])
 
-    // 建立價格 map
-    const priceMap = new Map(prices.map((p) => [p.skuId, p.price]))
+    // 合併所有商品去重（簡中）
+    const productMap = new Map<string, (typeof allProductsArrays)[0][0]>()
+    for (const arr of allProductsArrays) {
+      for (const p of arr) productMap.set(p.skuId, p)
+    }
+    for (const p of accelCn) productMap.set(p.skuId, p)
 
-    // 合併主商品 + 加速包，去重
-    const allProducts = new Map<string, typeof products[0]>()
-    for (const p of [...products, ...accelerationProducts]) {
-      allProducts.set(p.skuId, p)
+    // 合併所有價格
+    const priceMap = new Map<string, BCProductPrice['price']>()
+    for (const arr of allPricesArrays) {
+      for (const p of arr) priceMap.set(p.skuId, p.price)
     }
 
-    // 英文 name/desc map
+    // 合併英文 name/desc
     const enMap = new Map<string, { name: string; desc: string }>()
-    for (const p of [...enProducts, ...enAccel]) {
-      enMap.set(p.skuId, { name: p.name, desc: p.desc })
+    for (const arr of allEnProductsArrays) {
+      for (const p of arr) enMap.set(p.skuId, { name: p.name, desc: p.desc })
     }
+    for (const p of accelEn) enMap.set(p.skuId, { name: p.name, desc: p.desc })
 
-    // 組合資料（精簡 raw_data，只保留必要欄位以減少資料量）
-    const records = Array.from(allProducts.values()).map((p) => {
+    // 組合寫入資料
+    const records = Array.from(productMap.values()).map((p) => {
       const skuPrices = priceMap.get(p.skuId) || []
-      const costPrice = skuPrices.find((t) => t.copies === '1')?.settlementPrice || null
+      const costPrice = Array.isArray(skuPrices)
+        ? skuPrices.find((t) => t.copies === '1')?.settlementPrice || null
+        : null
       const enData = enMap.get(p.skuId)
-
-      // 精簡 country_data，只保留 mcc + name
       const countries = p.country?.map((c) => ({ mcc: c.mcc, name: c.name })) || null
 
       return {
         sku_id: p.skuId,
         name: p.name,
         type: p.type,
-        sales_method: salesMethod,
+        sales_method: '5', // 保留欄位相容
         days: p.days ? Number(p.days) : null,
         capacity: p.capacity || null,
         high_flow_size: p.highFlowSize || null,
@@ -63,75 +88,35 @@ export async function POST() {
         operator_info: p.operatorInfo || null,
         provider: p.provider || null,
         refund_policy: p.refundPolicy || null,
+        rechargeable_product: p.rechargeableProduct || null,
         speed_limit_rule: p.speedLimitRule || null,
         validity_period: p.validityPeroid || null,
         desc: p.desc,
         country_data: countries,
-        prices: skuPrices.length > 0 ? skuPrices : null,
+        prices: Array.isArray(skuPrices) && skuPrices.length > 0 ? skuPrices : null,
         cost_price: costPrice ? Number(costPrice) : null,
         name_en: enData?.name || null,
         desc_en: enData?.desc || null,
-        raw_data: null, // 不存 raw_data，節省空間避免 Nano 超載
+        raw_data: null,
         updated_at: new Date().toISOString(),
       }
     })
 
-    // 分批 upsert，避免一次寫入太多導致 DB 超載
+    // 分批 upsert
     let synced = 0
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
       const batch = records.slice(i, i + BATCH_SIZE)
       const { error } = await supabase
         .from('bc_products')
         .upsert(batch, { onConflict: 'sku_id' })
-
       if (error) throw error
       synced += batch.length
-    }
-
-    // 自動建立 ISO ↔ 數字MCC 映射
-    // 從 bc_products.country_data 取得 { mcc(數字), name }
-    // 與 bc_countries { mcc(ISO), name } 用 name 匹配
-    try {
-      const { data: bcCountries } = await supabase
-        .from('bc_countries')
-        .select('mcc, name')
-
-      if (bcCountries && bcCountries.length > 0) {
-        // 從所有商品的 country_data 收集 name → numeric_mcc 映射
-        const nameToNumericMcc = new Map<string, Set<string>>()
-        for (const p of allProducts.values()) {
-          for (const c of p.country || []) {
-            const name = c.name?.toLowerCase()
-            if (!name || !c.mcc) continue
-            if (!nameToNumericMcc.has(name)) nameToNumericMcc.set(name, new Set())
-            nameToNumericMcc.get(name)!.add(c.mcc)
-          }
-        }
-
-        // 用國家名稱匹配，更新 bc_countries.numeric_mcc
-        for (const country of bcCountries) {
-          const numericMccs = nameToNumericMcc.get(country.name.toLowerCase())
-          if (numericMccs && numericMccs.size > 0) {
-            await supabase
-              .from('bc_countries')
-              .update({ numeric_mcc: Array.from(numericMccs) })
-              .eq('mcc', country.mcc)
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to build MCC mapping:', e)
-      // 不影響主流程
     }
 
     return NextResponse.json({ synced })
   } catch (err) {
     console.error('Product sync failed:', err)
     const msg = err instanceof Error ? err.message : JSON.stringify(err)
-    console.error('Sync error detail:', msg)
-    return NextResponse.json(
-      { error: msg },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

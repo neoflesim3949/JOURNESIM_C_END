@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '商品不存在' }, { status: 404 })
   }
 
-  // 確認價格（從 product_plan_prices 驗證）
+  // 確認價格（從 package_plan_prices 驗證）
   let verifiedPrice = total_amount
   let verifiedSkuId = bc_sku_id
   let planLabel = ''
@@ -53,9 +53,9 @@ export async function POST(request: Request) {
 
   if (plan_id && copies) {
     const { data: priceRow } = await supabase
-      .from('product_plan_prices')
+      .from('package_plan_prices')
       .select('sell_price, cost_price')
-      .eq('product_plan_id', plan_id)
+      .eq('package_plan_id', plan_id)
       .eq('copies', copies)
       .single()
 
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
 
     // 取得 BC SKU 和天數
     const { data: planRow } = await supabase
-      .from('product_plans')
+      .from('package_plans')
       .select('bc_sku_id')
       .eq('id', plan_id)
       .single()

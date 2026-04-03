@@ -1,22 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
-
-// eSIM 類型碼
-const ESIM_TYPES = ['110', '111', '3105', '3106']
-
-// SIM 類型碼（含 eSIM 重疊的 110, 111）
-const SIM_TYPES = [
-  '110', '111',
-  '210', '211', '212',
-  '220', '221',
-  '311',
-  '3101', '3102', '3103', '3104',
-  '3201', '3202', '3211', '3212',
-]
-
-// 加速包排除列表（所有 eSIM + SIM 主商品類型）
-const ESIM_SIM_EXCLUDE = ['110', '111', '210', '211', '212', '220', '221', '230', '250', '311']
+import { ESIM_TYPES, SIM_TYPES, ESIM_SIM_ALL_TYPES } from '@/lib/bc-enums'
 
 export async function GET(request: Request) {
   const cookieStore = await cookies()
@@ -27,34 +12,72 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const type = searchParams.get('type') || 'esim'
-  const types = searchParams.get('types')
-  const acceleration = searchParams.get('acceleration') === 'true'
+  const page = parseInt(searchParams.get('page') || '1')
+  const pageSize = parseInt(searchParams.get('pageSize') || '50')
+  const search = searchParams.get('search') || ''
+  const planType = searchParams.get('planType') || ''
+  const productType = searchParams.get('productType') || ''
+  const salesMethod = searchParams.get('salesMethod') || ''
+  const rechargeable = searchParams.get('rechargeable') || ''
 
   const supabase = createAdminClient()
 
-  let query = supabase
-    .from('bc_products')
-    .select('*')
-    .order('name')
+  let query = supabase.from('bc_products').select('*', { count: 'exact' })
 
-  if (types) {
-    // 直接用傳入的 types 過濾
-    query = query.in('type', types.split(','))
-  } else if (acceleration || type === 'acceleration') {
-    // 加速包：排除 eSIM/SIM 主商品類型
-    query = query.not('type', 'in', `(${ESIM_SIM_EXCLUDE.join(',')})`)
-  } else if (type === 'sim') {
+  // 類型過濾
+  // rechargeable_product='1' → eSIM 複充商品（不管 type 是什麼）
+  // 同一商品可能同時出現在 SIM 和 eSIM 列表
+  if (type === 'sim') {
     query = query.in('type', SIM_TYPES)
+  } else if (type === 'acceleration') {
+    // 加速包：(type 不在 eSIM+SIM 或 type IS NULL) 且 非複充商品
+    query = query.or(`type.is.null,type.not.in.(${ESIM_SIM_ALL_TYPES.join(',')})`)
+    query = query.or('rechargeable_product.is.null,rechargeable_product.neq.1')
   } else {
-    // eSIM（預設）
-    query = query.in('type', ESIM_TYPES)
+    // eSIM：type 在 eSIM 列表 或 rechargeable_product='1'（不管 type）
+    query = query.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
   }
 
-  const { data, error } = await query
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  // 篩選：套餐類型
+  if (planType) {
+    query = query.eq('plan_type', planType)
   }
 
-  return NextResponse.json(data || [])
+  // 篩選：商品子類型
+  if (productType) {
+    query = query.eq('type', productType)
+  }
+
+  // 篩選：銷售方式
+  if (salesMethod) {
+    query = query.eq('sales_method', salesMethod)
+  }
+
+  // 篩選：複充
+  if (rechargeable === '1') {
+    query = query.eq('rechargeable_product', '1')
+  } else if (rechargeable === '0') {
+    query = query.or('rechargeable_product.is.null,rechargeable_product.neq.1')
+  }
+
+  // 搜尋
+  if (search) {
+    query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
+  }
+
+  // 分頁
+  const from = (page - 1) * pageSize
+  const to = from + pageSize - 1
+  query = query.order('name').range(from, to)
+
+  const { data, count, error } = await query
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({
+    data: data || [],
+    total: count || 0,
+    page,
+    pageSize,
+  })
 }

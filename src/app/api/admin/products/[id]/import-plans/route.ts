@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { ESIM_TYPES, SIM_TYPES } from '@/lib/bc-enums'
 
 async function checkAuth() {
   const cookieStore = await cookies()
@@ -23,22 +24,17 @@ export async function POST(
   if (!product) return NextResponse.json({ error: '方案不存在' }, { status: 404 })
 
   // 根據方案類型決定 BC type 過濾
-  const ESIM_TYPES = ['110', '111', '3105', '3106']
-  const SIM_TYPES = ['110', '111', '210', '211', '212', '220', '221', '311', '3101', '3102', '3103', '3104', '3201', '3202', '3211', '3212']
-  const allowedTypes = product.product_type === 'sim' ? SIM_TYPES : ESIM_TYPES
+  const isSim = product.product_type === 'sim'
 
   let matched: { sku_id: string; plan_type: string | null; cost_price: number | null; prices: unknown }[]
 
   if (sku_ids && sku_ids.length > 0) {
-    // 手動選擇：按指定 SKU 匯入
     const { data } = await supabase
       .from('bc_products')
       .select('sku_id, plan_type, cost_price, prices')
       .in('sku_id', sku_ids)
     matched = data || []
   } else if (country_code) {
-    // 自動匯入：從本地 bc_products 查詢
-    // 先查國家名稱
     const { data: country } = await supabase
       .from('bc_countries')
       .select('name')
@@ -48,19 +44,24 @@ export async function POST(
     const countryName = country?.name || ''
     const code = country_code.toUpperCase()
 
-    // 用商品名稱模糊匹配 + type 過濾
-    const { data: byName } = await supabase
-      .from('bc_products')
-      .select('sku_id, name, plan_type, cost_price, prices')
-      .ilike('name', `%${countryName}%`)
-      .in('type', allowedTypes)
-
-    // 也查 country_data 文字中包含 country_code 的
-    const { data: byCountryData } = await supabase
-      .from('bc_products')
-      .select('sku_id, name, plan_type, cost_price, prices')
-      .ilike('country_data::text', `%"mcc":"${code}"%`)
-      .in('type', allowedTypes)
+    let byName, byCountryData
+    if (isSim) {
+      ;({ data: byName } = await supabase.from('bc_products')
+        .select('sku_id, name, plan_type, cost_price, prices')
+        .ilike('name', `%${countryName}%`).in('type', SIM_TYPES))
+      ;({ data: byCountryData } = await supabase.from('bc_products')
+        .select('sku_id, name, plan_type, cost_price, prices')
+        .ilike('country_data::text', `%"mcc":"${code}"%`).in('type', SIM_TYPES))
+    } else {
+      ;({ data: byName } = await supabase.from('bc_products')
+        .select('sku_id, name, plan_type, cost_price, prices')
+        .ilike('name', `%${countryName}%`)
+        .or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`))
+      ;({ data: byCountryData } = await supabase.from('bc_products')
+        .select('sku_id, name, plan_type, cost_price, prices')
+        .ilike('country_data::text', `%"mcc":"${code}"%`)
+        .or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`))
+    }
 
     // 合併去重 + 排除加速包（名稱含「加速」或「acceleration」）
     const skuMap = new Map<string, typeof matched[0]>()

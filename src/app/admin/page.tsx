@@ -13,7 +13,7 @@ export default async function AdminDashboard() {
     { count: esimCount },
     { count: bcProductCount },
   ] = await Promise.all([
-    supabase.from('products').select('*', { count: 'exact', head: true }),
+    supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
     supabase.from('orders').select('*', { count: 'exact', head: true }),
     supabase.from('members').select('*', { count: 'exact', head: true }),
     supabase.from('esim_profiles').select('*', { count: 'exact', head: true }),

@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { RefreshCw, CheckCircle, AlertCircle, Database } from 'lucide-react'
+import { RefreshCw, CheckCircle, AlertCircle, Database, Search } from 'lucide-react'
+import { getProductTypeLabel, getPlanTypeLabel, getSalesMethodLabel } from '@/lib/bc-enums'
+import { formatCapacity, formatSpeed } from '@/lib/format'
 
 interface SyncResult {
   type: string
@@ -21,33 +23,68 @@ interface BCProductRow {
   id: string
   sku_id: string
   name: string
-  type: string
-  sales_method: string
+  type: string | null
+  sales_method: string | null
   days: number | null
   capacity: string | null
+  high_flow_size: string | null
+  limit_flow_speed: string | null
   plan_type: string | null
-  created_at: string
+  updated_at: string
 }
 
 export default function AdminSyncPage() {
   const [results, setResults] = useState<SyncResult[]>([])
   const [syncing, setSyncing] = useState<string | null>(null)
-  const [countries, setCountries] = useState<BCCountryRow[]>([])
-  const [products, setProducts] = useState<BCProductRow[]>([])
   const [activeTab, setActiveTab] = useState<'countries' | 'products'>('countries')
-  const [loading, setLoading] = useState(true)
 
-  async function loadData() {
-    const res = await fetch('/api/admin/sync/data')
+  // Countries state
+  const [countries, setCountries] = useState<BCCountryRow[]>([])
+  const [countryTotal, setCountryTotal] = useState(0)
+  const [countryPage, setCountryPage] = useState(1)
+  const [countryPageSize, setCountryPageSize] = useState(50)
+  const [countrySearch, setCountrySearch] = useState('')
+  const [countryLoading, setCountryLoading] = useState(true)
+
+  // Products state
+  const [products, setProducts] = useState<BCProductRow[]>([])
+  const [productTotal, setProductTotal] = useState(0)
+  const [productPage, setProductPage] = useState(1)
+  const [productPageSize, setProductPageSize] = useState(50)
+  const [productSearch, setProductSearch] = useState('')
+  const [productLoading, setProductLoading] = useState(true)
+
+  async function loadCountries() {
+    setCountryLoading(true)
+    const params = new URLSearchParams({ tab: 'countries', page: String(countryPage), pageSize: String(countryPageSize) })
+    if (countrySearch) params.set('search', countrySearch)
+    const res = await fetch(`/api/admin/sync/data?${params}`)
     if (res.ok) {
       const data = await res.json()
-      setCountries(data.countries || [])
-      setProducts(data.products || [])
+      setCountries(data.data || [])
+      setCountryTotal(data.total || 0)
     }
-    setLoading(false)
+    setCountryLoading(false)
   }
 
-  useEffect(() => { loadData() }, [])
+  async function loadProducts() {
+    setProductLoading(true)
+    const params = new URLSearchParams({ tab: 'products', page: String(productPage), pageSize: String(productPageSize) })
+    if (productSearch) params.set('search', productSearch)
+    const res = await fetch(`/api/admin/sync/data?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      setProducts(data.data || [])
+      setProductTotal(data.total || 0)
+    }
+    setProductLoading(false)
+  }
+
+  useEffect(() => { loadCountries() }, [countryPage, countryPageSize])
+  useEffect(() => { loadProducts() }, [productPage, productPageSize])
+
+  function handleCountrySearch() { setCountryPage(1); loadCountries() }
+  function handleProductSearch() { setProductPage(1); loadProducts() }
 
   async function sync(type: 'countries' | 'products') {
     setSyncing(type)
@@ -60,7 +97,8 @@ export default function AdminSyncPage() {
           { type, success: true, message: `同步完成，共 ${data.synced} 筆` },
           ...prev,
         ])
-        loadData()
+        if (type === 'countries') loadCountries()
+        else loadProducts()
       } else {
         setResults((prev) => [
           { type, success: false, message: data.error || '同步失敗' },
@@ -81,6 +119,9 @@ export default function AdminSyncPage() {
     await sync('countries')
     await sync('products')
   }
+
+  const countryTotalPages = Math.ceil(countryTotal / countryPageSize)
+  const productTotalPages = Math.ceil(productTotal / productPageSize)
 
   return (
     <div>
@@ -160,7 +201,7 @@ export default function AdminSyncPage() {
             activeTab === 'countries' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          BC 國家（{countries.length}）
+          BC 國家（{countryTotal}）
         </button>
         <button
           onClick={() => setActiveTab('products')}
@@ -168,86 +209,140 @@ export default function AdminSyncPage() {
             activeTab === 'products' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
           }`}
         >
-          BC 商品（{products.length}）
+          BC 商品（{productTotal}）
         </button>
       </div>
 
-      {loading ? (
-        <p className="mt-4 text-sm text-gray-500">載入中...</p>
-      ) : (
+      {/* Countries Tab */}
+      {activeTab === 'countries' && (
         <>
-          {/* Countries Table */}
-          {activeTab === 'countries' && (
-            countries.length === 0 ? (
-              <p className="mt-4 text-sm text-gray-500">尚未同步國家資料，請點擊上方「同步國家」</p>
-            ) : (
-              <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="max-h-[500px] overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-500 sticky top-0">
-                      <tr>
-                        <th className="text-left px-4 py-2 font-medium">MCC</th>
-                        <th className="text-left px-4 py-2 font-medium">國家名稱</th>
-                        <th className="text-left px-4 py-2 font-medium">洲別</th>
-                        <th className="text-left px-4 py-2 font-medium">同步時間</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {countries.map((c) => (
-                        <tr key={c.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 font-mono text-xs">{c.mcc}</td>
-                          <td className="px-4 py-2 font-medium">{c.name}</td>
-                          <td className="px-4 py-2 text-gray-500">{c.continent}</td>
-                          <td className="px-4 py-2 text-gray-400 text-xs">{new Date(c.created_at).toLocaleString('zh-TW')}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )
-          )}
+          <div className="mt-4 flex gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input type="text" placeholder="搜尋國家名稱或 MCC" value={countrySearch}
+                onChange={(e) => setCountrySearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCountrySearch()}
+                className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <button onClick={handleCountrySearch} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+          </div>
 
-          {/* Products Table */}
-          {activeTab === 'products' && (
-            products.length === 0 ? (
-              <p className="mt-4 text-sm text-gray-500">尚未同步商品資料，請點擊上方「同步商品」</p>
-            ) : (
-              <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="max-h-[500px] overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-500 sticky top-0">
-                      <tr>
-                        <th className="text-left px-4 py-2 font-medium">SKU ID</th>
-                        <th className="text-left px-4 py-2 font-medium">商品名稱</th>
-                        <th className="text-left px-4 py-2 font-medium">類型</th>
-                        <th className="text-left px-4 py-2 font-medium">天數</th>
-                        <th className="text-left px-4 py-2 font-medium">容量</th>
-                        <th className="text-left px-4 py-2 font-medium">計費方式</th>
-                        <th className="text-left px-4 py-2 font-medium">同步時間</th>
+          {countryLoading ? <p className="mt-4 text-sm text-gray-500">載入中...</p> : (
+            <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium">MCC</th>
+                      <th className="text-left px-4 py-3 font-medium">國家名稱</th>
+                      <th className="text-left px-4 py-3 font-medium">洲別</th>
+                      <th className="text-left px-4 py-3 font-medium">同步時間</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {countries.map((c) => (
+                      <tr key={c.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 font-mono text-xs">{c.mcc}</td>
+                        <td className="px-4 py-2 font-medium">{c.name}</td>
+                        <td className="px-4 py-2 text-gray-500">{c.continent}</td>
+                        <td className="px-4 py-2 text-gray-400 text-xs">{new Date(c.created_at).toLocaleString('zh-TW')}</td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {products.map((p) => (
-                        <tr key={p.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 font-mono text-xs">{p.sku_id}</td>
-                          <td className="px-4 py-2 font-medium max-w-[200px] truncate">{p.name}</td>
-                          <td className="px-4 py-2">
-                            <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{p.type}</span>
-                          </td>
-                          <td className="px-4 py-2">{p.days ?? '-'}</td>
-                          <td className="px-4 py-2">{p.capacity || '-'}</td>
-                          <td className="px-4 py-2 text-xs">
-                            {p.plan_type === '0' ? '總量型' : p.plan_type === '1' ? '單日型' : '-'}
-                          </td>
-                          <td className="px-4 py-2 text-gray-400 text-xs">{new Date(p.created_at).toLocaleString('zh-TW')}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  每頁
+                  <select value={countryPageSize} onChange={(e) => { setCountryPageSize(Number(e.target.value)); setCountryPage(1) }}
+                    className="px-2 py-1 border border-gray-300 rounded text-sm">
+                    {[10, 20, 30, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  筆 · 共 {countryTotal} 筆
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setCountryPage(Math.max(1, countryPage - 1))} disabled={countryPage <= 1}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
+                  <span className="px-3 py-1 text-sm">{countryPage} / {countryTotalPages}</span>
+                  <button onClick={() => setCountryPage(Math.min(countryTotalPages, countryPage + 1))} disabled={countryPage >= countryTotalPages}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
                 </div>
               </div>
-            )
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Products Tab */}
+      {activeTab === 'products' && (
+        <>
+          <div className="mt-4 flex gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input type="text" placeholder="搜尋套餐名稱或 SKU" value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleProductSearch()}
+                className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <button onClick={handleProductSearch} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+          </div>
+
+          {productLoading ? <p className="mt-4 text-sm text-gray-500">載入中...</p> : (
+            <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium min-w-[280px]">套餐名稱</th>
+                      <th className="text-left px-4 py-3 font-medium">商品類型</th>
+                      <th className="text-left px-4 py-3 font-medium">套餐類型</th>
+                      <th className="text-left px-4 py-3 font-medium">銷售方式</th>
+                      <th className="text-left px-4 py-3 font-medium">流量 / 限速</th>
+                      <th className="text-left px-4 py-3 font-medium">同步時間</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {products.map((p) => {
+                      const isDaily = p.plan_type === '1'
+                      const capacity = formatCapacity(p.high_flow_size ?? p.capacity, isDaily)
+                      const speed = formatSpeed(p.limit_flow_speed)
+                      return (
+                        <tr key={p.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">
+                            <div className="font-medium max-w-[280px] truncate">{p.name}</div>
+                            <div className="text-xs text-gray-400 font-mono mt-0.5">{p.sku_id}</div>
+                          </td>
+                          <td className="px-4 py-2 text-xs">{p.type ? getProductTypeLabel(p.type) : '-'}</td>
+                          <td className="px-4 py-2 text-xs">{getPlanTypeLabel(p.plan_type)}</td>
+                          <td className="px-4 py-2 text-xs">{getSalesMethodLabel(p.sales_method)}</td>
+                          <td className="px-4 py-2 text-xs">
+                            {capacity !== '-' ? capacity : ''}{capacity !== '-' && speed !== '-' ? ' / ' : ''}{speed !== '-' ? speed : ''}{capacity === '-' && speed === '-' ? '-' : ''}
+                          </td>
+                          <td className="px-4 py-2 text-gray-400 text-xs">{new Date(p.updated_at).toLocaleString('zh-TW')}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  每頁
+                  <select value={productPageSize} onChange={(e) => { setProductPageSize(Number(e.target.value)); setProductPage(1) }}
+                    className="px-2 py-1 border border-gray-300 rounded text-sm">
+                    {[10, 20, 30, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  筆 · 共 {productTotal} 筆
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setProductPage(Math.max(1, productPage - 1))} disabled={productPage <= 1}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
+                  <span className="px-3 py-1 text-sm">{productPage} / {productTotalPages}</span>
+                  <button onClick={() => setProductPage(Math.min(productTotalPages, productPage + 1))} disabled={productPage >= productTotalPages}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
+                </div>
+              </div>
+            </div>
           )}
         </>
       )}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { ESIM_TYPES, SIM_TYPES } from '@/lib/bc-enums'
 
 async function checkAuth() {
   const cookieStore = await cookies()
@@ -28,9 +29,7 @@ export async function POST(
   const { data: pkg } = await supabase.from('packages').select('id, product_type').eq('id', id).single()
   if (!pkg) return NextResponse.json({ error: '套餐不存在' }, { status: 404 })
 
-  const ESIM_TYPES = ['110', '111', '3105', '3106']
-  const SIM_TYPES = ['110', '111', '210', '211', '212', '220', '221', '311', '3101', '3102', '3103', '3104', '3201', '3202', '3211', '3212']
-  const allowedTypes = (product_type || pkg.product_type) === 'sim' ? SIM_TYPES : ESIM_TYPES
+  const isSim = (product_type || pkg.product_type) === 'sim'
 
   let matched: { sku_id: string; plan_type: string | null; prices: unknown }[]
 
@@ -42,10 +41,20 @@ export async function POST(
     const countryName = country?.name || ''
     const code = country_code.toUpperCase()
 
-    const { data: byName } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
-      .ilike('name', `%${countryName}%`).in('type', allowedTypes)
-    const { data: byMcc } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
-      .ilike('country_data::text', `%"mcc":"${code}"%`).in('type', allowedTypes)
+    let byName, byMcc
+    if (isSim) {
+      ;({ data: byName } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
+        .ilike('name', `%${countryName}%`).in('type', SIM_TYPES))
+      ;({ data: byMcc } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
+        .ilike('country_data::text', `%"mcc":"${code}"%`).in('type', SIM_TYPES))
+    } else {
+      ;({ data: byName } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
+        .ilike('name', `%${countryName}%`)
+        .or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`))
+      ;({ data: byMcc } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
+        .ilike('country_data::text', `%"mcc":"${code}"%`)
+        .or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`))
+    }
 
     const skuMap = new Map<string, typeof matched[0]>()
     for (const p of [...(byName || []), ...(byMcc || [])]) {

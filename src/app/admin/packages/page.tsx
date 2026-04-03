@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter } from 'lucide-react'
+import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil } from 'lucide-react'
 
-const ESIM_TYPES = ['110', '111', '3105', '3106']
+import { ESIM_TYPES } from '@/lib/bc-enums'
 function getSimLabel(type: string) {
   return ESIM_TYPES.includes(type) ? 'eSIM' : 'SIM'
 }
@@ -47,6 +47,10 @@ export default function AdminPackagesPage() {
   // 已存在套餐中的所有 SKU
   const [existingSkus, setExistingSkus] = useState<Set<string>>(new Set())
 
+  // 編輯套餐
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', description: '', product_type: 'esim' })
+
   async function load() {
     const res = await fetch('/api/admin/packages')
     if (res.ok) {
@@ -77,6 +81,17 @@ export default function AdminPackagesPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     })
+    load()
+  }
+
+  async function handleSaveEdit() {
+    if (!editingId) return
+    await fetch('/api/admin/packages', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingId, ...editForm }),
+    })
+    setEditingId(null)
     load()
   }
 
@@ -246,33 +261,64 @@ export default function AdminPackagesPage() {
         </div>
       ) : (
         <div className="mt-6 space-y-3">
-          {packages.map((pkg) => (
-            <div key={pkg.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition-all">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h3 className="font-semibold">{pkg.name}</h3>
-                    <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{pkg.product_type}</span>
-                    <button onClick={() => handleToggle(pkg.id, pkg.is_active)}
-                      className={`px-2 py-0.5 text-xs rounded-full ${pkg.is_active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-                      {pkg.is_active ? '上架中' : '已下架'}
-                    </button>
+          {packages.map((pkg) => {
+            const isEditing = editingId === pkg.id
+            return isEditing ? (
+              <div key={pkg.id} className="bg-white border border-blue-300 rounded-xl p-5 space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-medium text-gray-500">套餐名稱</label>
+                    <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
                   </div>
-                  {pkg.description && <p className="mt-1 text-sm text-gray-500">{pkg.description}</p>}
-                  <p className="mt-1 text-xs text-gray-400">
-                    {pkg._plan_count} 個 BC 商品 · 被 {pkg._product_count} 個方案使用
-                    {pkg._has_price_changes && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs font-medium">成本異動</span>}
-                  </p>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">類型</label>
+                    <select value={editForm.product_type} onChange={(e) => setEditForm({ ...editForm, product_type: e.target.value })}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                      <option value="esim">eSIM</option><option value="sim">SIM</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Link href={`/admin/packages/${pkg.id}`}
-                    className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">管理內容</Link>
-                  <button onClick={() => handleDelete(pkg.id)}
-                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                <div>
+                  <label className="text-xs font-medium text-gray-500">描述（選填）</label>
+                  <input value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                    placeholder="套餐描述" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleSaveEdit} className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
+                  <button onClick={() => setEditingId(null)} className="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
                 </div>
               </div>
-            </div>
-          ))}
+            ) : (
+              <div key={pkg.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition-all">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-semibold">{pkg.name}</h3>
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{pkg.product_type}</span>
+                      <button onClick={() => handleToggle(pkg.id, pkg.is_active)}
+                        className={`px-2 py-0.5 text-xs rounded-full ${pkg.is_active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+                        {pkg.is_active ? '上架中' : '已下架'}
+                      </button>
+                    </div>
+                    {pkg.description && <p className="mt-1 text-sm text-gray-500">{pkg.description}</p>}
+                    <p className="mt-1 text-xs text-gray-400">
+                      {pkg._plan_count} 個 BC 商品 · 被 {pkg._product_count} 個方案使用
+                      {pkg._has_price_changes && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs font-medium">成本異動</span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setEditingId(pkg.id); setEditForm({ name: pkg.name, description: pkg.description || '', product_type: pkg.product_type }) }}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Pencil className="w-4 h-4" /></button>
+                    <Link href={`/admin/packages/${pkg.id}`}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">管理內容</Link>
+                    <button onClick={() => handleDelete(pkg.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 

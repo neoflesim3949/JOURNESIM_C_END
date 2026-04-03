@@ -34,7 +34,7 @@ export default function ProductDetailPage() {
 }
 
 function ProductDetailContent() {
-  const { countryCode, productId } = useParams() as { countryCode: string; productId: string }
+  const { countryCode, productId: packageId } = useParams() as { countryCode: string; productId: string }
 
   const [product, setProduct] = useState<ProductData | null>(null)
   const [plans, setPlans] = useState<PlanData[]>([])
@@ -49,10 +49,10 @@ function ProductDetailContent() {
 
   useEffect(() => {
     async function load() {
-      const res = await fetch(`/api/shop/product?id=${productId}`)
+      const res = await fetch(`/api/shop/product?id=${packageId}&country=${countryCode}`)
       if (res.ok) {
         const data = await res.json()
-        setProduct(data.product)
+        setProduct(data.package)
         setPlans(data.plans || [])
 
         // 自動選第一個 tab
@@ -67,7 +67,7 @@ function ProductDetailContent() {
       setLoading(false)
     }
     load()
-  }, [productId])
+  }, [packageId])
 
   // 日費套餐：按速度分組
   const dailyPlans = useMemo(() => plans.filter((p) => p.plan_category === 'daily'), [plans])
@@ -197,108 +197,107 @@ function ProductDetailContent() {
           <h1 className="text-2xl font-bold">{product.name}</h1>
           {product.description && <p className="mt-2 text-muted-foreground">{product.description}</p>}
 
-          {/* Tabs */}
-          {hasDailyPlans && hasFixedPlans && (
-            <div className="mt-6 flex rounded-lg overflow-hidden border border-border">
-              <button
-                onClick={() => { setActiveTab('daily'); setQuantity(1) }}
-                className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors ${activeTab === 'daily' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
-              >
-                日費套餐
-              </button>
-              <button
-                onClick={() => { setActiveTab('fixed'); setQuantity(1) }}
-                className={`flex-1 py-2.5 text-sm font-medium text-center transition-colors ${activeTab === 'fixed' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
-              >
-                固定套餐
-              </button>
-            </div>
-          )}
+          {/* Tabs — 日費套餐 / 固定套餐 */}
+          <div className="mt-6 flex rounded-xl overflow-hidden border border-border">
+            <button
+              onClick={() => { setActiveTab('daily'); setSelectedDays(''); setQuantity(1) }}
+              className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${activeTab === 'daily' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
+            >
+              日費套餐
+            </button>
+            <button
+              onClick={() => { setActiveTab('fixed'); setSelectedFixedPlan(''); setQuantity(1) }}
+              className={`flex-1 py-3 text-sm font-semibold text-center transition-colors ${activeTab === 'fixed' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}
+            >
+              固定套餐
+            </button>
+          </div>
 
           {/* Daily Plan UI */}
-          {activeTab === 'daily' && hasDailyPlans && (
-            <div className="mt-6 space-y-5">
-              {/* Select Speed */}
-              <div>
-                <label className="text-sm font-medium">選擇手機套餐</label>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {speedOptions.map((speed) => (
-                    <button
-                      key={speed}
-                      onClick={() => { setSelectedSpeed(speed); setSelectedDays('') }}
-                      className={`px-4 py-2.5 border rounded-lg text-sm font-medium transition-all ${
-                        selectedSpeed === speed ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/50'
-                      }`}
+          {activeTab === 'daily' && (
+            hasDailyPlans ? (
+              <div className="mt-6 space-y-5">
+                <div>
+                  <label className="text-sm font-medium">選擇方案</label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {speedOptions.map((speed) => (
+                      <button
+                        key={speed}
+                        onClick={() => { setSelectedSpeed(speed); setSelectedDays('') }}
+                        className={`px-4 py-2.5 border rounded-xl text-sm font-medium transition-all ${
+                          selectedSpeed === speed ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        {speed}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">選擇天數</label>
+                    <select
+                      value={selectedDays}
+                      onChange={(e) => setSelectedDays(e.target.value)}
+                      className="mt-2 w-full px-4 py-3 border border-border rounded-xl text-sm bg-white cursor-pointer"
                     >
-                      {speed}
-                    </button>
-                  ))}
+                      {daysOptions.map((opt) => (
+                        <option key={opt.days} value={String(opt.days)}>{opt.days} 天</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">數量</label>
+                    <div className="mt-2 flex items-center border border-border rounded-xl">
+                      <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="px-3 py-3 hover:bg-muted transition-colors rounded-l-xl">
+                        <Minus className="w-4 h-4" />
+                      </button>
+                      <span className="flex-1 text-center text-sm font-medium">{quantity}</span>
+                      <button onClick={() => setQuantity(quantity + 1)} className="px-3 py-3 hover:bg-muted transition-colors rounded-r-xl">
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              {/* Select Days */}
-              <div>
-                <label className="text-sm font-medium">選擇天數</label>
-                <div className="mt-2 grid grid-cols-4 sm:grid-cols-5 gap-2">
-                  {daysOptions.map((opt) => (
-                    <button
-                      key={opt.days}
-                      onClick={() => setSelectedDays(String(opt.days))}
-                      className={`px-3 py-2 border rounded-lg text-center transition-all ${
-                        selectedDays === String(opt.days) ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/50'
-                      }`}
-                    >
-                      <div className="text-sm font-medium">{opt.days}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+            ) : (
+              <div className="mt-6 py-8 text-center text-muted-foreground text-sm">此套餐無日費方案</div>
+            )
           )}
 
           {/* Fixed Plan UI */}
-          {activeTab === 'fixed' && hasFixedPlans && (
-            <div className="mt-6">
-              <label className="text-sm font-medium">選擇手機套餐</label>
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                {fixedOptions.map((opt) => {
-                  const key = `${opt.plan_id}_${opt.copies}`
-                  const isSelected = selectedFixedPlan === key
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setSelectedFixedPlan(key)}
-                      className={`p-4 border rounded-xl text-left transition-all ${
-                        isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-semibold">{opt.capacity}</div>
-                          <div className="text-xs text-muted-foreground mt-0.5">{opt.days} 天</div>
+          {activeTab === 'fixed' && (
+            hasFixedPlans ? (
+              <div className="mt-6">
+                <label className="text-sm font-medium">選擇方案</label>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {fixedOptions.map((opt) => {
+                    const key = `${opt.plan_id}_${opt.copies}`
+                    const isSelected = selectedFixedPlan === key
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setSelectedFixedPlan(key)}
+                        className={`p-4 border rounded-xl text-left transition-all ${
+                          isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-semibold">{opt.capacity}</div>
+                            <div className="text-xs text-muted-foreground mt-0.5">{opt.days} 天</div>
+                          </div>
+                          <div className="font-semibold text-primary">{formatPrice(opt.sell_price)}</div>
                         </div>
-                        <div className="font-semibold text-primary">{formatPrice(opt.sell_price)}</div>
-                      </div>
-                    </button>
-                  )
-                })}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-6 py-8 text-center text-muted-foreground text-sm">此套餐無固定方案</div>
+            )
           )}
-
-          {/* Quantity */}
-          <div className="mt-5">
-            <label className="text-sm font-medium">數量</label>
-            <div className="mt-2 inline-flex items-center border border-border rounded-lg">
-              <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="p-2.5 hover:bg-muted transition-colors">
-                <Minus className="w-4 h-4" />
-              </button>
-              <span className="px-5 font-medium text-center min-w-[40px]">{quantity}</span>
-              <button onClick={() => setQuantity(quantity + 1)} className="p-2.5 hover:bg-muted transition-colors">
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
 
           {/* Total + Buy */}
           <div className="mt-6 p-5 bg-muted rounded-xl">
@@ -308,7 +307,7 @@ function ProductDetailContent() {
                 <div className="text-3xl font-bold text-primary">{formatPrice(totalPrice)}</div>
               </div>
               <Link
-                href={`/checkout?product=${productId}&planId=${activeTab === 'daily' ? selectedDayOption?.plan_id : selectedFixed?.plan_id}&copies=${activeTab === 'daily' ? selectedDayOption?.copies : selectedFixed?.copies}&qty=${quantity}&price=${totalPrice}`}
+                href={`/checkout?package=${packageId}&planId=${activeTab === 'daily' ? selectedDayOption?.plan_id : selectedFixed?.plan_id}&copies=${activeTab === 'daily' ? selectedDayOption?.copies : selectedFixed?.copies}&qty=${quantity}&price=${totalPrice}`}
                 className={`inline-flex items-center gap-2 px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors ${totalPrice <= 0 ? 'opacity-50 pointer-events-none' : ''}`}
               >
                 <ShoppingBag className="w-5 h-5" />

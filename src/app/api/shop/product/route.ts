@@ -3,51 +3,47 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const productId = searchParams.get('id')
+  const packageId = searchParams.get('id')
+  const countryCode = searchParams.get('country')
 
-  if (!productId) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
+  if (!packageId) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
   const supabase = createAdminClient()
 
-  const { data: product } = await supabase
-    .from('products')
+  // 取得套餐資訊
+  const { data: pkg } = await supabase
+    .from('packages')
     .select('*')
-    .eq('id', productId)
+    .eq('id', packageId)
     .eq('is_active', true)
     .single()
 
-  if (!product) return NextResponse.json({ error: '商品不存在' }, { status: 404 })
+  if (!pkg) return NextResponse.json({ error: '套餐不存在' }, { status: 404 })
 
-  const { data: country } = await supabase
-    .from('bc_countries')
-    .select('name, flag_url')
-    .eq('mcc', product.country_code)
-    .single()
-
-  // 新架構：product_packages → packages → package_plans → package_plan_prices
-  const { data: productPkgLinks } = await supabase
-    .from('product_packages')
-    .select('package_id')
-    .eq('product_id', productId)
-
-  const packageIds = (productPkgLinks || []).map((l) => l.package_id)
-
-  if (packageIds.length === 0) {
-    return NextResponse.json({
-      product: { ...product, country_name: country?.name || '', country_flag: country?.flag_url || null },
-      plans: [],
-    })
+  // 取得國家資訊（如果有提供 country code）
+  let countryName = ''
+  let countryFlag: string | null = null
+  if (countryCode) {
+    const { data: country } = await supabase
+      .from('bc_countries')
+      .select('name, flag_url')
+      .eq('mcc', countryCode)
+      .single()
+    if (country) {
+      countryName = country.name
+      countryFlag = country.flag_url
+    }
   }
 
   // 取得套餐下的所有 BC 商品
   const { data: packagePlans } = await supabase
     .from('package_plans')
     .select('id, bc_sku_id, plan_category, package_id')
-    .in('package_id', packageIds)
+    .eq('package_id', packageId)
 
   if (!packagePlans || packagePlans.length === 0) {
     return NextResponse.json({
-      product: { ...product, country_name: country?.name || '', country_flag: country?.flag_url || null },
+      package: { ...pkg, country_name: countryName, country_flag: countryFlag },
       plans: [],
     })
   }
@@ -98,10 +94,10 @@ export async function GET(request: Request) {
     })
 
   return NextResponse.json({
-    product: {
-      ...product,
-      country_name: country?.name || product.country_name || '',
-      country_flag: country?.flag_url || null,
+    package: {
+      ...pkg,
+      country_name: countryName,
+      country_flag: countryFlag,
     },
     plans: result,
   })

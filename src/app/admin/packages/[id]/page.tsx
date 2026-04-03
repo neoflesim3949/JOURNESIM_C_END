@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, Search, X, Trash2, DollarSign, Eye } from 'lucide-react'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 
-const ESIM_TYPES = ['110', '111', '3105', '3106']
+import { ESIM_TYPES } from '@/lib/bc-enums'
 function getSimLabel(type: string) { return ESIM_TYPES.includes(type) ? 'eSIM' : 'SIM' }
 function getSimColor(type: string) { return ESIM_TYPES.includes(type) ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600' }
 

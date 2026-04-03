@@ -11,25 +11,25 @@ interface Country {
   mcc: string; name: string; continent: string; flag_url: string | null
 }
 
-interface ProductSummary {
-  id: string; name: string; product_type: string; lowest_price: number | null
+interface PackageSummary {
+  id: string; name: string; description: string | null; product_type: string; lowest_price: number | null
 }
 
 export default function CountryPage() {
   const { countryCode } = useParams() as { countryCode: string }
   const [country, setCountry] = useState<Country | null>(null)
-  const [products, setProducts] = useState<ProductSummary[]>([])
+  const [packages, setPackages] = useState<PackageSummary[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
-      const [countryRes, productsRes] = await Promise.all([
+      const [countryRes, pkgRes] = await Promise.all([
         fetch(`/api/countries`).then((r) => r.json()),
         fetch(`/api/shop/country-products?mcc=${countryCode}`).then((r) => r.json()),
       ])
       const c = (countryRes as Country[]).find((c) => c.mcc === countryCode)
       setCountry(c || null)
-      setProducts(productsRes)
+      setPackages(pkgRes)
       setLoading(false)
     }
     load()
@@ -65,22 +65,23 @@ export default function CountryPage() {
       </div>
 
       <div className="mt-8">
-        {products.length === 0 ? (
+        {packages.length === 0 ? (
           <div className="text-center py-16 bg-muted rounded-xl">
-            <p className="text-muted-foreground">此國家尚無上架方案</p>
+            <p className="text-muted-foreground">此國家尚無上架套餐</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {products.map((p) => (
+            {packages.map((pkg) => (
               <Link
-                key={p.id}
-                href={`/shop/${countryCode}/${p.id}`}
+                key={pkg.id}
+                href={`/shop/${countryCode}/${pkg.id}`}
                 className="flex items-center justify-between p-5 border border-border rounded-xl hover:border-primary hover:shadow-sm transition-all"
               >
                 <div>
-                  <div className="text-lg font-semibold">{p.name}</div>
-                  {p.lowest_price && p.lowest_price > 0 && (
-                    <div className="text-sm text-muted-foreground mt-1">起價 {formatPrice(p.lowest_price)}</div>
+                  <div className="text-lg font-semibold">{pkg.name}</div>
+                  {pkg.description && <div className="text-sm text-muted-foreground mt-0.5">{pkg.description}</div>}
+                  {pkg.lowest_price && pkg.lowest_price > 0 && (
+                    <div className="text-sm text-muted-foreground mt-1">起價 {formatPrice(pkg.lowest_price)}</div>
                   )}
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
