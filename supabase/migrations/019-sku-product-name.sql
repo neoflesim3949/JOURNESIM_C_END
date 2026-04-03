@@ -1,0 +1,2 @@
+ALTER TABLE order_skus ADD COLUMN IF NOT EXISTS product_name TEXT;
+ALTER TABLE order_skus ADD COLUMN IF NOT EXISTS display_name TEXT;

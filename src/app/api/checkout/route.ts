@@ -184,6 +184,8 @@ export async function POST(request: Request) {
       sku_number: generateSkuId(subNumber, idx + 1),
       bc_sku_id: item.bcSkuId,
       bc_sku_name: item.bcSkuName,
+      product_name: item.packageName,
+      display_name: item.displayName,
       package_plan_id: item.planId,
       copies: item.copies,
       days: item.days,

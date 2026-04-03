@@ -13,7 +13,8 @@ interface Order {
 }
 
 interface OrderSku {
-  id: string; sku_number: string | null; bc_sku_id: string; bc_sku_name: string | null; copies: string
+  id: string; sku_number: string | null; bc_sku_id: string; bc_sku_name: string | null
+  product_name: string | null; display_name: string | null; copies: string
   days: number | null; unit_price: number; quantity: number; subtotal: number
   iccid: string[] | null; qr_code_url: string | null; lpa_code: string | null
   sim_iccid: string[] | null; bc_sub_order_id: string | null; status: string
@@ -270,7 +271,8 @@ function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onU
   return (
     <tr className="hover:bg-gray-50 align-top">
       <td className="px-4 py-2">
-        <div className="font-medium text-xs">{sku.bc_sku_name || '-'}</div>
+        {sku.product_name && <div className="font-medium text-xs">{sku.product_name}</div>}
+        <div className="text-xs text-gray-600">{sku.display_name || sku.bc_sku_name || '-'}</div>
         <div className="text-[10px] text-gray-400 font-mono">{sku.bc_sku_id}</div>
         {sku.sku_number && <div className="text-[10px] text-blue-500 font-mono mt-0.5">{sku.sku_number}</div>}
       </td>
