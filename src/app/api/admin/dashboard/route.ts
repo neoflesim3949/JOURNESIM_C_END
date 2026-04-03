@@ -56,15 +56,15 @@ export async function GET(request: Request) {
   startDate.setDate(startDate.getDate() - days)
   startDate.setHours(0, 0, 0, 0)
 
+  // order_skus 包含 cost_price (TWD，結帳時鎖定)
   const { data: skus } = await supabase.from('order_skus')
-    .select('id, created_at, subtotal, quantity, bc_sku_id, bc_sku_name, copies, days, package_plan_id, product_name, sub_orders!inner(id, order_id, category)')
+    .select('id, created_at, subtotal, cost_price, quantity, bc_sku_id, bc_sku_name, copies, days, package_plan_id, product_name, sub_orders!inner(id, order_id, category)')
     .gte('created_at', startDate.toISOString())
     .neq('status', 'cancelled')
 
-  // Cost map & Region map
+  // BC 商品資訊（區域、流量等）
   const skuIds = [...new Set((skus || []).map(s => s.bc_sku_id).filter(Boolean))]
-  const { data: bcProducts } = await supabase.from('bc_products').select('sku_id, name, cost_price, country_data, desc, high_flow_size, capacity').in('sku_id', skuIds)
-  const costMap = new Map((bcProducts || []).map(p => [p.sku_id, Number(p.cost_price) || 0]))
+  const { data: bcProducts } = await supabase.from('bc_products').select('sku_id, name, country_data, high_flow_size, capacity').in('sku_id', skuIds)
   const regionMap = new Map((bcProducts || []).map(p => [p.sku_id, p.country_data]))
   const bcInfoMap = new Map((bcProducts || []).map(p => [p.sku_id, {
     highFlowSize: p.high_flow_size,
@@ -85,7 +85,7 @@ export async function GET(request: Request) {
     return dateStr.split('T')[0]
   }
 
-  const trendMetrics = new Map<string, { revenue: number, skusCount: number, ordersSet: Set<string> }>()
+  const trendMetrics = new Map<string, { revenue: number, cost: number, skusCount: number, ordersSet: Set<string> }>()
 
   let totalEsim = 0
   let totalSim = 0
@@ -124,6 +124,7 @@ export async function GET(request: Request) {
 
   const hotPlansMap = new Map<string, any>()
   let totalRevenue = 0
+  let totalCost = 0
   let totalVolume = 0
 
   // 5. Processing Loop
@@ -137,15 +138,17 @@ export async function GET(request: Request) {
     if (typeFilter !== 'all' && typeFilter !== category) continue
 
     const revenue = Number(s.subtotal) || 0
+    const cost = (Number(s.cost_price) || 0) * (Number(s.quantity) || 1)
     const quantity = Number(s.quantity) || 1
     const subOrder = s.sub_orders as any
-    
+
     if (!trendMetrics.has(groupKey)) {
-      trendMetrics.set(groupKey, { revenue: 0, skusCount: 0, ordersSet: new Set() })
+      trendMetrics.set(groupKey, { revenue: 0, cost: 0, skusCount: 0, ordersSet: new Set() })
     }
-    
+
     const t = trendMetrics.get(groupKey)!
     t.revenue += revenue
+    t.cost += cost
     t.skusCount += quantity
     if (subOrder?.order_id) t.ordersSet.add(subOrder.order_id)
 
@@ -153,6 +156,7 @@ export async function GET(request: Request) {
     if (category === 'sim') totalSim += quantity
     
     totalRevenue += revenue
+    totalCost += cost
     totalVolume += quantity
 
     if (s.bc_sku_id) {
@@ -207,9 +211,11 @@ export async function GET(request: Request) {
   }
 
   const hotPlansTree = convertTree(hotPlansMap)
-  const trend = Array.from(trendMetrics.entries()).map(([date, data]) => ({ 
-    date, 
+  const trend = Array.from(trendMetrics.entries()).map(([date, data]) => ({
+    date,
     revenue: data.revenue,
+    cost: data.cost,
+    profit: data.revenue - data.cost,
     skusCount: data.skusCount,
     ordersCount: data.ordersSet.size
   })).sort((a: any, b: any) => a.date.localeCompare(b.date))
@@ -227,7 +233,7 @@ export async function GET(request: Request) {
     trend,
     distribution: { inner: innerPie, outer: outerPie },
     hotPlansTree,
-    summary: { totalRevenue, totalVolume }
+    summary: { totalRevenue, totalCost, totalProfit: totalRevenue - totalCost, totalVolume }
   })
 }
 

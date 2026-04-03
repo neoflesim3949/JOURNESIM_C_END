@@ -177,13 +177,18 @@ export async function POST(request: Request) {
     if (!subOrder) continue
     sub.subOrderId = subOrder.id
 
-    // 1. 取得這批項目的當前成本價（確保利潤追蹤精確度）
-    const itemSkuIds = [...new Set(sub.items.map(i => i.bcSkuId))]
-    const { data: currentProducts } = await supabase
-      .from('bc_products')
-      .select('sku_id, cost_price')
-      .in('sku_id', itemSkuIds)
-    const costMap = new Map((currentProducts || []).map(p => [p.sku_id, Number(p.cost_price) || 0]))
+    // 1. 取得當下成本價（從 package_plan_prices，CNY）和匯率，計算 TWD 成本
+    const itemPlanIds = [...new Set(sub.items.map(i => i.planId).filter(Boolean))]
+    const { data: planPrices } = itemPlanIds.length > 0
+      ? await supabase.from('package_plan_prices').select('package_plan_id, copies, cost_price').in('package_plan_id', itemPlanIds)
+      : { data: [] }
+    // key = planId_copies → cost_price (CNY)
+    const costCnyMap = new Map<string, number>()
+    for (const pp of planPrices || []) costCnyMap.set(`${pp.package_plan_id}_${pp.copies}`, Number(pp.cost_price) || 0)
+
+    // 匯率
+    const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
+    const cnyRate = rateRow ? Number(rateRow.rate) : 4.7
 
     // L3: 建立 SKU 單號（按 SKU + copies 拆分，每個 SKU 有獨立編號）
     // =====================================================
@@ -198,7 +203,7 @@ export async function POST(request: Request) {
       copies: item.copies,
       days: item.days,
       unit_price: item.unitPrice,
-      cost_price: costMap.get(item.bcSkuId) || 0, // 記錄當時成本
+      cost_price: Math.ceil((costCnyMap.get(`${item.planId}_${item.copies}`) || 0) * cnyRate), // 成本 TWD（結帳當下匯率鎖定）
       quantity: item.quantity,
       subtotal: item.unitPrice * item.quantity,
       status: sub.category === 'esim' ? 'processing' : 'pending',
