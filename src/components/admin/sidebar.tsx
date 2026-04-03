@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, ShoppingCart, RefreshCw, LogOut,
-  Users, Wifi, UserCog, Globe, ChevronDown, Image
+  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -33,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { href: '/admin/orders', label: '訂單管理', icon: ShoppingCart },
+  { href: '/admin/cards', label: '卡片管理', icon: CreditCard },
   { href: '/admin/members', label: '會員管理', icon: Users },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
   {
