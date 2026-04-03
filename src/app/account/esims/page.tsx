@@ -463,7 +463,7 @@ function TrafficQueryCard({ iccid }: { iccid: string }) {
     return d.toISOString().slice(0, 10)
   })
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [traffic, setTraffic] = useState<{ usedDate: string; type: string; usedAmount: string; country: string }[]>([])
+  const [traffic, setTraffic] = useState<{ usedDate: string; country: string; usedAmountKB: number }[]>([])
   const [loading, setLoading] = useState(false)
   const [queried, setQueried] = useState(false)
 
@@ -475,21 +475,22 @@ function TrafficQueryCard({ iccid }: { iccid: string }) {
     setLoading(false)
   }
 
+  function formatKB(kb: number): string {
+    if (kb >= 1024 * 1024) return `${(kb / 1024 / 1024).toFixed(2)}GB`
+    if (kb >= 1024) return `${(kb / 1024).toFixed(2)}MB`
+    return `${kb}KB`
+  }
+
   // 按國家分組統計
   const countryStats = (() => {
     const map = new Map<string, number>()
     let total = 0
     for (const t of traffic) {
-      const mb = parseFloat(t.usedAmount) || 0
-      map.set(t.country, (map.get(t.country) || 0) + mb)
-      total += mb
+      map.set(t.country, (map.get(t.country) || 0) + t.usedAmountKB)
+      total += t.usedAmountKB
     }
-    return { countries: Array.from(map.entries()).sort((a, b) => b[1] - a[1]), totalMB: total }
+    return { countries: Array.from(map.entries()).sort((a, b) => b[1] - a[1]), totalKB: total }
   })()
-
-  function formatMB(mb: number): string {
-    return mb >= 1024 ? `${(mb / 1024).toFixed(2)}GB` : `${mb.toFixed(2)}MB`
-  }
 
   return (
     <div className="bg-white border border-border rounded-xl p-5">
@@ -518,13 +519,13 @@ function TrafficQueryCard({ iccid }: { iccid: string }) {
                 {countryStats.countries.map(([country, mb]) => (
                   <div key={country} className="px-2 py-1 bg-white rounded border border-blue-200 text-xs">
                     <div className="text-muted-foreground">{country}</div>
-                    <div className="font-semibold text-blue-600">{formatMB(mb)}</div>
+                    <div className="font-semibold text-blue-600">{formatKB(mb)}</div>
                   </div>
                 ))}
               </div>
               <div className="mt-2 text-xs">
                 <span className="text-muted-foreground">總用量：</span>
-                <span className="font-semibold">{formatMB(countryStats.totalMB)}</span>
+                <span className="font-semibold">{formatKB(countryStats.totalKB)}</span>
               </div>
             </div>
           )}
@@ -545,7 +546,7 @@ function TrafficQueryCard({ iccid }: { iccid: string }) {
                     <tr key={i}>
                       <td className="py-1.5 text-muted-foreground">{t.usedDate}</td>
                       <td className="py-1.5">{t.country}</td>
-                      <td className="py-1.5 text-right font-medium">{t.usedAmount}</td>
+                      <td className="py-1.5 text-right font-medium">{formatKB(t.usedAmountKB)}</td>
                     </tr>
                   ))}
                 </tbody>

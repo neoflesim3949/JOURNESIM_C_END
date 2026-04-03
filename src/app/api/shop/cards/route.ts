@@ -74,8 +74,28 @@ export async function GET(request: Request) {
     const endDate = searchParams.get('endDate') || ''
     if (!beginDate || !endDate) return NextResponse.json({ traffic: [] })
     try {
-      const traffic = await getDailyTraffic({ iccid, beginDate, endDate }).catch(() => [])
-      return NextResponse.json({ traffic: Array.isArray(traffic) ? traffic : [] })
+      const raw = await getDailyTraffic({ iccid, beginDate, endDate }).catch(() => [])
+      const items = Array.isArray(raw) ? raw : []
+
+      // 查 bc_countries 做國家名繁體對應
+      const mccs = [...new Set(items.map((t) => t.countryRegionCode).filter(Boolean))]
+      let countryMap = new Map<string, string>()
+      if (mccs.length > 0) {
+        const { data: countries } = await supabase.from('bc_countries')
+          .select('mcc, name_zh, name').in('mcc', mccs)
+        for (const c of countries || []) {
+          countryMap.set(c.mcc, c.name_zh || c.name)
+        }
+      }
+
+      const traffic = items.map((t) => ({
+        usedDate: t.usedDate,
+        country: countryMap.get(t.countryRegionCode) || t.country,
+        countryCode: t.countryRegionCode,
+        usedAmountKB: parseFloat(t.usedAmount) || 0,
+      }))
+
+      return NextResponse.json({ traffic })
     } catch {
       return NextResponse.json({ traffic: [] })
     }
