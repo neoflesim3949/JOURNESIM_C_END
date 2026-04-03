@@ -10,15 +10,41 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient()
 
-  // 取得套餐資訊
-  const { data: pkg } = await supabase
+  // 優先從 packages 表搜尋具體套餐 (UUID 模式)
+  const { data: directPackage } = await supabase
     .from('packages')
     .select('*')
     .eq('id', packageId)
     .eq('is_active', true)
     .single()
 
-  if (!pkg) return NextResponse.json({ error: '套餐不存在' }, { status: 404 })
+  let pkg = directPackage
+
+  // 如果 packages 找不到，且 ID 看起來像 MCC 或容器 UUID，則從 products 表尋找
+  if (!pkg) {
+    // 先找 ID 匹配
+    const { data: productById } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', packageId)
+      .eq('is_active', true)
+      .single()
+    pkg = productById
+
+    // 如果還是找不到，嘗試用 country_code (MCC)
+    if (!pkg && packageId) {
+      const { data: fallbackPkg } = await supabase
+        .from('products')
+        .select('*')
+        .eq('country_code', packageId)
+        .eq('is_active', true)
+        .limit(1)
+        .single()
+      if (fallbackPkg) pkg = fallbackPkg
+    }
+  }
+
+  if (!pkg) return NextResponse.json({ error: '商品或套餐不存在' }, { status: 404 })
 
   // 取得國家資訊（如果有提供 country code）
   let countryName = ''
@@ -35,11 +61,11 @@ export async function GET(request: Request) {
     }
   }
 
-  // 取得套餐下的所有 BC 商品
+  // 取得套餐下的所有 BC 商品 (使用查得的 pkg.id)
   const { data: packagePlans } = await supabase
     .from('package_plans')
     .select('id, bc_sku_id, plan_category, package_id, display_name, sort_order')
-    .eq('package_id', packageId)
+    .eq('package_id', pkg.id)
     .order('sort_order')
     .order('created_at')
 

@@ -1,22 +1,14 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
-
-async function checkAuth() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('admin_token')?.value
-  return token === process.env.ADMIN_PASSWORD
-}
+import { checkAdminAuth, getUnauthorizedResponse } from '@/lib/admin'
 
 export async function GET() {
-  if (!(await checkAuth())) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('products')
-    .select('*')
+    .select('id, name, description, country_code, country_name, product_type, scope, sort_order, is_active, icon_url, created_at')
     .order('sort_order')
     .order('created_at', { ascending: false })
 
@@ -24,9 +16,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!(await checkAuth())) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const body = await request.json()
   const supabase = createAdminClient()
@@ -53,9 +43,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!(await checkAuth())) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const body = await request.json()
   const supabase = createAdminClient()
@@ -83,9 +71,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!(await checkAuth())) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const { id } = await request.json()
   const supabase = createAdminClient()
@@ -101,3 +87,4 @@ export async function DELETE(request: Request) {
 
   return NextResponse.json({ ok: true })
 }
+

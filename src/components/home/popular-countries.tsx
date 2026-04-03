@@ -4,11 +4,16 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { CountryModal } from '@/components/shop/country-modal'
 
 interface Country {
   mcc: string
   name: string
   flag_url: string | null
+}
+
+interface ProductSummary {
+  id: string; name: string; product_type: string; lowest_price: number | null
 }
 
 export function PopularCountries() {
@@ -17,6 +22,11 @@ export function PopularCountries() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+
+  // 彈窗
+  const [selectedCountry, setSelectedCountry] = useState<Country | null>(null)
+  const [products, setProducts] = useState<ProductSummary[]>([])
+  const [productsLoading, setProductsLoading] = useState(false)
 
   useEffect(() => {
     fetch('/api/shop/popular-countries')
@@ -46,6 +56,15 @@ export function PopularCountries() {
     setTimeout(updateScrollButtons, 300)
   }
 
+  async function openCountry(c: Country) {
+    setSelectedCountry(c)
+    setProducts([])
+    setProductsLoading(true)
+    const res = await fetch(`/api/shop/country-products?mcc=${c.mcc}`)
+    if (res.ok) setProducts(await res.json())
+    setProductsLoading(false)
+  }
+
   if (loading || countries.length === 0) return null
 
   return (
@@ -54,48 +73,33 @@ export function PopularCountries() {
       <p className="mt-2 text-center text-muted-foreground">最多旅客選擇的上網方案</p>
 
       <div className="mt-10 relative">
-        {/* Left Arrow (desktop only) */}
         {canScrollLeft && (
-          <button
-            onClick={() => scroll('left')}
-            className="hidden lg:flex absolute -left-5 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-white border border-border rounded-full items-center justify-center shadow-md hover:shadow-lg transition-shadow"
-          >
+          <button onClick={() => scroll('left')}
+            className="hidden lg:flex absolute -left-5 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-white border border-border rounded-full items-center justify-center shadow-md hover:shadow-lg transition-shadow">
             <ChevronLeft className="w-5 h-5" />
           </button>
         )}
 
-        {/* Countries Grid / Scroll */}
-        <div
-          ref={scrollRef}
-          onScroll={updateScrollButtons}
+        <div ref={scrollRef} onScroll={updateScrollButtons}
           className="flex gap-4 overflow-x-auto scrollbar-hide lg:overflow-x-hidden"
-          style={{ scrollSnapType: 'x mandatory' }}
-        >
+          style={{ scrollSnapType: 'x mandatory' }}>
           {countries.map((c, i) => (
-            <Link
-              key={c.mcc}
-              href={`/shop/${c.mcc}`}
-              className={`flex-shrink-0 flex flex-col items-center gap-3 p-4 rounded-xl border border-border hover:border-primary hover:shadow-md transition-all w-[calc(25%-12px)] sm:w-[calc(25%-12px)] lg:w-[calc(12.5%-14px)] ${
-                i >= 8 ? 'hidden sm:flex lg:flex' : ''
-              }`}
-              style={{ scrollSnapAlign: 'start' }}
-            >
+            <button key={c.mcc} onClick={() => openCountry(c)}
+              className={`flex-shrink-0 flex flex-col items-center gap-3 p-4 rounded-xl border border-border hover:border-primary hover:shadow-md transition-all w-[calc(25%-12px)] sm:w-[calc(25%-12px)] lg:w-[calc(12.5%-14px)] ${i >= 8 ? 'hidden sm:flex lg:flex' : ''}`}
+              style={{ scrollSnapAlign: 'start' }}>
               {c.flag_url ? (
                 <Image src={c.flag_url} alt={c.name} width={56} height={56} className="w-14 h-14 rounded-full object-cover shadow-sm" />
               ) : (
                 <div className="w-14 h-14 bg-muted rounded-full" />
               )}
               <span className="text-sm font-medium text-center">{c.name}</span>
-            </Link>
+            </button>
           ))}
         </div>
 
-        {/* Right Arrow (desktop only) */}
         {canScrollRight && (
-          <button
-            onClick={() => scroll('right')}
-            className="hidden lg:flex absolute -right-5 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-white border border-border rounded-full items-center justify-center shadow-md hover:shadow-lg transition-shadow"
-          >
+          <button onClick={() => scroll('right')}
+            className="hidden lg:flex absolute -right-5 top-1/2 -translate-y-1/2 z-10 w-10 h-10 bg-white border border-border rounded-full items-center justify-center shadow-md hover:shadow-lg transition-shadow">
             <ChevronRight className="w-5 h-5" />
           </button>
         )}
@@ -106,6 +110,16 @@ export function PopularCountries() {
           查看所有國家 &rarr;
         </Link>
       </div>
+
+      {/* 彈窗 */}
+      {selectedCountry && (
+        <CountryModal
+          country={{ mcc: selectedCountry.mcc, name: selectedCountry.name, flag_url: selectedCountry.flag_url }}
+          products={products}
+          loading={productsLoading}
+          onClose={() => setSelectedCountry(null)}
+        />
+      )}
     </section>
   )
 }

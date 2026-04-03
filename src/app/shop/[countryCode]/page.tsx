@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft, ChevronRight, ImageIcon } from 'lucide-react'
@@ -17,42 +17,33 @@ interface PackageSummary {
 
 export default function CountryPage() {
   const { countryCode } = useParams() as { countryCode: string }
+  const searchParams = useSearchParams()
+  const typeParam = searchParams.get('type') as 'esim' | 'sim' | null
+
   const [info, setInfo] = useState<CountryInfo | null>(null)
   const [packages, setPackages] = useState<PackageSummary[]>([])
   const [loading, setLoading] = useState(true)
-
-  const isCustomGroup = countryCode.startsWith('regional_') || countryCode.startsWith('global_')
+  const [isGroup, setIsGroup] = useState(false)
+  const [activeTab, setActiveTab] = useState<'esim' | 'sim'>(typeParam || 'esim')
 
   useEffect(() => {
     async function load() {
-      if (isCustomGroup) {
-        // 區域/全球方案：從 products 取資訊
-        const scope = countryCode.startsWith('global_') ? 'global' : 'regional'
-        const [groupsRes, pkgRes] = await Promise.all([
-          fetch(`/api/shop/groups?scope=${scope}`).then((r) => r.json()),
+      try {
+        const [infoRes, pkgRes] = await Promise.all([
+          fetch(`/api/shop/info?mcc=${countryCode}`).then((r) => r.json()),
           fetch(`/api/shop/country-products?mcc=${countryCode}`).then((r) => r.json()),
         ])
-        const group = (groupsRes as { name: string; icon_url: string | null; country_code: string }[])
-          .find((g) => g.country_code === countryCode)
-        if (group) {
-          setInfo({ name: group.name, icon_url: group.icon_url, flag_url: null })
-        }
-        setPackages(pkgRes)
-      } else {
-        // 本地方案
-        const [countryRes, pkgRes] = await Promise.all([
-          fetch(`/api/countries`).then((r) => r.json()),
-          fetch(`/api/shop/country-products?mcc=${countryCode}`).then((r) => r.json()),
-        ])
-        const c = (countryRes as { mcc: string; name: string; continent: string; flag_url: string | null }[])
-          .find((c) => c.mcc === countryCode)
-        if (c) setInfo({ name: c.name, continent: c.continent, flag_url: c.flag_url })
-        setPackages(pkgRes)
-      }
-      setLoading(false)
+        if (infoRes && !infoRes.error) { setInfo(infoRes); setIsGroup(!!infoRes.is_group) }
+        setPackages(Array.isArray(pkgRes) ? pkgRes : [])
+      } catch (err) { console.error(err) }
+      finally { setLoading(false) }
     }
     load()
-  }, [countryCode, isCustomGroup])
+  }, [countryCode])
+
+  const esimPackages = useMemo(() => packages.filter((p) => p.product_type === 'esim'), [packages])
+  const simPackages = useMemo(() => packages.filter((p) => p.product_type === 'sim'), [packages])
+  const displayPackages = activeTab === 'esim' ? esimPackages : simPackages
 
   if (loading) return <div className="max-w-4xl mx-auto px-4 py-16 text-center text-muted-foreground">載入中...</div>
 
@@ -75,10 +66,10 @@ export default function CountryPage() {
 
       <div className="mt-6 flex items-center gap-4">
         {displayImage ? (
-          <Image src={displayImage} alt={info.name} width={64} height={48}
-            className={`shadow ${isCustomGroup ? 'rounded-lg w-16 h-12 object-cover' : 'rounded'}`} />
+          <Image src={displayImage} alt={info.name} width={64} height={64}
+            className="w-16 h-16 rounded-full object-cover shadow" />
         ) : (
-          <div className="w-16 h-12 bg-muted rounded-lg flex items-center justify-center">
+          <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center">
             <ImageIcon className="w-6 h-6 text-muted-foreground/30" />
           </div>
         )}
@@ -88,14 +79,26 @@ export default function CountryPage() {
         </div>
       </div>
 
-      <div className="mt-8">
-        {packages.length === 0 ? (
+      {/* eSIM / SIM Tab */}
+      <div className="mt-6 flex rounded-xl overflow-hidden border border-border w-fit">
+        <button onClick={() => setActiveTab('esim')}
+          className={`px-6 py-2.5 text-sm font-semibold transition-colors ${activeTab === 'esim' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}>
+          eSIM
+        </button>
+        <button onClick={() => setActiveTab('sim')}
+          className={`px-6 py-2.5 text-sm font-semibold transition-colors ${activeTab === 'sim' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}>
+          SIM 卡
+        </button>
+      </div>
+
+      <div className="mt-6">
+        {displayPackages.length === 0 ? (
           <div className="text-center py-16 bg-muted rounded-xl">
-            <p className="text-muted-foreground">尚無上架套餐</p>
+            <p className="text-muted-foreground">暫無{activeTab === 'esim' ? 'eSIM' : 'SIM 卡'}方案</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {packages.map((pkg) => (
+            {displayPackages.map((pkg) => (
               <Link key={pkg.id} href={`/shop/${countryCode}/${pkg.id}`}
                 className="flex items-center justify-between p-5 border border-border rounded-xl hover:border-primary hover:shadow-sm transition-all">
                 <div>

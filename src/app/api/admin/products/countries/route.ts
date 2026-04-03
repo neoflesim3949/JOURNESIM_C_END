@@ -2,19 +2,23 @@ import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-export async function GET() {
+export async function GET(request: Request) {
   const cookieStore = await cookies()
   const token = cookieStore.get('admin_token')?.value
   if (token !== process.env.ADMIN_PASSWORD) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const { searchParams } = new URL(request.url)
+  const scope = searchParams.get('scope') || 'local'
+
   const supabase = createAdminClient()
 
-  // 取得所有 BC 國家
+  // 取得 BC 國家或類別群組
   const { data: countries } = await supabase
     .from('bc_countries')
-    .select('mcc, name, name_zh, continent, continent_zh, flag_url')
+    .select('mcc, name, name_zh, continent, continent_zh, flag_url, icon_url, scope')
+    .eq('scope', scope)
     .order('name')
 
   // 取得每個國家實際綁定的套餐數量（product_packages count）
@@ -42,6 +46,8 @@ export async function GET() {
     name: c.name_zh || c.name,
     continent: c.continent_zh || c.continent,
     flag_url: c.flag_url,
+    icon_url: c.icon_url,
+    scope: c.scope,
     product_count: countMap.get(c.mcc) || 0,
   }))
 

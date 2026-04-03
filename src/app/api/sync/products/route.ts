@@ -65,7 +65,14 @@ export async function POST() {
         ? skuPrices.find((t) => t.copies === '1')?.settlementPrice || null
         : null
       const enData = enMap.get(p.skuId)
-      const countries = p.country?.map((c) => ({ mcc: c.mcc, name: c.name })) || null
+      const countries = p.country?.map((c) => ({ 
+        mcc: c.mcc, 
+        name: c.name,
+        apn: c.apn,
+        apnUsername: c.apnUsername,
+        apnPassword: c.apnPassword,
+        operatorInfo: c.operatorInfo
+      })) || null
 
       return {
         sku_id: p.skuId,

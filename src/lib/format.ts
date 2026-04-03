@@ -5,11 +5,11 @@
  */
 export function formatCapacity(kb: string | null | undefined, perDay = false): string {
   if (!kb || kb === '' || kb === '-1') {
-    return perDay ? '無限/天' : '不限量'
+    return perDay ? '無限流量/天' : '無限流量'
   }
   const val = parseFloat(kb)
   if (isNaN(val) || val === -1) {
-    return perDay ? '無限/天' : '不限量'
+    return perDay ? '無限流量/天' : '無限流量'
   }
   const mb = val / 1024
   let result: string

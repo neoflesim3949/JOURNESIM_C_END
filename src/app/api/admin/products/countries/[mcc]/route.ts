@@ -18,16 +18,15 @@ export async function GET(
   // 取得國家資訊
   const { data: country } = await supabase
     .from('bc_countries')
-    .select('mcc, name, name_zh, continent, continent_zh, flag_url')
+    .select('mcc, name, name_zh, continent, continent_zh, flag_url, icon_url, scope')
     .eq('mcc', mcc)
     .single()
 
-  // 取得此國家的商品（只取 local scope）
+  // 取得此國家的商品
   const { data: products } = await supabase
     .from('products')
     .select('*')
     .eq('country_code', mcc)
-    .or('scope.eq.local,scope.is.null')
     .order('sort_order')
     .order('created_at', { ascending: false })
 
@@ -56,6 +55,8 @@ export async function GET(
     name: country.name_zh || country.name,
     continent: country.continent_zh || country.continent,
     flag_url: country.flag_url,
+    icon_url: country.icon_url,
+    scope: country.scope,
   } : null
 
   return NextResponse.json({ country: countryZh, products: productsWithCount })

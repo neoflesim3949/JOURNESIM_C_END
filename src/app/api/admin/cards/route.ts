@@ -151,5 +151,16 @@ export async function GET(request: Request) {
     }
   }
 
+  // ─── sku：從 bc_products 查詢套餐詳情 ────────────────────
+  if (action === 'sku') {
+    const skuId = searchParams.get('skuId')
+    if (!skuId) return NextResponse.json({ sku: null })
+    const { data } = await supabase.from('bc_products')
+      .select('sku_id, name, type, plan_type, high_flow_size, limit_flow_speed, capacity, hotspot_support, acceleration_support, point_contact_type, time_zone, desc, country_data')
+      .eq('sku_id', skuId)
+      .single()
+    return NextResponse.json({ sku: data || null })
+  }
+
   return NextResponse.json({ error: '無效 action' }, { status: 400 })
 }

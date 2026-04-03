@@ -6,7 +6,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft, Plus, Trash2, Package, X, Search, Zap } from 'lucide-react'
 
-interface Country { mcc: string; name: string; continent: string; flag_url: string | null }
+interface Country { mcc: string; name: string; continent: string; flag_url: string | null; icon_url: string | null; scope: string }
 interface PkgInfo { id: string; name: string; description: string | null; product_type: string; is_active: boolean; _plan_count?: number }
 
 export default function AdminCountryProductsPage() {
@@ -131,10 +131,23 @@ export default function AdminCountryProductsPage() {
       {/* Country Header */}
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {country?.flag_url ? <Image src={country.flag_url} alt={country.name} width={48} height={36} className="rounded shadow" /> : <div className="w-12 h-9 bg-gray-100 rounded" />}
+          {country?.icon_url || country?.flag_url ? (
+            <Image src={(country.icon_url || country.flag_url)!} alt={country.name} width={48} height={country.icon_url ? 48 : 36} className={`rounded ${country.icon_url ? 'w-12 h-12 object-cover' : 'shadow'}`} />
+          ) : (
+            <div className="w-12 h-12 bg-gray-100 rounded flex items-center justify-center">
+               <span className="text-gray-400 text-xs">無圖示</span>
+            </div>
+          )}
           <div>
-            <h1 className="text-2xl font-bold">{country?.name || mcc}</h1>
-            <p className="text-sm text-gray-500">{country?.continent} · {mcc}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold">{country?.name || mcc}</h1>
+              {country?.scope && country.scope !== 'local' && (
+                <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                  {country.scope === 'global' ? '全球' : '區域'}分組
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-gray-500">{country?.continent ? `${country.continent} · ` : ''}{mcc}</p>
           </div>
         </div>
         <div className="flex gap-2">

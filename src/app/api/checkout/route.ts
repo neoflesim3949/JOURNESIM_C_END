@@ -177,7 +177,14 @@ export async function POST(request: Request) {
     if (!subOrder) continue
     sub.subOrderId = subOrder.id
 
-    // =====================================================
+    // 1. 取得這批項目的當前成本價（確保利潤追蹤精確度）
+    const itemSkuIds = [...new Set(sub.items.map(i => i.bcSkuId))]
+    const { data: currentProducts } = await supabase
+      .from('bc_products')
+      .select('sku_id, cost_price')
+      .in('sku_id', itemSkuIds)
+    const costMap = new Map((currentProducts || []).map(p => [p.sku_id, Number(p.cost_price) || 0]))
+
     // L3: 建立 SKU 單號（按 SKU + copies 拆分，每個 SKU 有獨立編號）
     // =====================================================
     const skuRecords = sub.items.map((item, idx) => ({
@@ -191,6 +198,7 @@ export async function POST(request: Request) {
       copies: item.copies,
       days: item.days,
       unit_price: item.unitPrice,
+      cost_price: costMap.get(item.bcSkuId) || 0, // 記錄當時成本
       quantity: item.quantity,
       subtotal: item.unitPrice * item.quantity,
       status: sub.category === 'esim' ? 'processing' : 'pending',

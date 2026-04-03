@@ -1,100 +1,123 @@
-import { createAdminClient } from '@/lib/supabase/admin'
-import { Package, ShoppingCart, Users, Wifi } from 'lucide-react'
+'use client'
 
-export const dynamic = 'force-dynamic'
+import { useState, useEffect } from 'react'
+import { StatusCards } from '@/components/admin/dashboard/StatusCards'
+import { AnalyticsCharts } from '@/components/admin/dashboard/AnalyticsCharts'
+import { HotRankings } from '@/components/admin/dashboard/HotRankings'
+import { Loader2 } from 'lucide-react'
 
-export default async function AdminDashboard() {
-  const supabase = createAdminClient()
+export default function AdminDashboard() {
+  const [days, setDays] = useState(30)
+  const [typeFilter, setTypeFilter] = useState('all') // 'all' | 'esim' | 'sim'
+  const [aggregation, setAggregation] = useState('day') // day | month | quarter | year
+  
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
-  const [
-    { count: productCount },
-    { count: orderCount },
-    { count: memberCount },
-    { count: esimCount },
-    { count: bcProductCount },
-  ] = await Promise.all([
-    supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_active', true),
-    supabase.from('orders').select('*', { count: 'exact', head: true }),
-    supabase.from('members').select('*', { count: 'exact', head: true }),
-    supabase.from('esim_profiles').select('*', { count: 'exact', head: true }),
-    supabase.from('bc_products').select('*', { count: 'exact', head: true }),
-  ])
+  const refreshData = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/admin/dashboard?days=${days}&productType=${typeFilter}&aggregation=${aggregation}`)
+      const json = await res.json()
+      setData(json)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  const stats = [
-    { label: '上架商品', value: productCount ?? 0, icon: Package, color: 'bg-blue-100 text-blue-600' },
-    { label: '訂單數', value: orderCount ?? 0, icon: ShoppingCart, color: 'bg-green-100 text-green-600' },
-    { label: '會員數', value: memberCount ?? 0, icon: Users, color: 'bg-purple-100 text-purple-600' },
-    { label: 'eSIM 發行', value: esimCount ?? 0, icon: Wifi, color: 'bg-orange-100 text-orange-600' },
-  ]
-
-  // 最近 5 筆訂單
-  const { data: recentOrders } = await supabase
-    .from('orders')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(5)
+  useEffect(() => {
+    refreshData()
+  }, [days, typeFilter, aggregation])
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold">總覽</h1>
-
-      {/* Stats */}
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((s) => (
-          <div key={s.label} className="bg-white p-5 rounded-xl border border-gray-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-gray-500">{s.label}</div>
-                <div className="mt-1 text-2xl font-bold">{s.value}</div>
-              </div>
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${s.color}`}>
-                <s.icon className="w-5 h-5" />
-              </div>
-            </div>
+    <div className="pb-10">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 relative z-10">
+        <h1 className="text-2xl font-bold text-gray-800 tracking-tight">綜合業務儀表盤</h1>
+        
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
+            {(['day', 'month', 'quarter', 'year'] as const).map(a => (
+              <button
+                key={a}
+                onClick={() => setAggregation(a)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${aggregation === a ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                {a === 'day' ? '日' : a === 'month' ? '月' : a === 'quarter' ? '季' : '年'}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
 
-      {/* BC Products count */}
-      <div className="mt-4 bg-white p-4 rounded-xl border border-gray-200">
-        <span className="text-sm text-gray-500">BC 已同步商品：</span>
-        <span className="font-semibold ml-1">{bcProductCount ?? 0}</span>
-      </div>
-
-      {/* Recent Orders */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold">最近訂單</h2>
-        {(!recentOrders || recentOrders.length === 0) ? (
-          <p className="mt-4 text-sm text-gray-500">尚無訂單</p>
-        ) : (
-          <div className="mt-3 bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500">
-                <tr>
-                  <th className="text-left px-4 py-3 font-medium">訂單編號</th>
-                  <th className="text-left px-4 py-3 font-medium">Email</th>
-                  <th className="text-left px-4 py-3 font-medium">金額</th>
-                  <th className="text-left px-4 py-3 font-medium">狀態</th>
-                  <th className="text-left px-4 py-3 font-medium">時間</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {recentOrders.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs">{order.order_number}</td>
-                    <td className="px-4 py-3">{order.email}</td>
-                    <td className="px-4 py-3 font-medium">NT$ {order.total_amount}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100">{order.status}</span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">{new Date(order.created_at).toLocaleString('zh-TW')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex items-center bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
+            <button
+              onClick={() => setDays(7)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${days === 7 ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              近 7 天
+            </button>
+            <button
+              onClick={() => setDays(15)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${days === 15 ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              近 15 天
+            </button>
+            <button
+              onClick={() => setDays(30)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${days === 30 ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              近 30 天
+            </button>
           </div>
-        )}
+
+          <div className="flex items-center bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
+            <button
+              onClick={() => setTypeFilter('all')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${typeFilter === 'all' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+            >
+              全部
+            </button>
+            <button
+              onClick={() => setTypeFilter('esim')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${typeFilter === 'esim' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+            >
+              eSIM
+            </button>
+            <button
+              onClick={() => setTypeFilter('sim')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${typeFilter === 'sim' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}
+            >
+              SIM
+            </button>
+          </div>
+        </div>
       </div>
+
+      {loading && !data ? (
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        </div>
+      ) : data ? (
+        <div className={`transition-opacity duration-300 ${loading ? 'opacity-50' : 'opacity-100'}`}>
+          <StatusCards 
+            summary={data.summary} 
+            balance={data.balance} 
+            realtime={data.realtime} 
+            onRefreshBalance={refreshData}
+          />
+          <AnalyticsCharts 
+            trend={data.trend} 
+            distribution={data.distribution} 
+          />
+          <HotRankings 
+            hotPlans={data.hotPlansTree} 
+          />
+        </div>
+      ) : (
+        <div className="text-center py-12 text-gray-500">
+          無法載入儀表盤數據
+        </div>
+      )}
     </div>
   )
 }

@@ -1,19 +1,14 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
-
-async function checkAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
-}
+import { checkAdminAuth, getUnauthorizedResponse } from '@/lib/admin'
 
 export async function GET() {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('bc_countries')
-    .select('id, mcc, name, name_zh, name_en, continent, continent_zh, continent_en, flag_url, created_at')
+    .select('id, mcc, name, name_zh, name_en, continent, continent_zh, continent_en, flag_url, scope, created_at')
     .order('name')
 
   return NextResponse.json(data || [])
@@ -21,15 +16,20 @@ export async function GET() {
 
 // PATCH — 手動修改國家名稱翻譯
 export async function PATCH(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const body = await request.json()
-  const { id, name_zh, name_en, continent_zh, continent_en } = body
+  const { id, mcc, name, name_zh, name_en, continent, continent_zh, continent_en } = body
 
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
 
   const supabase = createAdminClient()
   const updates: Record<string, unknown> = {}
+  
+  if (mcc !== undefined) updates.mcc = mcc
+  if (name !== undefined) updates.name = name
+  if (continent !== undefined) updates.continent = continent
+  
   if (name_zh !== undefined) updates.name_zh = name_zh
   if (name_en !== undefined) updates.name_en = name_en
   if (continent_zh !== undefined) updates.continent_zh = continent_zh
@@ -40,3 +40,4 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({ ok: true })
 }
+

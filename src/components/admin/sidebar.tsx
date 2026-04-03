@@ -16,7 +16,8 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { href: '/admin', label: '總覽', icon: LayoutDashboard },
+  { href: '/admin', label: '儀表盤', icon: LayoutDashboard },
+  { href: '/admin/core-dashboard', label: '核心儀表盤', icon: RefreshCw },
   {
     href: '/admin/products', label: '商品管理', icon: Package,
     children: [

@@ -1,72 +1,25 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLowestPricesByMcc } from '@/lib/pricing'
 
 export async function GET() {
   const supabase = createAdminClient()
 
+  // 1. 取得本地標籤的國家清單 (只抓取必要欄位)
   const { data: countriesRaw } = await supabase
     .from('bc_countries')
     .select('mcc, name, name_zh, continent, continent_zh, flag_url')
+    .or('scope.eq.local,scope.is.null')
     .order('name')
 
-  // 計算每個國家的起價（透過 products → product_packages → packages → package_plans → package_plan_prices）
-  const { data: products } = await supabase
-    .from('products')
-    .select('id, country_code')
-    .not('is_active', 'eq', false)
-    .or('scope.eq.local,scope.is.null')
+  if (!countriesRaw || countriesRaw.length === 0) return NextResponse.json([])
 
-  const productIds = (products || []).map((p) => p.id)
-  const pidToMcc = new Map((products || []).map((p) => [p.id, p.country_code]))
+  // 2. 使用共享工具計算起價
+  const countryMccs = countriesRaw.map(c => c.mcc)
+  const lowestByMcc = await getLowestPricesByMcc(supabase, countryMccs)
 
-  const lowestByMcc = new Map<string, number>()
-
-  if (productIds.length > 0) {
-    const { data: links } = await supabase
-      .from('product_packages')
-      .select('product_id, package_id')
-      .in('product_id', productIds)
-
-    const packageIds = [...new Set((links || []).map((l) => l.package_id))]
-    const pkgToMccs = new Map<string, Set<string>>()
-    for (const l of links || []) {
-      const mcc = pidToMcc.get(l.product_id)
-      if (!mcc) continue
-      if (!pkgToMccs.has(l.package_id)) pkgToMccs.set(l.package_id, new Set())
-      pkgToMccs.get(l.package_id)!.add(mcc)
-    }
-
-    if (packageIds.length > 0) {
-      const { data: plans } = await supabase
-        .from('package_plans')
-        .select('id, package_id')
-        .in('package_id', packageIds)
-
-      const planIds = (plans || []).map((p) => p.id)
-      const planToPkg = new Map((plans || []).map((p) => [p.id, p.package_id]))
-
-      if (planIds.length > 0) {
-        const { data: prices } = await supabase
-          .from('package_plan_prices')
-          .select('package_plan_id, sell_price')
-          .in('package_plan_id', planIds)
-          .gt('sell_price', 0)
-
-        for (const pr of prices || []) {
-          const pkgId = planToPkg.get(pr.package_plan_id)
-          if (!pkgId) continue
-          const mccs = pkgToMccs.get(pkgId)
-          if (!mccs) continue
-          for (const mcc of mccs) {
-            const cur = lowestByMcc.get(mcc)
-            if (!cur || pr.sell_price < cur) lowestByMcc.set(mcc, pr.sell_price)
-          }
-        }
-      }
-    }
-  }
-
-  const result = (countriesRaw || []).map((c) => ({
+  // 3. 組裝結果
+  const result = countriesRaw.map((c) => ({
     mcc: c.mcc,
     name: c.name_zh || c.name,
     continent: c.continent_zh || c.continent,
@@ -76,3 +29,4 @@ export async function GET() {
 
   return NextResponse.json(result)
 }
+

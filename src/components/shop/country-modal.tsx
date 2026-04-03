@@ -31,10 +31,6 @@ export function CountryModal({ country, products, loading, onClose, defaultTab =
   const esimProducts = useMemo(() => products.filter((p) => p.product_type === 'esim'), [products])
   const simProducts = useMemo(() => products.filter((p) => p.product_type === 'sim'), [products])
 
-  const hasEsim = esimProducts.length > 0
-  const hasSim = simProducts.length > 0
-  const hasBothTypes = hasEsim && hasSim
-
   const [activeTab, setActiveTab] = useState<'esim' | 'sim'>(defaultTab)
 
   const displayProducts = activeTab === 'esim' ? esimProducts : simProducts
@@ -58,27 +54,17 @@ export function CountryModal({ country, products, loading, onClose, defaultTab =
             </button>
           </div>
 
-          {/* Tabs */}
-          {hasBothTypes && (
-            <div className="mt-4 flex rounded-lg overflow-hidden border border-border">
-              <button
-                onClick={() => setActiveTab('esim')}
-                className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${
-                  activeTab === 'esim' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'
-                }`}
-              >
-                eSIM
-              </button>
-              <button
-                onClick={() => setActiveTab('sim')}
-                className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${
-                  activeTab === 'sim' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'
-                }`}
-              >
-                SIM 卡
-              </button>
-            </div>
-          )}
+          {/* Tabs — 永遠顯示 */}
+          <div className="mt-4 flex rounded-lg overflow-hidden border border-border">
+            <button onClick={() => setActiveTab('esim')}
+              className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${activeTab === 'esim' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}>
+              eSIM
+            </button>
+            <button onClick={() => setActiveTab('sim')}
+              className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${activeTab === 'sim' ? 'bg-primary text-white' : 'bg-white text-foreground hover:bg-muted'}`}>
+              SIM 卡
+            </button>
+          </div>
 
         </div>
 
