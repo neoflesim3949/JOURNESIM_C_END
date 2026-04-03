@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-async function checkAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
-}
 
 // PATCH — 批量更新售價 或 方案名稱/排序
 export async function PATCH(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
   const supabase = createAdminClient()
@@ -43,7 +39,7 @@ export async function PATCH(request: Request) {
 
 // DELETE — 移除套餐中的 BC 商品
 export async function DELETE(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { plan_id } = await request.json()
   const supabase = createAdminClient()

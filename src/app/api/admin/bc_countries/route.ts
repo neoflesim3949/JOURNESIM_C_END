@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies()
-  if (cookieStore.get('admin_token')?.value !== process.env.ADMIN_PASSWORD) {
+  
+  if (!(await checkAdminAuth())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -38,8 +38,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies()
-  if (cookieStore.get('admin_token')?.value !== process.env.ADMIN_PASSWORD) {
+  
+  if (!(await checkAdminAuth())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -73,8 +73,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const cookieStore = await cookies()
-  if (cookieStore.get('admin_token')?.value !== process.env.ADMIN_PASSWORD) {
+  
+  if (!(await checkAdminAuth())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

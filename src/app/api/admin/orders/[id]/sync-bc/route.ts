@@ -1,19 +1,15 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getOrderInfo } from '@/lib/billionconnect'
 
-async function checkAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
-}
 
 // POST — 手動從 BC F011 同步訂單狀態
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: orderId } = await params
   const supabase = createAdminClient()

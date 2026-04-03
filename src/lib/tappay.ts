@@ -149,13 +149,13 @@ export async function payByToken(params: {
   email: string
   details?: string
 }): Promise<{ success: boolean; trade_id: string; raw: PayByTokenResponse }> {
-  const { partnerKey, baseUrl } = await getTapPayConfig()
+  const { settings, partnerKey, baseUrl } = await getTapPayConfig()
 
   const body = {
     card_key: params.cardKey,
     card_token: params.cardToken,
     partner_key: partnerKey,
-    merchant_id: process.env.TAPPAY_MERCHANT_ID,
+    merchant_id: getMerchantId(settings, 'credit_card'),
     amount: params.amount,
     currency: 'TWD',
     details: params.details || 'FLESIM eSIM',

@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getCardExpiry, getPlanUsageV2, getDailyTraffic } from '@/lib/billionconnect'
 
-async function checkAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
-}
 
 export async function GET(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
   const action = searchParams.get('action') // list | expiry | usage | traffic

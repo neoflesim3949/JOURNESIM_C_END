@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-async function checkAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
-}
 
 // GET — 列出所有套餐
 export async function GET() {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const supabase = createAdminClient()
   const { data: packages } = await supabase
@@ -64,7 +60,7 @@ export async function GET() {
 
 // POST — 建立套餐
 export async function POST(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
   const supabase = createAdminClient()
@@ -81,7 +77,7 @@ export async function POST(request: Request) {
 
 // PATCH — 更新套餐
 export async function PATCH(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
   const supabase = createAdminClient()
@@ -98,7 +94,7 @@ export async function PATCH(request: Request) {
 
 // DELETE — 刪除套餐（級聯刪除關聯資料）
 export async function DELETE(request: Request) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await request.json()
   const supabase = createAdminClient()

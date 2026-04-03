@@ -1,19 +1,15 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createEsimOrder, createRechargeOrder } from '@/lib/billionconnect'
 
-async function checkAuth() {
-  const cookieStore = await cookies()
-  return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
-}
 
 // POST — 批次儲存 ICCID 並送出 BC 訂單
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: orderId } = await params
   const { sub_order_id } = await request.json()

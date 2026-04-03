@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
+import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ESIM_TYPES, SIM_TYPES } from '@/lib/bc-enums'
 
 const FIELDS = 'sku_id, name, type, plan_type, high_flow_size, rechargeable_product'
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies()
-  if (cookieStore.get('admin_token')?.value !== process.env.ADMIN_PASSWORD) {
+  
+  if (!(await checkAdminAuth())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
