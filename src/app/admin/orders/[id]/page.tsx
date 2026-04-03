@@ -77,6 +77,12 @@ export default function AdminOrderDetailPage() {
     load()
   }
 
+  async function batchSave(subOrderId: string) {
+    // TODO: 收集所有有 ICCID 值的 SKU，批次儲存並呼叫 BC API
+    alert('批次儲存功能開發中 — 將收集所有已填入的 ICCID 並送出 BC 訂單')
+    load()
+  }
+
   if (loading) return <div className="text-gray-500">載入中...</div>
   if (!order) return <div>找不到訂單</div>
 
@@ -120,7 +126,7 @@ export default function AdminOrderDetailPage() {
       {subOrders.length > 0 ? (
         <div className="mt-6 space-y-6">
           {subOrders.map((sub) => (
-            <SubOrderCard key={sub.id} sub={sub} onUpdateSub={updateSubOrder} onUpdateSku={updateSku} />
+            <SubOrderCard key={sub.id} sub={sub} onUpdateSub={updateSubOrder} onUpdateSku={updateSku} onBatchSave={batchSave} />
           ))}
         </div>
       ) : hasOldItems && (
@@ -132,10 +138,11 @@ export default function AdminOrderDetailPage() {
   )
 }
 
-function SubOrderCard({ sub, onUpdateSub, onUpdateSku }: {
+function SubOrderCard({ sub, onUpdateSub, onUpdateSku, onBatchSave }: {
   sub: SubOrder
   onUpdateSub: (id: string, updates: Record<string, unknown>) => void
   onUpdateSku: (id: string, updates: Record<string, unknown>) => void
+  onBatchSave: (subOrderId: string) => void
 }) {
   const isEsim = sub.category === 'esim'
   const [trackingInput, setTrackingInput] = useState(sub.tracking_number || '')
@@ -191,16 +198,30 @@ function SubOrderCard({ sub, onUpdateSub, onUpdateSku }: {
         </div>
       )}
 
+      {/* 批次儲存按鈕 */}
+      <div className="px-4 py-3 bg-blue-50/50 border-b border-gray-100 flex items-center justify-between">
+        <span className="text-xs text-gray-500">
+          {isEsim ? '填入 ICCID + LPA Code 後儲存' : '填入所有 SIM 卡 ICCID 後批次儲存並送出 BC 訂單'}
+        </span>
+        <button onClick={() => onBatchSave(sub.id)}
+          className={`px-4 py-1.5 text-xs font-medium rounded flex items-center gap-1 ${
+            isEsim ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-green-600 text-white hover:bg-green-700'
+          }`}>
+          <Save className="w-3.5 h-3.5" /> 批次儲存
+        </button>
+      </div>
+
       {/* L3: SKU 列表 */}
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-gray-500">
           <tr>
-            <th className="text-left px-4 py-2 font-medium">SKU</th>
+            <th className="text-left px-4 py-2 font-medium">商品 / SKU</th>
             <th className="text-left px-4 py-2 font-medium w-16">Copies</th>
             <th className="text-left px-4 py-2 font-medium w-16">數量</th>
             <th className="text-left px-4 py-2 font-medium w-20">小計</th>
-            <th className="text-left px-4 py-2 font-medium w-48">{isEsim ? 'ICCID / QR Code' : 'SIM ICCID'}</th>
+            <th className="text-left px-4 py-2 font-medium">{isEsim ? 'ICCID / LPA Code' : 'SIM ICCID'}</th>
             <th className="text-left px-4 py-2 font-medium w-20">狀態</th>
+            <th className="text-left px-4 py-2 font-medium w-24">BC 單號</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -216,11 +237,11 @@ function SubOrderCard({ sub, onUpdateSub, onUpdateSku }: {
 function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onUpdate: (id: string, updates: Record<string, unknown>) => void }) {
   const existingIccids = isEsim ? (sku.iccid || []) : (sku.sim_iccid || [])
   const [iccids, setIccids] = useState<string[]>(() => {
-    // 初始化：已有的 ICCID 填入，不足的補空字串
     const arr = [...existingIccids]
     while (arr.length < sku.quantity) arr.push('')
     return arr
   })
+  const [lpaCode, setLpaCode] = useState(sku.lpa_code || '')
   const [saving, setSaving] = useState(false)
 
   function updateIccid(idx: number, val: string) {
@@ -232,9 +253,16 @@ function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onU
     const filled = iccids.filter(Boolean)
     const allFilled = filled.length === sku.quantity
     if (isEsim) {
-      onUpdate(sku.id, { iccid: filled.length > 0 ? filled : null, status: allFilled ? 'completed' : 'processing' })
+      onUpdate(sku.id, {
+        iccid: filled.length > 0 ? filled : null,
+        lpa_code: lpaCode || null,
+        status: allFilled ? 'completed' : 'processing',
+      })
     } else {
-      onUpdate(sku.id, { sim_iccid: filled.length > 0 ? filled : null, status: allFilled ? 'card_assigned' : 'pending' })
+      onUpdate(sku.id, {
+        sim_iccid: filled.length > 0 ? filled : null,
+        status: allFilled ? 'card_assigned' : 'pending',
+      })
     }
     setSaving(false)
   }
@@ -242,7 +270,7 @@ function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onU
   return (
     <tr className="hover:bg-gray-50 align-top">
       <td className="px-4 py-2">
-        <div className="font-medium text-xs">{sku.bc_sku_name || sku.bc_sku_id}</div>
+        <div className="font-medium text-xs">{sku.bc_sku_name || '-'}</div>
         <div className="text-[10px] text-gray-400 font-mono">{sku.bc_sku_id}</div>
         {sku.sku_number && <div className="text-[10px] text-blue-500 font-mono mt-0.5">{sku.sku_number}</div>}
       </td>
@@ -255,18 +283,29 @@ function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onU
             <div key={i} className="flex items-center gap-1">
               <span className="text-[10px] text-gray-400 w-4">{i + 1}</span>
               <input value={val} onChange={(e) => updateIccid(i, e.target.value)}
-                placeholder={isEsim ? 'eSIM ICCID' : 'SIM 卡 ICCID'}
+                placeholder={isEsim ? 'ICCID' : 'SIM ICCID'}
                 className={`flex-1 px-2 py-1 border rounded text-xs font-mono ${val ? 'border-green-300 bg-green-50' : 'border-gray-200'}`} />
             </div>
           ))}
+          {isEsim && (
+            <input value={lpaCode} onChange={(e) => setLpaCode(e.target.value)}
+              placeholder="LPA Code (QR Code Content)"
+              className={`w-full px-2 py-1 border rounded text-xs font-mono ${lpaCode ? 'border-green-300 bg-green-50' : 'border-gray-200'}`} />
+          )}
           <button onClick={handleSave} disabled={saving}
             className="mt-1 w-full px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1">
             <Save className="w-3 h-3" /> 儲存 ({iccids.filter(Boolean).length}/{sku.quantity})
           </button>
         </div>
-        {sku.bc_sub_order_id && <div className="text-[10px] text-gray-400 mt-1">BC: {sku.bc_sub_order_id}</div>}
       </td>
       <td className="px-4 py-2"><StatusBadge status={sku.status} /></td>
+      <td className="px-4 py-2">
+        {sku.bc_sub_order_id ? (
+          <span className="text-[10px] text-green-600 font-mono">{sku.bc_sub_order_id}</span>
+        ) : (
+          <span className="text-[10px] text-gray-300">—</span>
+        )}
+      </td>
     </tr>
   )
 }
