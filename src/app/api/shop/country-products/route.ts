@@ -19,31 +19,61 @@ export async function GET(request: Request) {
 
   if (!products || products.length === 0) return NextResponse.json([])
 
-  // 取每個方案的最低售價
+  // 取得每個方案關聯的套餐（新架構：product_packages → packages → package_plans → package_plan_prices）
   const productIds = products.map((p) => p.id)
-  const { data: plans } = await supabase
-    .from('product_plans')
-    .select('product_id, id')
+
+  const { data: productPkgLinks } = await supabase
+    .from('product_packages')
+    .select('product_id, package_id')
     .in('product_id', productIds)
 
-  const planIds = (plans || []).map((p) => p.id)
-  const planProductMap = new Map((plans || []).map((p) => [p.id, p.product_id]))
+  if (!productPkgLinks || productPkgLinks.length === 0) {
+    // 沒有新架構的資料，fallback 試舊架構
+    return NextResponse.json(products.map((p) => ({
+      id: p.id, name: p.name, product_type: p.product_type, lowest_price: null,
+    })))
+  }
 
+  // 取得所有關聯的套餐 ID
+  const packageIds = [...new Set(productPkgLinks.map((l) => l.package_id))]
+
+  // 取得套餐下的 plan IDs
+  const { data: packagePlans } = await supabase
+    .from('package_plans')
+    .select('id, package_id')
+    .in('package_id', packageIds)
+
+  const planIds = (packagePlans || []).map((p) => p.id)
+  // plan_id → package_id
+  const planToPkg = new Map((packagePlans || []).map((p) => [p.id, p.package_id]))
+  // package_id → product_ids
+  const pkgToProducts = new Map<string, Set<string>>()
+  for (const link of productPkgLinks) {
+    if (!pkgToProducts.has(link.package_id)) pkgToProducts.set(link.package_id, new Set())
+    pkgToProducts.get(link.package_id)!.add(link.product_id)
+  }
+
+  // 取得最低售價
   let lowestPrices = new Map<string, number>()
 
   if (planIds.length > 0) {
     const { data: prices } = await supabase
-      .from('product_plan_prices')
-      .select('product_plan_id, sell_price')
-      .in('product_plan_id', planIds)
+      .from('package_plan_prices')
+      .select('package_plan_id, sell_price')
+      .in('package_plan_id', planIds)
       .gt('sell_price', 0)
 
     for (const p of prices || []) {
-      const productId = planProductMap.get(p.product_plan_id)
-      if (!productId) continue
-      const current = lowestPrices.get(productId)
-      if (!current || p.sell_price < current) {
-        lowestPrices.set(productId, p.sell_price)
+      const pkgId = planToPkg.get(p.package_plan_id)
+      if (!pkgId) continue
+      const productIdSet = pkgToProducts.get(pkgId)
+      if (!productIdSet) continue
+
+      for (const productId of productIdSet) {
+        const current = lowestPrices.get(productId)
+        if (!current || p.sell_price < current) {
+          lowestPrices.set(productId, p.sell_price)
+        }
       }
     }
   }

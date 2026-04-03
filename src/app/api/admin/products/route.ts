@@ -39,6 +39,7 @@ export async function POST(request: Request) {
       country_code: body.country_code,
       country_name: body.country_name,
       product_type: body.product_type || 'esim',
+      scope: body.scope || 'local',
       sort_order: body.sort_order || 0,
     })
     .select()
