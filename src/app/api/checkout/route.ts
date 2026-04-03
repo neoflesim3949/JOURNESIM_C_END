@@ -203,7 +203,7 @@ export async function POST(request: Request) {
       copies: item.copies,
       days: item.days,
       unit_price: item.unitPrice,
-      cost_price: Math.ceil((costCnyMap.get(`${item.planId}_${item.copies}`) || 0) * cnyRate), // 成本 TWD（結帳當下匯率鎖定）
+      cost_price: Math.ceil((costCnyMap.get(`${item.planId}_${item.copies}`) || 0) / cnyRate), // 成本 TWD = CNY / rate（結帳當下匯率鎖定）
       quantity: item.quantity,
       subtotal: item.unitPrice * item.quantity,
       status: sub.category === 'esim' ? 'processing' : 'pending',
