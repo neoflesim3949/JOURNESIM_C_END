@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Wifi, CreditCard, Truck, Save } from 'lucide-react'
+import { ArrowLeft, Wifi, CreditCard, Truck, Save, RefreshCw } from 'lucide-react'
 
 interface Order {
   id: string; order_number: string; email: string; status: string
@@ -93,6 +93,23 @@ export default function AdminOrderDetailPage() {
     load()
   }
 
+  const [syncing, setSyncing] = useState(false)
+
+  async function syncBC() {
+    setSyncing(true)
+    const res = await fetch(`/api/admin/orders/${id}/sync-bc`, { method: 'POST' })
+    const data = await res.json()
+    if (res.ok) {
+      const ok = data.results?.filter((r: { synced: boolean }) => r.synced).length || 0
+      const fail = data.results?.filter((r: { synced: boolean }) => !r.synced).length || 0
+      alert(`同步完成：${ok} 成功，${fail} 失敗`)
+    } else {
+      alert(data.error || '同步失敗')
+    }
+    setSyncing(false)
+    load()
+  }
+
   if (loading) return <div className="text-gray-500">載入中...</div>
   if (!order) return <div>找不到訂單</div>
 
@@ -104,7 +121,15 @@ export default function AdminOrderDetailPage() {
         <ArrowLeft className="w-4 h-4" /> 返回訂單列表
       </Link>
 
-      <h1 className="mt-4 text-2xl font-bold">訂單詳情</h1>
+      <div className="mt-4 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">訂單詳情</h1>
+        {subOrders.some((s) => s.bc_order_id) && (
+          <button onClick={syncBC} disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> 同步 BC 狀態
+          </button>
+        )}
+      </div>
 
       {/* L1: 主訂單資訊 */}
       <div className="mt-6 bg-white p-6 rounded-xl border border-gray-200">
