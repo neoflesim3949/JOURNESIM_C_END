@@ -1,0 +1,3 @@
+-- ICCID 改為 JSONB 陣列（支援多張卡號）
+ALTER TABLE order_skus ALTER COLUMN sim_iccid TYPE JSONB USING CASE WHEN sim_iccid IS NOT NULL THEN to_jsonb(ARRAY[sim_iccid]) ELSE NULL END;
+ALTER TABLE order_skus ALTER COLUMN iccid TYPE JSONB USING CASE WHEN iccid IS NOT NULL THEN to_jsonb(ARRAY[iccid]) ELSE NULL END;

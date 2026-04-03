@@ -15,8 +15,8 @@ interface Order {
 interface OrderSku {
   id: string; bc_sku_id: string; bc_sku_name: string | null; copies: string
   days: number | null; unit_price: number; quantity: number; subtotal: number
-  iccid: string | null; qr_code_url: string | null; lpa_code: string | null
-  sim_iccid: string | null; bc_sub_order_id: string | null; status: string
+  iccid: string[] | null; qr_code_url: string | null; lpa_code: string | null
+  sim_iccid: string[] | null; bc_sub_order_id: string | null; status: string
 }
 
 interface SubOrder {
@@ -214,21 +214,33 @@ function SubOrderCard({ sub, onUpdateSub, onUpdateSku }: {
 }
 
 function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onUpdate: (id: string, updates: Record<string, unknown>) => void }) {
-  const [iccidInput, setIccidInput] = useState(isEsim ? (sku.iccid || '') : (sku.sim_iccid || ''))
+  const existingIccids = isEsim ? (sku.iccid || []) : (sku.sim_iccid || [])
+  const [iccids, setIccids] = useState<string[]>(() => {
+    // 初始化：已有的 ICCID 填入，不足的補空字串
+    const arr = [...existingIccids]
+    while (arr.length < sku.quantity) arr.push('')
+    return arr
+  })
   const [saving, setSaving] = useState(false)
+
+  function updateIccid(idx: number, val: string) {
+    const arr = [...iccids]; arr[idx] = val; setIccids(arr)
+  }
 
   async function handleSave() {
     setSaving(true)
+    const filled = iccids.filter(Boolean)
+    const allFilled = filled.length === sku.quantity
     if (isEsim) {
-      await onUpdate(sku.id, { iccid: iccidInput, status: iccidInput ? 'completed' : 'processing' })
+      onUpdate(sku.id, { iccid: filled.length > 0 ? filled : null, status: allFilled ? 'completed' : 'processing' })
     } else {
-      await onUpdate(sku.id, { sim_iccid: iccidInput, status: iccidInput ? 'card_assigned' : 'pending' })
+      onUpdate(sku.id, { sim_iccid: filled.length > 0 ? filled : null, status: allFilled ? 'card_assigned' : 'pending' })
     }
     setSaving(false)
   }
 
   return (
-    <tr className="hover:bg-gray-50">
+    <tr className="hover:bg-gray-50 align-top">
       <td className="px-4 py-2">
         <div className="font-medium text-xs">{sku.bc_sku_name || sku.bc_sku_id}</div>
         <div className="text-[10px] text-gray-400 font-mono">{sku.bc_sku_id}</div>
@@ -237,16 +249,21 @@ function SkuRow({ sku, isEsim, onUpdate }: { sku: OrderSku; isEsim: boolean; onU
       <td className="px-4 py-2 text-xs">{sku.quantity}</td>
       <td className="px-4 py-2 text-xs font-medium">NT$ {sku.subtotal}</td>
       <td className="px-4 py-2">
-        <div className="flex items-center gap-1">
-          <input value={iccidInput} onChange={(e) => setIccidInput(e.target.value)}
-            placeholder={isEsim ? 'eSIM ICCID' : 'SIM 卡 ICCID'}
-            className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs font-mono" />
+        <div className="space-y-1">
+          {iccids.map((val, i) => (
+            <div key={i} className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-400 w-4">{i + 1}</span>
+              <input value={val} onChange={(e) => updateIccid(i, e.target.value)}
+                placeholder={isEsim ? 'eSIM ICCID' : 'SIM 卡 ICCID'}
+                className={`flex-1 px-2 py-1 border rounded text-xs font-mono ${val ? 'border-green-300 bg-green-50' : 'border-gray-200'}`} />
+            </div>
+          ))}
           <button onClick={handleSave} disabled={saving}
-            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 disabled:opacity-50">
-            <Save className="w-3 h-3" />
+            className="mt-1 w-full px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-1">
+            <Save className="w-3 h-3" /> 儲存 ({iccids.filter(Boolean).length}/{sku.quantity})
           </button>
         </div>
-        {sku.bc_sub_order_id && <div className="text-[10px] text-gray-400 mt-0.5">BC: {sku.bc_sub_order_id}</div>}
+        {sku.bc_sub_order_id && <div className="text-[10px] text-gray-400 mt-1">BC: {sku.bc_sub_order_id}</div>}
       </td>
       <td className="px-4 py-2"><StatusBadge status={sku.status} /></td>
     </tr>
