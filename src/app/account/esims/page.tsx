@@ -13,20 +13,20 @@ interface CardItem {
 
 interface CardDetail {
   iccid: string
-  expiry: { iccid: string; status: string; expirationDate: string; type: string } | null
-  service_status: { esimStatus?: string; profileStatus?: string } | null
-}
-
-interface PlanUsage {
-  iccid: string
+  expiry: { iccid: string; status: string; expirationDate: string; type: string; usageCount?: string } | null
+  service_status: { esimStatus?: string; profileStatus?: string; qrCodeUrl?: string; qrCodeContent?: string } | null
   usage: {
     orderId: string; channelOrderId: string
     subOrderList: {
       skuName: string; planStatus: string; planStartTime?: string; planEndTime?: string
-      totalDays?: string; totalTraffic?: string; highFlowSize?: string
+      totalDays?: string; totalTraffic?: string; highFlowSize?: string; planType?: string
       usageInfoList?: { useDate: string; useageAmt: string }[]
     }[]
   } | null
+  traffic: { usedDate: string; type: string; usedAmount: string; country: string }[]
+  verify: { iccid: string; iccidStatus?: string; iccidType?: string; rechargeableProduct?: string } | null
+  real_name: { iccid: string; realNameStatus?: string; realNameType?: string } | null
+  recharge_products: { iccidValidity?: string; skuId?: string[] } | null
 }
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -45,7 +45,6 @@ export default function MyCardsPage() {
   const [loading, setLoading] = useState(true)
   const [selectedCard, setSelectedCard] = useState<string | null>(null)
   const [detail, setDetail] = useState<CardDetail | null>(null)
-  const [usage, setUsage] = useState<PlanUsage | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
   useEffect(() => {
@@ -59,15 +58,9 @@ export default function MyCardsPage() {
     setSelectedCard(iccid)
     setLoadingDetail(true)
     setDetail(null)
-    setUsage(null)
 
-    const [detailRes, usageRes] = await Promise.all([
-      fetch(`/api/shop/cards?action=detail&iccid=${iccid}`).then((r) => r.json()).catch(() => null),
-      fetch(`/api/shop/cards?action=usage&iccid=${iccid}`).then((r) => r.json()).catch(() => null),
-    ])
-
-    setDetail(detailRes)
-    setUsage(usageRes)
+    const res = await fetch(`/api/shop/cards?action=detail&iccid=${iccid}`).then((r) => r.json()).catch(() => null)
+    setDetail(res)
     setLoadingDetail(false)
   }
 
@@ -185,13 +178,13 @@ export default function MyCardsPage() {
                 )}
 
                 {/* 套餐使用資訊 */}
-                {usage?.usage?.subOrderList && usage.usage.subOrderList.length > 0 && (
+                {detail?.usage?.subOrderList && detail.usage.subOrderList.length > 0 && (
                   <div className="bg-white border border-border rounded-xl p-5">
                     <div className="flex items-center gap-2 text-sm font-medium mb-3">
                       <Database className="w-4 h-4 text-green-500" /> 套餐使用資訊
                     </div>
                     <div className="space-y-3">
-                      {usage.usage.subOrderList.map((plan, i) => (
+                      {detail.usage.subOrderList.map((plan, i) => (
                         <div key={i} className="p-3 bg-muted rounded-lg text-sm">
                           <div className="font-medium">{plan.skuName}</div>
                           <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
@@ -216,6 +209,67 @@ export default function MyCardsPage() {
                             </div>
                           )}
                         </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 日流量 (F023) */}
+                {detail?.traffic && detail.traffic.length > 0 && (
+                  <div className="bg-white border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <Database className="w-4 h-4 text-purple-500" /> 近 7 日流量
+                    </div>
+                    <div className="space-y-1">
+                      {detail.traffic.map((t, i) => (
+                        <div key={i} className="flex justify-between text-xs py-1 border-b border-border last:border-0">
+                          <span className="text-muted-foreground">{t.usedDate}</span>
+                          <span>{t.usedAmount} · {t.country}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ICCID 驗證 (F013) */}
+                {detail?.verify && (
+                  <div className="bg-white border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <Smartphone className="w-4 h-4 text-gray-500" /> ICCID 資訊
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><span className="text-muted-foreground">狀態：</span>{detail.verify.iccidStatus || '-'}</div>
+                      <div><span className="text-muted-foreground">類型：</span>{detail.verify.iccidType || '-'}</div>
+                      <div><span className="text-muted-foreground">可複充：</span>{detail.verify.rechargeableProduct === '1' ? '是' : '否'}</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 實名認證 (F054) */}
+                {detail?.real_name && (
+                  <div className="bg-white border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <CreditCard className="w-4 h-4 text-red-500" /> 實名認證
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><span className="text-muted-foreground">狀態：</span>{detail.real_name.realNameStatus || '-'}</div>
+                      <div><span className="text-muted-foreground">類型：</span>{detail.real_name.realNameType || '-'}</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 可充值商品 (F052) */}
+                {detail?.recharge_products?.skuId && detail.recharge_products.skuId.length > 0 && (
+                  <div className="bg-white border border-border rounded-xl p-5">
+                    <div className="flex items-center gap-2 text-sm font-medium mb-3">
+                      <RefreshCw className="w-4 h-4 text-orange-500" /> 可充值方案
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      卡片有效期至：{detail.recharge_products.iccidValidity || '-'}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {detail.recharge_products.skuId.map((sku) => (
+                        <span key={sku} className="px-2 py-0.5 bg-muted rounded text-xs font-mono">{sku}</span>
                       ))}
                     </div>
                   </div>

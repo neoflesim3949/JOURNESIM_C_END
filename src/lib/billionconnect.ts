@@ -183,6 +183,13 @@ export async function getPlanUsageV2(params: {
 }
 
 // =====================================================
+// F013 — ICCID 驗證
+// =====================================================
+export async function verifyIccid(iccid: string) {
+  return callBC<BCIccidVerify>('F013', { iccid })
+}
+
+// =====================================================
 // F042 — 查詢 eSIM 服務狀態
 // =====================================================
 export async function getEsimServiceStatus(iccid: string) {
@@ -439,6 +446,13 @@ export interface BCPlanUsageV2 {
   orderId: string
   channelOrderId: string
   subOrderList: BCPlanUsageV2Sub[]
+}
+
+export interface BCIccidVerify {
+  iccid: string
+  iccidStatus?: string
+  iccidType?: string
+  rechargeableProduct?: string
 }
 
 export interface BCEsimServiceStatus {

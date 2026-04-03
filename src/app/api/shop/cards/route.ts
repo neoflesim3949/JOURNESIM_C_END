@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getCardExpiry, getPlanUsageV2, getEsimServiceStatus, getDailyTraffic } from '@/lib/billionconnect'
+import { getCardExpiry, getPlanUsageV2, getEsimServiceStatus, getDailyTraffic, verifyIccid, getRealNameStatus, getEsimRechargeProducts } from '@/lib/billionconnect'
 
 // GET — 取得用戶所有卡片（從訂單中的 ICCID 收集）
 export async function GET(request: Request) {
@@ -17,48 +17,34 @@ export async function GET(request: Request) {
   const supabase = createAdminClient()
 
   if (action === 'detail' && iccid) {
-    // 查詢單張卡片詳情
-    try {
-      const [expiry, serviceStatus] = await Promise.all([
-        getCardExpiry([iccid]).catch(() => []),
-        getEsimServiceStatus(iccid).catch(() => null),
-      ])
-
-      return NextResponse.json({
-        iccid,
-        expiry: Array.isArray(expiry) ? expiry[0] || null : null,
-        service_status: serviceStatus,
-      })
-    } catch (err) {
-      return NextResponse.json({ error: '查詢失敗' }, { status: 500 })
-    }
-  }
-
-  if (action === 'usage' && iccid) {
-    // 查詢套餐使用資訊
-    try {
-      const usage = await getPlanUsageV2({ iccid }).catch(() => null)
-      return NextResponse.json({ iccid, usage })
-    } catch {
-      return NextResponse.json({ error: '查詢失敗' }, { status: 500 })
-    }
-  }
-
-  if (action === 'traffic' && iccid) {
-    // 查詢日流量
-    const days = parseInt(searchParams.get('days') || '7')
+    // 一次查詢所有 ICCID 相關資訊
     const now = new Date()
-    const begin = new Date(now.getTime() - days * 86400000)
-    try {
-      const traffic = await getDailyTraffic({
+    const begin = new Date(now.getTime() - 7 * 86400000)
+
+    const [expiry, serviceStatus, usage, traffic, verify, realName, rechargeProducts] = await Promise.all([
+      getCardExpiry([iccid]).catch(() => []),                              // F010
+      getEsimServiceStatus(iccid).catch(() => null),                      // F042
+      getPlanUsageV2({ iccid }).catch(() => null),                        // F046
+      getDailyTraffic({                                                    // F023
         iccid,
         beginDate: begin.toISOString().slice(0, 10).replace(/-/g, ''),
         endDate: now.toISOString().slice(0, 10).replace(/-/g, ''),
-      }).catch(() => [])
-      return NextResponse.json({ iccid, traffic })
-    } catch {
-      return NextResponse.json({ error: '查詢失敗' }, { status: 500 })
-    }
+      }).catch(() => []),
+      verifyIccid(iccid).catch(() => null),                               // F013
+      getRealNameStatus(iccid).catch(() => null),                          // F054
+      getEsimRechargeProducts(iccid).catch(() => null),                   // F052
+    ])
+
+    return NextResponse.json({
+      iccid,
+      expiry: Array.isArray(expiry) ? expiry[0] || null : null,
+      service_status: serviceStatus,
+      usage,
+      traffic: Array.isArray(traffic) ? traffic : [],
+      verify,
+      real_name: realName,
+      recharge_products: rechargeProducts,
+    })
   }
 
   // 預設：列出所有卡片
