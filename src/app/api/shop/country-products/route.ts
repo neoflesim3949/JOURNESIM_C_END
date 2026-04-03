@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     .from('products')
     .select('id')
     .eq('country_code', mcc)
-    .eq('is_active', true)
+    .not('is_active', 'eq', false)
 
   if (!products || products.length === 0) return NextResponse.json([])
 

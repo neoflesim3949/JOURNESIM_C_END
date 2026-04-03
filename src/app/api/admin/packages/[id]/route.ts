@@ -25,6 +25,7 @@ export async function GET(
     .from('package_plans')
     .select('*')
     .eq('package_id', id)
+    .order('sort_order')
     .order('created_at')
 
   if (!plans || plans.length === 0) {
@@ -35,7 +36,7 @@ export async function GET(
   const skuIds = plans.map((p) => p.bc_sku_id)
   const { data: bcProducts } = await supabase
     .from('bc_products')
-    .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type')
+    .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, rechargeable_product')
     .in('sku_id', skuIds)
   const bcMap = new Map((bcProducts || []).map((p) => [p.sku_id, p]))
 
@@ -60,12 +61,15 @@ export async function GET(
       bc_sku_id: p.bc_sku_id,
       bc_name: bc?.name || '',
       bc_type: bc?.type || '',
+      display_name: p.display_name || null,
+      sort_order: p.sort_order || 0,
       plan_category: p.plan_category,
       days: bc?.days || null,
       capacity: bc?.capacity || null,
       high_flow_size: bc?.high_flow_size || null,
       limit_flow_speed: bc?.limit_flow_speed || null,
       plan_type: bc?.plan_type || null,
+      rechargeable_product: bc?.rechargeable_product || null,
       is_active: p.is_active,
       copy_prices: (priceMap.get(p.id) || [])
         .sort((a, b) => parseInt(a.copies) - parseInt(b.copies))

@@ -4,13 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil } from 'lucide-react'
 
-import { ESIM_TYPES } from '@/lib/bc-enums'
-function getSimLabel(type: string) {
-  return ESIM_TYPES.includes(type) ? 'eSIM' : 'SIM'
-}
-function getSimColor(type: string) {
-  return ESIM_TYPES.includes(type) ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'
-}
+import { getTypeLabels } from '@/lib/bc-enums'
 
 interface Pkg {
   id: string; name: string; description: string | null; product_type: string; scope?: string
@@ -19,6 +13,7 @@ interface Pkg {
 
 interface BcProduct {
   sku_id: string; name: string; type: string; plan_type: string | null; high_flow_size: string | null
+  rechargeable_product: string | null
   country_data?: { mcc: string; name: string }[] | null
 }
 
@@ -31,8 +26,12 @@ export default function AdminPackagesPage() {
   // 未加入列表
   const [showUnassigned, setShowUnassigned] = useState(false)
   const [unassignedList, setUnassignedList] = useState<BcProduct[]>([])
+  const [unassignedTotal, setUnassignedTotal] = useState(0)
   const [unassignedLoading, setUnassignedLoading] = useState(false)
   const [unassignedSearch, setUnassignedSearch] = useState('')
+  const [unassignedPage, setUnassignedPage] = useState(1)
+  const [unassignedPageSize, setUnassignedPageSize] = useState(50)
+  const [unassignedTypeFilter, setUnassignedTypeFilter] = useState('')
 
   // 快捷新增
   const [showQuickAdd, setShowQuickAdd] = useState(false)
@@ -177,27 +176,35 @@ export default function AdminPackagesPage() {
     load()
   }
 
-  async function openUnassigned() {
-    setShowUnassigned(true)
-    setUnassignedSearch('')
+  async function loadUnassigned(p?: number, search?: string, filterType?: string) {
+    const pg = p ?? unassignedPage
+    const s = search ?? unassignedSearch
+    const ft = filterType ?? unassignedTypeFilter
     setUnassignedLoading(true)
-    const res = await fetch('/api/admin/packages/unassigned')
-    if (res.ok) setUnassignedList(await res.json())
+    const params = new URLSearchParams({ page: String(pg), pageSize: String(unassignedPageSize) })
+    if (s) params.set('search', s)
+    if (ft) params.set('filterType', ft)
+    const res = await fetch(`/api/admin/packages/unassigned?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      setUnassignedList(data.data || [])
+      setUnassignedTotal(data.total || 0)
+    }
     setUnassignedLoading(false)
   }
 
-  const filteredUnassigned = unassignedSearch
-    ? unassignedList.filter((p) => {
-        const q = unassignedSearch.toLowerCase()
-        if (p.name.toLowerCase().includes(q) || p.sku_id.includes(unassignedSearch)) return true
-        // MCC 搜尋：檢查 country_data
-        if (/^[A-Za-z]{2,3}$/.test(unassignedSearch)) {
-          const code = unassignedSearch.toUpperCase()
-          return p.country_data?.some((c) => c.mcc.toUpperCase() === code) || false
-        }
-        return false
-      })
-    : unassignedList
+  function openUnassigned() {
+    setShowUnassigned(true)
+    setUnassignedSearch('')
+    setUnassignedTypeFilter('')
+    setUnassignedPage(1)
+    loadUnassigned(1, '', '')
+  }
+
+  function handleUnassignedSearch() { setUnassignedPage(1); loadUnassigned(1) }
+  function handleUnassignedTypeChange(v: string) { setUnassignedTypeFilter(v); setUnassignedPage(1); loadUnassigned(1, unassignedSearch, v) }
+
+  const unassignedTotalPages = Math.ceil(unassignedTotal / unassignedPageSize)
 
   if (loading) return <div className="text-gray-500">載入中...</div>
 
@@ -329,29 +336,37 @@ export default function AdminPackagesPage() {
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold">未加入套餐的 BC 商品</h2>
-                <p className="text-sm text-gray-500 mt-0.5">共 {unassignedList.length} 個商品尚未被加入任何套餐</p>
+                <p className="text-sm text-gray-500 mt-0.5">共 {unassignedTotal} 個商品尚未被加入任何套餐</p>
               </div>
               <button onClick={() => setShowUnassigned(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
             </div>
-            <div className="p-4 border-b border-gray-100">
-              <div className="relative">
+            <div className="p-4 border-b border-gray-100 flex gap-3">
+              <select value={unassignedTypeFilter} onChange={(e) => handleUnassignedTypeChange(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                <option value="">全部類型</option>
+                <option value="esim">eSIM</option>
+                <option value="sim">SIM</option>
+              </select>
+              <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input type="text" value={unassignedSearch} onChange={(e) => setUnassignedSearch(e.target.value)}
-                  placeholder="搜尋名稱、SKU 或國家代碼（如 CN、JP）..." className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" autoFocus />
+                  onKeyDown={(e) => e.key === 'Enter' && handleUnassignedSearch()}
+                  placeholder="搜尋名稱或 SKU..." className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" autoFocus />
               </div>
+              <button onClick={handleUnassignedSearch} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
             </div>
             {/* 批量操作 */}
-            {filteredUnassigned.length > 0 && (
+            {unassignedList.length > 0 && (
               <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                 <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
                   <input type="checkbox"
-                    checked={filteredUnassigned.length > 0 && filteredUnassigned.every((p) => bcSelectedSkus.has(p.sku_id))}
+                    checked={unassignedList.length > 0 && unassignedList.every((p: BcProduct) => bcSelectedSkus.has(p.sku_id))}
                     onChange={() => {
-                      const allSel = filteredUnassigned.every((p) => bcSelectedSkus.has(p.sku_id))
-                      setBcSelectedSkus((prev) => { const n = new Set(prev); filteredUnassigned.forEach((p) => allSel ? n.delete(p.sku_id) : n.add(p.sku_id)); return n })
+                      const allSel = unassignedList.every((p: BcProduct) => bcSelectedSkus.has(p.sku_id))
+                      setBcSelectedSkus((prev) => { const n = new Set(prev); unassignedList.forEach((p: BcProduct) => allSel ? n.delete(p.sku_id) : n.add(p.sku_id)); return n })
                     }}
                     className="accent-blue-600" />
-                  全選（{filteredUnassigned.length}）
+                  全選（{unassignedList.length}）
                 </label>
                 {bcSelectedSkus.size > 0 && (
                   <button onClick={() => {
@@ -369,13 +384,13 @@ export default function AdminPackagesPage() {
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {unassignedLoading ? (
                 <p className="text-sm text-gray-500 text-center py-4">載入中...</p>
-              ) : filteredUnassigned.length === 0 ? (
+              ) : unassignedList.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-4">
-                  {unassignedList.length === 0 ? '所有 BC 商品都已加入套餐' : '找不到符合的商品'}
+                  {unassignedTotal === 0 ? '所有 BC 商品都已加入套餐' : '找不到符合的商品'}
                 </p>
               ) : (
                 <div className="space-y-1">
-                  {filteredUnassigned.map((p) => (
+                  {unassignedList.map((p: BcProduct) => (
                     <div key={p.sku_id}
                       className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${bcSelectedSkus.has(p.sku_id) ? 'border-blue-300 bg-blue-50/50' : 'border-gray-200 hover:border-gray-300'}`}>
                       <input type="checkbox" checked={bcSelectedSkus.has(p.sku_id)}
@@ -383,13 +398,33 @@ export default function AdminPackagesPage() {
                         className="accent-blue-600 flex-shrink-0" />
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-sm truncate">{p.name}</div>
-                        <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getSimColor(p.type)}`}>{getSimLabel(p.type)}</span></div>
+                        <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} {getTypeLabels(p.type, p.rechargeable_product).map((t) => <span key={t.label} className={`px-1.5 py-0.5 rounded text-xs font-medium ${t.color}`}>{t.label}</span>)}</div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
+            {/* 分頁 */}
+            {unassignedTotal > unassignedPageSize && (
+              <div className="flex items-center justify-between px-5 py-3 border-t border-gray-200 bg-gray-50">
+                <div className="text-xs text-gray-500">
+                  每頁
+                  <select value={unassignedPageSize} onChange={(e) => { setUnassignedPageSize(Number(e.target.value)); setUnassignedPage(1); loadUnassigned(1, unassignedSearch, unassignedTypeFilter) }}
+                    className="mx-1 px-1 py-0.5 border border-gray-300 rounded text-xs">
+                    {[50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  筆 · 共 {unassignedTotal} 筆
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => { const p = Math.max(1, unassignedPage - 1); setUnassignedPage(p); loadUnassigned(p) }} disabled={unassignedPage <= 1}
+                    className="px-2 py-1 border border-gray-300 rounded text-xs disabled:opacity-50">上一頁</button>
+                  <span className="px-2 py-1 text-xs">{unassignedPage} / {unassignedTotalPages}</span>
+                  <button onClick={() => { const p = Math.min(unassignedTotalPages, unassignedPage + 1); setUnassignedPage(p); loadUnassigned(p) }} disabled={unassignedPage >= unassignedTotalPages}
+                    className="px-2 py-1 border border-gray-300 rounded text-xs disabled:opacity-50">下一頁</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -441,7 +476,7 @@ export default function AdminPackagesPage() {
                       <input type="checkbox" checked={bcSelectedSkus.has(p.sku_id)} onChange={() => toggleBcSelect(p.sku_id)} className="accent-blue-600" />
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm truncate">{p.name}</div>
-                        <div className="text-xs text-gray-400 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getSimColor(p.type)}`}>{getSimLabel(p.type)}</span></div>
+                        <div className="text-xs text-gray-400 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} {getTypeLabels(p.type, p.rechargeable_product).map((t) => <span key={t.label} className={`px-1.5 py-0.5 rounded text-xs font-medium ${t.color}`}>{t.label}</span>)}</div>
                       </div>
                     </div>
                   ))}

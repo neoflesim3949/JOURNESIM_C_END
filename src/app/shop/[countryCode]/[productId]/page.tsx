@@ -4,9 +4,11 @@ import { Suspense, useEffect, useState, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
-import { ArrowLeft, Minus, Plus, ShoppingBag } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, Minus, Plus, ShoppingBag, ShoppingCart, Check } from 'lucide-react'
 import { formatPrice } from '@/lib/utils'
 import { formatCapacity } from '@/lib/format'
+import { useCart } from '@/lib/cart'
 
 interface CopyPrice {
   copies: string; sell_price: number
@@ -14,6 +16,7 @@ interface CopyPrice {
 
 interface PlanData {
   plan_id: string; bc_sku_id: string; bc_name: string
+  display_name: string | null; sort_order: number
   plan_category: 'daily' | 'fixed'; plan_type: string | null
   days: number | null; capacity: string | null; high_flow_size: string | null
   limit_flow_speed: string | null; copy_prices: CopyPrice[]
@@ -36,9 +39,12 @@ export default function ProductDetailPage() {
 function ProductDetailContent() {
   const { countryCode, productId: packageId } = useParams() as { countryCode: string; productId: string }
 
+  const router = useRouter()
+  const { addItem } = useCart()
   const [product, setProduct] = useState<ProductData | null>(null)
   const [plans, setPlans] = useState<PlanData[]>([])
   const [loading, setLoading] = useState(true)
+  const [addedToCart, setAddedToCart] = useState(false)
 
   // UI State
   const [activeTab, setActiveTab] = useState<'daily' | 'fixed'>('daily')
@@ -73,17 +79,21 @@ function ProductDetailContent() {
   const dailyPlans = useMemo(() => plans.filter((p) => p.plan_category === 'daily'), [plans])
   const fixedPlans = useMemo(() => plans.filter((p) => p.plan_category === 'fixed'), [plans])
 
-  const speedGroups = useMemo(() => {
-    const map = new Map<string, PlanData[]>()
-    for (const p of dailyPlans) {
+  // 每個 SKU 是獨立方案選項，用 display_name 或 speed 顯示
+  const dailyPlanOptions = useMemo(() => {
+    return dailyPlans.map((p) => {
       const speed = formatCapacity(p.high_flow_size ?? p.capacity, true)
-      if (!map.has(speed)) map.set(speed, [])
-      map.get(speed)!.push(p)
-    }
-    return map
+      return {
+        key: p.plan_id,
+        label: p.display_name || speed,
+        sortOrder: p.sort_order || 0,
+        rawSize: parseFloat(p.high_flow_size ?? p.capacity ?? '0'),
+        plan: p,
+      }
+    }).sort((a, b) => a.sortOrder - b.sortOrder || a.rawSize - b.rawSize)
   }, [dailyPlans])
 
-  const speedOptions = useMemo(() => Array.from(speedGroups.keys()), [speedGroups])
+  const speedOptions = useMemo(() => dailyPlanOptions.map((o) => o.key), [dailyPlanOptions])
 
   // 自動選第一個速度
   useEffect(() => {
@@ -92,30 +102,27 @@ function ProductDetailContent() {
     }
   }, [speedOptions, selectedSpeed])
 
-  // 當前速度下可選的天數
-  const currentSpeedPlans = useMemo(() => {
-    return speedGroups.get(selectedSpeed) || []
-  }, [speedGroups, selectedSpeed])
+  // 當前選中的方案
+  const currentPlanOption = useMemo(() => {
+    return dailyPlanOptions.find((o) => o.key === selectedSpeed) || null
+  }, [dailyPlanOptions, selectedSpeed])
 
-  // 合併所有 copies 選項
+  // 天數選項（從選中方案的 copies 計算）
   const daysOptions = useMemo(() => {
-    const allCopies = new Map<string, { copies: string; sell_price: number; bc_sku_id: string; plan_id: string }>()
-    for (const plan of currentSpeedPlans) {
-      const unitDays = plan.days ?? 1
-      for (const cp of plan.copy_prices) {
-        if (cp.sell_price <= 0) continue
-        const actualDays = unitDays * parseInt(cp.copies)
-        const key = String(actualDays)
-        // 取最低價
-        if (!allCopies.has(key) || cp.sell_price < allCopies.get(key)!.sell_price) {
-          allCopies.set(key, { copies: cp.copies, sell_price: cp.sell_price, bc_sku_id: plan.bc_sku_id, plan_id: plan.plan_id })
-        }
-      }
-    }
-    return Array.from(allCopies.entries())
-      .sort(([a], [b]) => parseInt(a) - parseInt(b))
-      .map(([days, data]) => ({ days: parseInt(days), ...data }))
-  }, [currentSpeedPlans])
+    if (!currentPlanOption) return []
+    const plan = currentPlanOption.plan
+    const unitDays = plan.days ?? 1
+    return plan.copy_prices
+      .filter((cp) => cp.sell_price > 0)
+      .map((cp) => ({
+        days: unitDays * parseInt(cp.copies),
+        copies: cp.copies,
+        sell_price: cp.sell_price,
+        bc_sku_id: plan.bc_sku_id,
+        plan_id: plan.plan_id,
+      }))
+      .sort((a, b) => a.days - b.days)
+  }, [currentPlanOption])
 
   // 自動選第一個天數
   useEffect(() => {
@@ -128,40 +135,84 @@ function ProductDetailContent() {
   const selectedDayOption = daysOptions.find((d) => String(d.days) === selectedDays)
   const dailyTotalPrice = selectedDayOption ? selectedDayOption.sell_price * quantity : 0
 
-  // 固定套餐選項
-  const fixedOptions = useMemo(() => {
-    const options: { plan_id: string; bc_sku_id: string; bc_name: string; capacity: string; days: number; sell_price: number; copies: string }[] = []
+  // 固定套餐：按容量分組
+  const fixedGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; capacity: string; label: string; rawSize: number; sortOrder: number; plan_id: string; bc_sku_id: string; days: { day: number; sell_price: number; copies: string }[] }>()
     for (const plan of fixedPlans) {
+      const raw = formatCapacity(plan.high_flow_size ?? plan.capacity, false)
+      const capacity = raw === '不限量' ? raw : `總量${raw}`
+      const rawSize = parseFloat(plan.high_flow_size ?? plan.capacity ?? '0')
       const unitDays = plan.days ?? 1
+      if (!groups.has(plan.plan_id)) groups.set(plan.plan_id, { key: plan.plan_id, capacity, label: plan.display_name || capacity, rawSize, sortOrder: plan.sort_order || 0, plan_id: plan.plan_id, bc_sku_id: plan.bc_sku_id, days: [] })
       for (const cp of plan.copy_prices) {
         if (cp.sell_price <= 0) continue
-        options.push({
-          plan_id: plan.plan_id,
-          bc_sku_id: plan.bc_sku_id,
-          bc_name: plan.bc_name,
-          capacity: formatCapacity(plan.high_flow_size ?? plan.capacity, false),
-          days: unitDays * parseInt(cp.copies),
-          sell_price: cp.sell_price,
-          copies: cp.copies,
-        })
+        groups.get(plan.plan_id)!.days.push({ day: unitDays * parseInt(cp.copies), sell_price: cp.sell_price, copies: cp.copies })
       }
     }
-    return options.sort((a, b) => a.sell_price - b.sell_price)
+    return Array.from(groups.values())
+      .filter((g) => g.days.length > 0)
+      .map((g) => ({ ...g, days: g.days.sort((a, b) => a.day - b.day) }))
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.rawSize - b.rawSize)
   }, [fixedPlans])
 
-  // 自動選第一個固定套餐
+  // 自動選第一個固定方案
   useEffect(() => {
-    if (fixedOptions.length > 0 && !selectedFixedPlan) {
-      setSelectedFixedPlan(`${fixedOptions[0].plan_id}_${fixedOptions[0].copies}`)
+    if (fixedGroups.length > 0 && !selectedFixedPlan) {
+      setSelectedFixedPlan(fixedGroups[0].key)
     }
-  }, [fixedOptions, selectedFixedPlan])
+  }, [fixedGroups, selectedFixedPlan])
 
-  const selectedFixed = fixedOptions.find((f) => `${f.plan_id}_${f.copies}` === selectedFixedPlan)
-  const fixedTotalPrice = selectedFixed ? selectedFixed.sell_price * quantity : 0
+  const currentFixedGroup = fixedGroups.find((g) => g.key === selectedFixedPlan)
+
+  // 固定套餐天數選項
+  const fixedDaysOptions = currentFixedGroup?.days || []
+
+  // 自動選第一個天數
+  const [selectedFixedDay, setSelectedFixedDay] = useState('')
+  useEffect(() => {
+    if (fixedDaysOptions.length > 0 && !selectedFixedDay) {
+      setSelectedFixedDay(String(fixedDaysOptions[0].day))
+    }
+  }, [fixedDaysOptions, selectedFixedDay])
+
+  const selectedFixedDayOption = fixedDaysOptions.find((d) => String(d.day) === selectedFixedDay)
+  const fixedTotalPrice = selectedFixedDayOption ? selectedFixedDayOption.sell_price * quantity : 0
 
   const totalPrice = activeTab === 'daily' ? dailyTotalPrice : fixedTotalPrice
   const hasDailyPlans = dailyPlans.length > 0
   const hasFixedPlans = fixedPlans.length > 0
+
+  function handleAddToCart() {
+    if (!product) return
+    const pType = product.product_type === 'sim' ? 'sim' as const : 'esim' as const
+    if (activeTab === 'daily' && currentPlanOption && selectedDayOption) {
+      addItem({
+        packageId, packageName: product.name,
+        planId: selectedDayOption.plan_id,
+        bcSkuId: selectedDayOption.bc_sku_id,
+        bcSkuName: currentPlanOption.label,
+        displayName: `${currentPlanOption.label} · ${selectedDayOption.days}天`,
+        copies: selectedDayOption.copies,
+        days: selectedDayOption.days,
+        planCategory: 'daily', productType: pType,
+        unitPrice: selectedDayOption.sell_price,
+        countryCode, countryName: product.country_name || '',
+      }, quantity)
+    } else if (activeTab === 'fixed' && currentFixedGroup && selectedFixedDayOption) {
+      addItem({
+        packageId, packageName: product.name,
+        planId: currentFixedGroup.plan_id,
+        bcSkuId: currentFixedGroup.bc_sku_id,
+        bcSkuName: currentFixedGroup.label,
+        displayName: `${currentFixedGroup.label} · ${selectedFixedDayOption.day}天`,
+        copies: selectedFixedDayOption.copies,
+        days: selectedFixedDayOption.day,
+        planCategory: 'fixed', productType: pType,
+        unitPrice: selectedFixedDayOption.sell_price,
+        countryCode, countryName: product.country_name || '',
+      }, quantity)
+    }
+  }
 
   if (loading) return <div className="max-w-4xl mx-auto px-4 py-16 text-center text-muted-foreground">載入中...</div>
 
@@ -220,15 +271,15 @@ function ProductDetailContent() {
                 <div>
                   <label className="text-sm font-medium">選擇方案</label>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {speedOptions.map((speed) => (
+                    {dailyPlanOptions.map((opt) => (
                       <button
-                        key={speed}
-                        onClick={() => { setSelectedSpeed(speed); setSelectedDays('') }}
+                        key={opt.key}
+                        onClick={() => { setSelectedSpeed(opt.key); setSelectedDays('') }}
                         className={`px-4 py-2.5 border rounded-xl text-sm font-medium transition-all ${
-                          selectedSpeed === speed ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/50'
+                          selectedSpeed === opt.key ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/50'
                         }`}
                       >
-                        {speed}
+                        {opt.label}
                       </button>
                     ))}
                   </div>
@@ -268,30 +319,44 @@ function ProductDetailContent() {
           {/* Fixed Plan UI */}
           {activeTab === 'fixed' && (
             hasFixedPlans ? (
-              <div className="mt-6">
-                <label className="text-sm font-medium">選擇方案</label>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {fixedOptions.map((opt) => {
-                    const key = `${opt.plan_id}_${opt.copies}`
-                    const isSelected = selectedFixedPlan === key
-                    return (
-                      <button
-                        key={key}
-                        onClick={() => setSelectedFixedPlan(key)}
-                        className={`p-4 border rounded-xl text-left transition-all ${
-                          isSelected ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-semibold">{opt.capacity}</div>
-                            <div className="text-xs text-muted-foreground mt-0.5">{opt.days} 天</div>
-                          </div>
-                          <div className="font-semibold text-primary">{formatPrice(opt.sell_price)}</div>
-                        </div>
+              <div className="mt-6 space-y-5">
+                <div>
+                  <label className="text-sm font-medium">選擇方案</label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {fixedGroups.map((g) => (
+                      <button key={g.key}
+                        onClick={() => { setSelectedFixedPlan(g.key); setSelectedFixedDay('') }}
+                        className={`px-4 py-2.5 border rounded-xl text-sm font-medium transition-all ${
+                          selectedFixedPlan === g.key ? 'border-primary bg-primary/5 text-primary' : 'border-border hover:border-primary/50'
+                        }`}>
+                        {g.label}
                       </button>
-                    )
-                  })}
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium">選擇天數</label>
+                    <select value={selectedFixedDay}
+                      onChange={(e) => setSelectedFixedDay(e.target.value)}
+                      className="mt-2 w-full px-4 py-3 border border-border rounded-xl text-sm bg-white cursor-pointer">
+                      {fixedDaysOptions.map((d) => (
+                        <option key={d.day} value={String(d.day)}>{d.day} 天</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">數量</label>
+                    <div className="mt-2 flex items-center border border-border rounded-xl">
+                      <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="px-3 py-3 hover:bg-muted transition-colors rounded-l-xl">
+                        <Minus className="w-4 h-4" />
+                      </button>
+                      <span className="flex-1 text-center text-sm font-medium">{quantity}</span>
+                      <button onClick={() => setQuantity(quantity + 1)} className="px-3 py-3 hover:bg-muted transition-colors rounded-r-xl">
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -299,20 +364,40 @@ function ProductDetailContent() {
             )
           )}
 
-          {/* Total + Buy */}
-          <div className="mt-6 p-5 bg-muted rounded-xl">
+          {/* Total + Actions */}
+          <div className="mt-6 p-5 bg-muted rounded-xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">總計</div>
                 <div className="text-3xl font-bold text-primary">{formatPrice(totalPrice)}</div>
               </div>
-              <Link
-                href={`/checkout?package=${packageId}&planId=${activeTab === 'daily' ? selectedDayOption?.plan_id : selectedFixed?.plan_id}&copies=${activeTab === 'daily' ? selectedDayOption?.copies : selectedFixed?.copies}&qty=${quantity}&price=${totalPrice}`}
-                className={`inline-flex items-center gap-2 px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors ${totalPrice <= 0 ? 'opacity-50 pointer-events-none' : ''}`}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  if (totalPrice <= 0 || !product) return
+                  handleAddToCart()
+                  setAddedToCart(true)
+                  setTimeout(() => setAddedToCart(false), 2000)
+                }}
+                disabled={totalPrice <= 0}
+                className={`flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 border-2 border-primary font-semibold rounded-lg transition-colors ${
+                  addedToCart ? 'bg-green-500 border-green-500 text-white' : 'text-primary hover:bg-primary/5'
+                } ${totalPrice <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                <ShoppingBag className="w-5 h-5" />
-                立即購買
-              </Link>
+                {addedToCart ? <><Check className="w-5 h-5" /> 已加入</> : <><ShoppingCart className="w-5 h-5" /> 加入購物車</>}
+              </button>
+              <button
+                onClick={() => {
+                  if (totalPrice <= 0 || !product) return
+                  handleAddToCart()
+                  router.push('/cart')
+                }}
+                disabled={totalPrice <= 0}
+                className={`flex-1 inline-flex items-center justify-center gap-2 px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors ${totalPrice <= 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <ShoppingBag className="w-5 h-5" /> 立即購買
+              </button>
             </div>
           </div>
         </div>

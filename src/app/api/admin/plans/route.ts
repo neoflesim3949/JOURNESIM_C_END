@@ -62,7 +62,41 @@ export async function GET(request: Request) {
 
   // 搜尋
   if (search) {
-    query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
+    // 先查 bc_countries 看搜尋詞是否匹配任何國家（MCC碼、簡繁英名稱）
+    const { data: matchedCountries } = await supabase.from('bc_countries')
+      .select('mcc')
+      .or(`mcc.ilike.${search},name.ilike.%${search}%,name_zh.ilike.%${search}%,name_en.ilike.%${search}%`)
+
+    const matchedMccs = (matchedCountries || []).map((c) => c.mcc.toUpperCase())
+
+    if (matchedMccs.length > 0) {
+      // 用 MCC 在 country_data 中搜尋
+      const matchingSkus: string[] = []
+      let mccFrom = 0
+      while (true) {
+        const { data: batch } = await supabase.from('bc_products')
+          .select('sku_id, country_data')
+          .range(mccFrom, mccFrom + 999)
+        if (!batch || batch.length === 0) break
+        for (const p of batch) {
+          const countries = p.country_data as { mcc: string }[] | null
+          if (countries?.some((c) => matchedMccs.includes(c.mcc.toUpperCase()))) {
+            matchingSkus.push(p.sku_id)
+          }
+        }
+        if (batch.length < 1000) break
+        mccFrom += 1000
+      }
+      if (matchingSkus.length > 0) {
+        query = query.in('sku_id', matchingSkus)
+      } else {
+        // 國家匹配了但沒有商品，也搜名稱
+        query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
+      }
+    } else {
+      // 非國家搜尋，用名稱和 SKU
+      query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
+    }
   }
 
   // 分頁

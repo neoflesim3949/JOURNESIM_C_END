@@ -4,10 +4,12 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Menu, X, ShoppingCart, User, Cpu, ClipboardList } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useCart } from '@/lib/cart'
 
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const { itemCount } = useCart()
   const [logo, setLogo] = useState('')
 
   useEffect(() => {
@@ -65,6 +67,9 @@ export function Header() {
             </Link>
             <Link href="/cart" className="relative p-2 text-foreground hover:text-primary transition-colors">
               <ShoppingCart className="w-5 h-5" />
+              {itemCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4.5 h-4.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none">{itemCount > 99 ? '99+' : itemCount}</span>
+              )}
             </Link>
           </div>
 

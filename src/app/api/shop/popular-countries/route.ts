@@ -8,7 +8,6 @@ export async function GET() {
     settings = await getSettings()
   } catch {}
 
-  // 從 system_settings 讀取熱門國家 MCC 列表（逗號分隔，有序）
   const popularMccs = (settings.get('popular_countries') || '').split(',').map((s) => s.trim()).filter(Boolean)
 
   if (popularMccs.length === 0) {
@@ -18,13 +17,16 @@ export async function GET() {
   const supabase = createAdminClient()
   const { data: countries } = await supabase
     .from('bc_countries')
-    .select('mcc, name, flag_url')
+    .select('mcc, name, name_zh, flag_url')
     .in('mcc', popularMccs)
 
-  // 按後台設定的順序排列
   const countryMap = new Map((countries || []).map((c) => [c.mcc, c]))
   const ordered = popularMccs
-    .map((mcc) => countryMap.get(mcc))
+    .map((mcc) => {
+      const c = countryMap.get(mcc)
+      if (!c) return null
+      return { mcc: c.mcc, name: c.name_zh || c.name, flag_url: c.flag_url }
+    })
     .filter(Boolean)
 
   return NextResponse.json(ordered)

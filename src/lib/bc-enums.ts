@@ -74,3 +74,19 @@ export function getSalesMethodLabel(method: string | null): string {
   if (!method) return '-'
   return SALES_METHOD[method] || method
 }
+
+// 取得商品 SIM/eSIM/加速 標籤
+export function getTypeLabels(type: string | null, rechargeable?: string | null): { label: string; color: string }[] {
+  const labels: { label: string; color: string }[] = []
+  if (type && SIM_TYPES.includes(type)) labels.push({ label: 'SIM', color: 'bg-green-50 text-green-600' })
+  if ((type && ESIM_TYPES.includes(type)) || rechargeable === '1') labels.push({ label: 'eSIM', color: 'bg-blue-50 text-blue-600' })
+  if (labels.length === 0) {
+    // type=NULL 且非複充 → 加速包
+    if (!type || !ESIM_SIM_ALL_TYPES.includes(type)) {
+      labels.push({ label: '加速', color: 'bg-orange-50 text-orange-600' })
+    } else {
+      labels.push({ label: type, color: 'bg-gray-50 text-gray-600' })
+    }
+  }
+  return labels
+}

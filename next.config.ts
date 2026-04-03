@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'flagcdn.com' },
       { protocol: 'https', hostname: 'images.unsplash.com' },
       { protocol: 'https', hostname: 'op-flow-public.oss-cn-hangzhou.aliyuncs.com' },
+      { protocol: 'https', hostname: 'ecayqnbzzkbbrsjwdobe.supabase.co' },
     ],
   },
 };

@@ -6,16 +6,16 @@ import Link from 'next/link'
 import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, Search, X, Trash2, DollarSign, Eye } from 'lucide-react'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 
-import { ESIM_TYPES } from '@/lib/bc-enums'
-function getSimLabel(type: string) { return ESIM_TYPES.includes(type) ? 'eSIM' : 'SIM' }
-function getSimColor(type: string) { return ESIM_TYPES.includes(type) ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600' }
+import { getTypeLabels } from '@/lib/bc-enums'
 
 interface CopyPrice { id: string; copies: string; cost_price: number; original_cost_price: number | null; sell_price: number; price_changed: boolean }
 interface BoundPlan {
   id: string; bc_sku_id: string; bc_name: string; bc_type: string
+  display_name: string | null; sort_order: number
   plan_category: 'daily' | 'fixed'; days: number | null
   capacity: string | null; high_flow_size: string | null
   limit_flow_speed: string | null; plan_type: string | null
+  rechargeable_product: string | null
   is_active: boolean; copy_prices: CopyPrice[]
 }
 interface Pkg { id: string; name: string; description: string | null; product_type: string }
@@ -38,7 +38,7 @@ export default function PackageDetailPage() {
   const [showPreview, setShowPreview] = useState(false)
   const [showManual, setShowManual] = useState(false)
   const [bcSearch, setBcSearch] = useState('')
-  const [bcResults, setBcResults] = useState<{ sku_id: string; name: string; type: string; plan_type: string | null; high_flow_size: string | null }[]>([])
+  const [bcResults, setBcResults] = useState<{ sku_id: string; name: string; type: string; plan_type: string | null; high_flow_size: string | null; rechargeable_product: string | null }[]>([])
   const [bcLoading, setBcLoading] = useState(false)
   const [bcSelectedSkus, setBcSelectedSkus] = useState<Set<string>>(new Set())
   const [batchImporting, setBatchImporting] = useState(false)
@@ -276,7 +276,7 @@ export default function PackageDetailPage() {
       )}
 
       {/* Preview Modal */}
-      {showPreview && <PreviewModal pkg={pkg} plans={plans} editedPrices={editedPrices} onClose={() => setShowPreview(false)} />}
+      {showPreview && <PreviewModal pkg={pkg} plans={plans} editedPrices={editedPrices} packageId={id} onClose={() => setShowPreview(false)} onSaved={loadData} />}
 
       {/* Batch Price Modal */}
       {showBatchPrice && (
@@ -376,7 +376,7 @@ export default function PackageDetailPage() {
                         {!added && <input type="checkbox" checked={bcSelectedSkus.has(p.sku_id)} onChange={() => setBcSelectedSkus((prev) => { const n = new Set(prev); n.has(p.sku_id) ? n.delete(p.sku_id) : n.add(p.sku_id); return n })} className="accent-blue-600" />}
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-sm truncate">{p.name}</div>
-                          <div className="text-xs text-gray-400 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getSimColor(p.type)}`}>{getSimLabel(p.type)}</span></div>
+                          <div className="text-xs text-gray-400 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} {getTypeLabels(p.type, p.rechargeable_product).map((t) => <span key={t.label} className={`px-1.5 py-0.5 rounded text-xs font-medium ${t.color}`}>{t.label}</span>)}</div>
                         </div>
                         {added && <span className="text-xs text-gray-400">已匯入</span>}
                       </div>
@@ -390,64 +390,93 @@ export default function PackageDetailPage() {
   )
 }
 
-function PreviewModal({ pkg, plans, editedPrices, onClose }: {
-  pkg: Pkg; plans: BoundPlan[]; editedPrices: Map<string, number>; onClose: () => void
+function PreviewModal({ pkg, plans, editedPrices, packageId, onClose, onSaved }: {
+  pkg: Pkg; plans: BoundPlan[]; editedPrices: Map<string, number>; packageId: string; onClose: () => void; onSaved: () => void
 }) {
   const [pvTab, setPvTab] = useState<'daily' | 'fixed'>('daily')
   const [pvSpeed, setPvSpeed] = useState('')
   const [pvDay, setPvDay] = useState('')
-  const [pvFixed, setPvFixed] = useState(0)
+  const [pvFixed, setPvFixed] = useState('')
+  const [pvFixedDay, setPvFixedDay] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [orderEdits, setOrderEdits] = useState<{ id: string; display_name: string; speed: string; bc_name: string }[]>([])
+  const [saving, setSaving] = useState(false)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
 
   const dailyPlans = plans.filter((p) => p.plan_category === 'daily')
   const fixedPlans = plans.filter((p) => p.plan_category === 'fixed')
 
-  // 日費：按速度分組
-  const speedGroups = (() => {
-    const groups = new Map<string, { speed: string; days: { day: number; price: number; bc_sku_id: string; copies: string }[] }>()
+  const dailyOptions = (() => {
+    const opts: { id: string; speed: string; label: string; rawSize: number; sortOrder: number; bc_sku_id: string; bc_name: string; days: { day: number; price: number; copies: string }[] }[] = []
     for (const plan of dailyPlans) {
       const speed = formatCapacity(plan.high_flow_size ?? plan.capacity, true)
-      if (!groups.has(speed)) groups.set(speed, { speed, days: [] })
+      const rawSize = parseFloat(plan.high_flow_size ?? plan.capacity ?? '0')
       const unitDays = plan.days ?? 1
+      const days: { day: number; price: number; copies: string }[] = []
       for (const cp of plan.copy_prices) {
         const price = editedPrices.has(cp.id) ? editedPrices.get(cp.id)! : cp.sell_price
         if (price <= 0) continue
-        groups.get(speed)!.days.push({ day: unitDays * parseInt(cp.copies), price, bc_sku_id: plan.bc_sku_id, copies: cp.copies })
+        days.push({ day: unitDays * parseInt(cp.copies), price, copies: cp.copies })
+      }
+      if (days.length > 0) {
+        days.sort((a, b) => a.day - b.day)
+        opts.push({ id: plan.id, speed, label: plan.display_name || speed, rawSize, sortOrder: plan.sort_order, bc_sku_id: plan.bc_sku_id, bc_name: plan.bc_name, days })
       }
     }
-    for (const g of groups.values()) g.days.sort((a, b) => a.day - b.day)
-    return Array.from(groups.values()).filter((g) => g.days.length > 0)
+    return opts.sort((a, b) => a.sortOrder - b.sortOrder || a.rawSize - b.rawSize)
   })()
 
-  // 固定套餐
-  const fixedOptions = (() => {
-    const opts: { capacity: string; days: number; price: number; bc_sku_id: string; copies: string }[] = []
+  // 固定套餐：按容量分組，每組有天數選項
+  const fixedGroups = (() => {
+    const groups = new Map<string, { capacity: string; rawSize: number; bc_sku_id: string; bc_name: string; days: { day: number; price: number; copies: string }[] }>()
     for (const plan of fixedPlans) {
+      const raw = formatCapacity(plan.high_flow_size ?? plan.capacity, false)
+      const capacity = raw === '不限量' ? raw : `總量${raw}`
+      const rawSize = parseFloat(plan.high_flow_size ?? plan.capacity ?? '0')
       const unitDays = plan.days ?? 1
+      if (!groups.has(plan.bc_sku_id)) groups.set(plan.bc_sku_id, { capacity, rawSize, bc_sku_id: plan.bc_sku_id, bc_name: plan.bc_name, days: [] })
       for (const cp of plan.copy_prices) {
         const price = editedPrices.has(cp.id) ? editedPrices.get(cp.id)! : cp.sell_price
         if (price <= 0) continue
-        opts.push({ capacity: formatCapacity(plan.high_flow_size ?? plan.capacity, false), days: unitDays * parseInt(cp.copies), price, bc_sku_id: plan.bc_sku_id, copies: cp.copies })
+        groups.get(plan.bc_sku_id)!.days.push({ day: unitDays * parseInt(cp.copies), price, copies: cp.copies })
       }
     }
-    return opts.sort((a, b) => a.price - b.price)
+    return Array.from(groups.values())
+      .filter((g) => g.days.length > 0)
+      .map((g) => ({ ...g, days: g.days.sort((a, b) => a.day - b.day) }))
+      .sort((a, b) => a.rawSize - b.rawSize)
   })()
 
-  const hasDailyGroups = speedGroups.length > 0
-  const hasFixedOptions = fixedOptions.length > 0
-
-  // 自動選
-  useEffect(() => {
-    if (hasDailyGroups && !pvSpeed) setPvSpeed(speedGroups[0].speed)
-  }, [speedGroups, pvSpeed, hasDailyGroups])
+  const hasDailyOptions = dailyOptions.length > 0
+  const hasFixedOptions = fixedGroups.length > 0
 
   useEffect(() => {
-    const group = speedGroups.find((g) => g.speed === pvSpeed)
-    if (group && !pvDay) setPvDay(String(group.days[0]?.day || ''))
-  }, [pvSpeed, speedGroups, pvDay])
+    if (hasDailyOptions && !pvSpeed) setPvSpeed(dailyOptions[0].bc_sku_id)
+  }, [dailyOptions, pvSpeed, hasDailyOptions])
 
-  const currentGroup = speedGroups.find((g) => g.speed === pvSpeed)
-  const currentDay = currentGroup?.days.find((d) => String(d.day) === pvDay)
-  const currentFixed = fixedOptions[pvFixed]
+  useEffect(() => {
+    const opt = dailyOptions.find((o) => o.bc_sku_id === pvSpeed)
+    if (opt && opt.days.length > 0 && !pvDay) setPvDay(String(opt.days[0].day))
+  }, [pvSpeed, dailyOptions, pvDay])
+
+  const currentOption = dailyOptions.find((o) => o.bc_sku_id === pvSpeed)
+  const currentDay = currentOption?.days.find((d) => String(d.day) === pvDay)
+  const currentFixedGroup = fixedGroups.find((g) => g.bc_sku_id === pvFixed)
+  const currentFixedDay = currentFixedGroup?.days.find((d) => String(d.day) === pvFixedDay)
+
+  function startEditing() {
+    setOrderEdits(dailyOptions.map((o) => ({ id: o.id, display_name: o.label === o.speed ? '' : o.label, speed: o.speed, bc_name: o.bc_name })))
+    setEditing(true)
+  }
+
+  async function saveEdits() {
+    setSaving(true)
+    await fetch(`/api/admin/packages/${packageId}/prices`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_updates: orderEdits.map((p, i) => ({ id: p.id, display_name: p.display_name, sort_order: i })) }),
+    })
+    setSaving(false); setEditing(false); onSaved()
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -461,85 +490,134 @@ function PreviewModal({ pkg, plans, editedPrices, onClose }: {
           <div className="bg-gradient-to-br from-blue-50 to-white rounded-xl p-5 border border-blue-100">
             <h3 className="text-xl font-bold">{pkg.name}</h3>
 
-            {hasDailyGroups && hasFixedOptions && (
-              <div className="mt-4 flex rounded-lg overflow-hidden border border-gray-200">
-                <button onClick={() => setPvTab('daily')} className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${pvTab === 'daily' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500'}`}>日費套餐</button>
-                <button onClick={() => setPvTab('fixed')} className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${pvTab === 'fixed' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500'}`}>固定套餐</button>
-              </div>
-            )}
+            <div className="mt-4 flex rounded-lg overflow-hidden border border-gray-200">
+              <button onClick={() => setPvTab('daily')} className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${pvTab === 'daily' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500'}`}>日費套餐</button>
+              <button onClick={() => setPvTab('fixed')} className={`flex-1 py-2 text-sm font-medium text-center transition-colors ${pvTab === 'fixed' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500'}`}>固定套餐</button>
+            </div>
 
             {/* Daily */}
-            {((pvTab === 'daily' && hasDailyGroups) || (!hasFixedOptions && hasDailyGroups)) && (
-              <div className="mt-4 space-y-4">
-                <div>
-                  <div className="text-sm font-medium text-gray-700">選擇手機套餐</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {speedGroups.map((g) => (
-                      <button key={g.speed} onClick={() => { setPvSpeed(g.speed); setPvDay('') }}
-                        className={`px-4 py-2 border rounded-lg text-sm font-medium transition-all ${pvSpeed === g.speed ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-200 hover:border-blue-300'}`}>{g.speed}</button>
-                    ))}
+            {pvTab === 'daily' && (
+              hasDailyOptions ? (
+                <div className="mt-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-gray-700">選擇方案</div>
+                    {!editing ? (
+                      <button onClick={startEditing} className="text-xs text-blue-600 hover:underline">編輯排序</button>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button onClick={saveEdits} disabled={saving} className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50">{saving ? '儲存中' : '儲存'}</button>
+                        <button onClick={() => setEditing(false)} className="px-2 py-0.5 border border-gray-300 text-xs rounded hover:bg-gray-50">取消</button>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-gray-700">選擇天數</div>
-                  <div className="mt-2 grid grid-cols-5 gap-2">
-                    {currentGroup?.days.map((d) => (
-                      <button key={d.day} onClick={() => setPvDay(String(d.day))}
-                        className={`px-2 py-1.5 border rounded-lg text-center text-sm transition-all ${String(d.day) === pvDay ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-200 hover:border-blue-300'}`}>{d.day}</button>
-                    ))}
-                  </div>
-                </div>
-                {currentDay && (
-                  <>
-                    <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                      <span className="text-sm text-gray-500">總計</span>
-                      <span className="text-xl font-bold text-blue-600">NT$ {currentDay.price}</span>
+
+                  {editing ? (
+                    <div className="space-y-1.5">
+                      {orderEdits.map((p, i) => (
+                        <div key={p.id} draggable
+                          onDragStart={() => setDragIdx(i)} onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => { if (dragIdx === null || dragIdx === i) return; const arr = [...orderEdits]; const [m] = arr.splice(dragIdx, 1); arr.splice(i, 0, m); setOrderEdits(arr); setDragIdx(null) }}
+                          className={`flex items-center gap-2 p-2 border rounded-lg ${dragIdx === i ? 'bg-blue-50 border-blue-300' : 'border-gray-200 hover:bg-gray-50'} cursor-grab active:cursor-grabbing`}>
+                          <span className="text-gray-300 text-sm select-none">☰</span>
+                          <input value={p.display_name} onChange={(e) => { const arr = [...orderEdits]; arr[i] = { ...arr[i], display_name: e.target.value }; setOrderEdits(arr) }}
+                            placeholder={p.speed} className="flex-1 px-2 py-1 border border-gray-200 rounded text-sm" />
+                          <span className="text-[10px] text-gray-400 whitespace-nowrap">{p.speed}</span>
+                        </div>
+                      ))}
                     </div>
-                    <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500 space-y-1">
-                      <div><span className="text-gray-400">SKU：</span><span className="font-mono">{currentDay.bc_sku_id}</span></div>
-                      <div><span className="text-gray-400">Copies：</span>{currentDay.copies}</div>
-                      <div><span className="text-gray-400">天數：</span>{currentDay.day} 天</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {dailyOptions.map((o) => (
+                        <button key={o.bc_sku_id} onClick={() => { setPvSpeed(o.bc_sku_id); setPvDay('') }}
+                          className={`px-4 py-2 border rounded-lg text-sm font-medium transition-all ${pvSpeed === o.bc_sku_id ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-200 hover:border-blue-300'}`}>
+                          {o.label}
+                        </button>
+                      ))}
                     </div>
-                  </>
-                )}
-              </div>
+                  )}
+
+                  {!editing && (
+                    <>
+                      <div>
+                        <div className="text-sm font-medium text-gray-700">選擇天數</div>
+                        <div className="mt-2 grid grid-cols-6 gap-2">
+                          {currentOption?.days.map((d) => (
+                            <button key={d.day} onClick={() => setPvDay(String(d.day))}
+                              className={`px-2 py-1.5 border rounded-lg text-center text-sm transition-all ${String(d.day) === pvDay ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-200 hover:border-blue-300'}`}>
+                              {d.day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {currentDay && (
+                        <>
+                          <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                            <span className="text-sm text-gray-500">總計</span>
+                            <span className="text-xl font-bold text-blue-600">NT$ {currentDay.price}</span>
+                          </div>
+                          <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500 space-y-1">
+                            <div><span className="text-gray-400">SKU：</span><span className="font-mono">{currentOption?.bc_sku_id}</span></div>
+                            <div><span className="text-gray-400">名稱：</span>{currentOption?.bc_name}</div>
+                            <div><span className="text-gray-400">Copies：</span>{currentDay.copies}</div>
+                            <div><span className="text-gray-400">天數：</span>{currentDay.day} 天</div>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4 text-center py-8 text-gray-400 text-sm">無日費方案</div>
+              )
             )}
 
             {/* Fixed */}
-            {((pvTab === 'fixed' && hasFixedOptions) || (!hasDailyGroups && hasFixedOptions)) && (
-              <div className="mt-4">
-                <div className="text-sm font-medium text-gray-700">選擇手機套餐</div>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {fixedOptions.map((opt, i) => (
-                    <button key={i} onClick={() => setPvFixed(i)}
-                      className={`p-3 border rounded-xl text-left transition-all ${pvFixed === i ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 hover:border-blue-300'}`}>
-                      <div className="flex items-center justify-between">
-                        <div><div className="font-semibold text-sm">{opt.capacity}</div><div className="text-xs text-gray-500">{opt.days} 天</div></div>
-                        <div className="font-semibold text-blue-600 text-sm">NT$ {opt.price}</div>
-                      </div>
-                    </button>
-                  ))}
+            {pvTab === 'fixed' && (
+              hasFixedOptions ? (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-700">選擇方案</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {fixedGroups.map((g) => (
+                      <button key={g.bc_sku_id} onClick={() => { setPvFixed(g.bc_sku_id); setPvFixedDay('') }}
+                        className={`px-4 py-2 border rounded-lg text-sm font-medium transition-all ${pvFixed === g.bc_sku_id ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-200 hover:border-blue-300'}`}>
+                        {g.capacity}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                {currentFixed && (
-                  <div className="mt-3 p-3 bg-gray-50 rounded-lg text-xs text-gray-500 space-y-1">
-                    <div><span className="text-gray-400">SKU：</span><span className="font-mono">{currentFixed.bc_sku_id}</span></div>
-                    <div><span className="text-gray-400">Copies：</span>{currentFixed.copies}</div>
-                    <div><span className="text-gray-400">天數：</span>{currentFixed.days} 天</div>
+                {currentFixedGroup && (
+                  <div>
+                    <div className="text-sm font-medium text-gray-700">選擇天數</div>
+                    <div className="mt-2 grid grid-cols-6 gap-2">
+                      {currentFixedGroup.days.map((d) => (
+                        <button key={d.day} onClick={() => setPvFixedDay(String(d.day))}
+                          className={`px-2 py-1.5 border rounded-lg text-center text-sm transition-all ${String(d.day) === pvFixedDay ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-gray-200 hover:border-blue-300'}`}>
+                          {d.day}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {currentFixedDay && (
+                  <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                    <span className="text-sm text-gray-500">總計</span>
+                    <span className="text-xl font-bold text-blue-600">NT$ {currentFixedDay.price}</span>
+                  </div>
+                )}
+                {currentFixedGroup && (
+                  <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500 space-y-1">
+                    <div><span className="text-gray-400">SKU：</span><span className="font-mono">{currentFixedGroup.bc_sku_id}</span></div>
+                    <div><span className="text-gray-400">名稱：</span>{currentFixedGroup.bc_name}</div>
+                    <div><span className="text-gray-400">Copies：</span>{currentFixedDay?.copies || '—'}</div>
+                    <div><span className="text-gray-400">天數：</span>{currentFixedDay ? `${currentFixedDay.day} 天` : '—'}</div>
                   </div>
                 )}
               </div>
+              ) : (
+                <div className="mt-4 text-center py-8 text-gray-400 text-sm">無固定方案</div>
+              )
             )}
-
-            {!hasDailyGroups && !hasFixedOptions && (
-              <div className="mt-4 text-center py-8 text-gray-400 text-sm">尚無已定價的套餐</div>
-            )}
-          </div>
-
-          <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-500 space-y-1">
-            <div>日費速度選項：{speedGroups.length} 個（{speedGroups.map((g) => g.speed).join('、') || '無'}）</div>
-            <div>日費天數選項：{speedGroups[0]?.days.length || 0} 個</div>
-            <div>固定套餐選項：{fixedOptions.length} 個</div>
-            <div>未定價規格：{plans.reduce((sum, p) => sum + p.copy_prices.filter((cp) => cp.sell_price <= 0 && !editedPrices.has(cp.id)).length, 0)} 個</div>
           </div>
         </div>
       </div>
@@ -596,7 +674,7 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3"><span className={`px-1.5 py-0.5 text-xs rounded ${getSimColor(plan.bc_type)}`}>{getSimLabel(plan.bc_type)}</span><div className="text-xs text-gray-400 mt-0.5">{isDaily ? '單日' : '總量'}</div></td>
+                  <td className="px-3 py-3"><div className="flex flex-wrap gap-1">{getTypeLabels(plan.bc_type, plan.rechargeable_product).map((t) => <span key={t.label} className={`px-1.5 py-0.5 text-xs rounded ${t.color}`}>{t.label}</span>)}</div><div className="text-xs text-gray-400 mt-0.5">{isDaily ? '單日' : '總量'}</div></td>
                   <td className="px-3 py-3 text-xs">{formatCapacity(plan.high_flow_size ?? plan.capacity, isDaily)}</td>
                   <td className="px-3 py-3 text-xs">{formatSpeed(plan.limit_flow_speed)}</td>
                   <td className="px-3 py-3 text-gray-500 text-xs">{plan.copy_prices.length > 0 ? `${plan.copy_prices.length} 規格` : '-'}</td>

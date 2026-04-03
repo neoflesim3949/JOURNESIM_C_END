@@ -7,21 +7,38 @@ async function checkAuth() {
   return cookieStore.get('admin_token')?.value === process.env.ADMIN_PASSWORD
 }
 
-// PATCH — 批量更新 copies 售價
+// PATCH — 批量更新售價 或 方案名稱/排序
 export async function PATCH(request: Request) {
   if (!(await checkAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { updates } = await request.json() as { updates: { id: string; sell_price: number }[] }
+  const body = await request.json()
   const supabase = createAdminClient()
 
-  for (const u of updates) {
-    await supabase.from('package_plan_prices').update({
-      sell_price: u.sell_price,
-      price_changed: false,  // 儲存後清除異動標記
-    }).eq('id', u.id)
+  // 更新售價
+  if (body.updates) {
+    const updates = body.updates as { id: string; sell_price: number }[]
+    for (const u of updates) {
+      await supabase.from('package_plan_prices').update({
+        sell_price: u.sell_price,
+        price_changed: false,
+      }).eq('id', u.id)
+    }
+    return NextResponse.json({ ok: true, updated: updates.length })
   }
 
-  return NextResponse.json({ ok: true, updated: updates.length })
+  // 更新方案名稱/排序
+  if (body.plan_updates) {
+    const planUpdates = body.plan_updates as { id: string; display_name?: string; sort_order?: number }[]
+    for (const u of planUpdates) {
+      const upd: Record<string, unknown> = {}
+      if (u.display_name !== undefined) upd.display_name = u.display_name || null
+      if (u.sort_order !== undefined) upd.sort_order = u.sort_order
+      await supabase.from('package_plans').update(upd).eq('id', u.id)
+    }
+    return NextResponse.json({ ok: true, updated: planUpdates.length })
+  }
+
+  return NextResponse.json({ error: '缺少 updates 或 plan_updates' }, { status: 400 })
 }
 
 // DELETE — 移除套餐中的 BC 商品

@@ -14,7 +14,7 @@ export async function GET() {
   // 取得所有 BC 國家
   const { data: countries } = await supabase
     .from('bc_countries')
-    .select('mcc, name, continent, flag_url')
+    .select('mcc, name, name_zh, continent, continent_zh, flag_url')
     .order('name')
 
   // 取得每個國家實際綁定的套餐數量（product_packages count）
@@ -38,7 +38,10 @@ export async function GET() {
   }
 
   const result = (countries || []).map((c) => ({
-    ...c,
+    mcc: c.mcc,
+    name: c.name_zh || c.name,
+    continent: c.continent_zh || c.continent,
+    flag_url: c.flag_url,
     product_count: countMap.get(c.mcc) || 0,
   }))
 

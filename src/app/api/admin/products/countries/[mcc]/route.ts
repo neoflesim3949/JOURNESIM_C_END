@@ -18,7 +18,7 @@ export async function GET(
   // 取得國家資訊
   const { data: country } = await supabase
     .from('bc_countries')
-    .select('mcc, name, continent, flag_url')
+    .select('mcc, name, name_zh, continent, continent_zh, flag_url')
     .eq('mcc', mcc)
     .single()
 
@@ -51,5 +51,12 @@ export async function GET(
     _plan_count: pkgCounts.get(p.id) || 0,
   }))
 
-  return NextResponse.json({ country, products: productsWithCount })
+  const countryZh = country ? {
+    mcc: country.mcc,
+    name: country.name_zh || country.name,
+    continent: country.continent_zh || country.continent,
+    flag_url: country.flag_url,
+  } : null
+
+  return NextResponse.json({ country: countryZh, products: productsWithCount })
 }

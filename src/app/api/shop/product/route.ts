@@ -26,11 +26,11 @@ export async function GET(request: Request) {
   if (countryCode) {
     const { data: country } = await supabase
       .from('bc_countries')
-      .select('name, flag_url')
+      .select('name, name_zh, flag_url')
       .eq('mcc', countryCode)
       .single()
     if (country) {
-      countryName = country.name
+      countryName = country.name_zh || country.name
       countryFlag = country.flag_url
     }
   }
@@ -38,8 +38,10 @@ export async function GET(request: Request) {
   // 取得套餐下的所有 BC 商品
   const { data: packagePlans } = await supabase
     .from('package_plans')
-    .select('id, bc_sku_id, plan_category, package_id')
+    .select('id, bc_sku_id, plan_category, package_id, display_name, sort_order')
     .eq('package_id', packageId)
+    .order('sort_order')
+    .order('created_at')
 
   if (!packagePlans || packagePlans.length === 0) {
     return NextResponse.json({
@@ -83,6 +85,8 @@ export async function GET(request: Request) {
         plan_id: p.id,
         bc_sku_id: p.bc_sku_id,
         bc_name: bc?.name || '',
+        display_name: p.display_name || null,
+        sort_order: p.sort_order || 0,
         plan_category: p.plan_category,
         plan_type: bc?.plan_type || null,
         days: bc?.days ? Number(bc.days) : null,

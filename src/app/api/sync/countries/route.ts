@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getCountries } from '@/lib/billionconnect'
+import { translateCountryName, translateCountryNameEn, translateContinent, translateContinentEn } from '@/lib/country-translations'
 
 const BATCH_SIZE = 30
 
@@ -13,11 +14,14 @@ export async function POST() {
     const records = countries.map((c) => ({
       mcc: c.mcc,
       name: c.name,
+      name_zh: translateCountryName(c.name),
+      name_en: translateCountryNameEn(c.name),
       continent: c.continent,
+      continent_zh: translateContinent(c.continent),
+      continent_en: translateContinentEn(c.continent),
       flag_url: c.url || null,
     }))
 
-    // 分批 upsert
     let synced = 0
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
       const batch = records.slice(i, i + BATCH_SIZE)
