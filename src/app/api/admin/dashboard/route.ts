@@ -101,16 +101,23 @@ export async function GET(request: Request) {
   }]))
 
   // 取得 package_id -> country 映射
-  const { data: pkgCountries } = await supabase.from('product_packages')
-    .select('package_id, products(country_code, bc_countries(scope, name_zh))')
-  
+  const { data: pkgCountries } = await supabase.from('country_packages')
+    .select('package_id, mcc')
+
+  // 取得 mcc -> country info
+  const allMccs = [...new Set((pkgCountries || []).map((p) => p.mcc))]
+  const { data: countryInfo } = allMccs.length > 0
+    ? await supabase.from('bc_countries').select('mcc, scope, name_zh, name').in('mcc', allMccs)
+    : { data: [] }
+  const mccInfoMap = new Map((countryInfo || []).map((c) => [c.mcc, c]))
+
   const pkgCountryMap = new Map()
   for (const ps of pkgCountries || []) {
-    const country = (ps as any).products?.bc_countries
-    if (country && !pkgCountryMap.has(ps.package_id)) {
+    const info = mccInfoMap.get(ps.mcc)
+    if (info && !pkgCountryMap.has(ps.package_id)) {
       pkgCountryMap.set(ps.package_id, {
-        scope: country.scope || 'local',
-        name: country.name_zh || (ps as any).products.country_code
+        scope: info.scope || 'local',
+        name: info.name_zh || info.name || ps.mcc
       })
     }
   }

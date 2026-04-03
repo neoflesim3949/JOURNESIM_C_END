@@ -1,47 +1,26 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkAdminAuth, getUnauthorizedResponse } from '@/lib/admin'
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('admin_token')?.value
-  if (token !== process.env.ADMIN_PASSWORD) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
 
   const { searchParams } = new URL(request.url)
   const scope = searchParams.get('scope') || 'local'
-
   const supabase = createAdminClient()
 
-  // 取得 BC 國家或類別群組
   const { data: countries } = await supabase
     .from('bc_countries')
     .select('mcc, name, name_zh, continent, continent_zh, flag_url, icon_url, scope')
     .eq('scope', scope)
     .order('name')
 
-  // 取得每個國家實際綁定的套餐數量（product_packages count）
-  const { data: products } = await supabase
-    .from('products')
-    .select('id, country_code')
-
-  const productIdToCountry = new Map<string, string>()
-  for (const p of products || []) {
-    productIdToCountry.set(p.id, p.country_code)
-  }
-
-  const { data: links } = await supabase
-    .from('product_packages')
-    .select('product_id')
-
+  // 套餐數量：直接從 country_packages 統計
+  const { data: links } = await supabase.from('country_packages').select('mcc')
   const countMap = new Map<string, number>()
-  for (const l of links || []) {
-    const cc = productIdToCountry.get(l.product_id)
-    if (cc) countMap.set(cc, (countMap.get(cc) || 0) + 1)
-  }
+  for (const l of links || []) countMap.set(l.mcc, (countMap.get(l.mcc) || 0) + 1)
 
-  const result = (countries || []).map((c) => ({
+  return NextResponse.json((countries || []).map((c) => ({
     mcc: c.mcc,
     name: c.name_zh || c.name,
     continent: c.continent_zh || c.continent,
@@ -49,7 +28,5 @@ export async function GET(request: Request) {
     icon_url: c.icon_url,
     scope: c.scope,
     product_count: countMap.get(c.mcc) || 0,
-  }))
-
-  return NextResponse.json(result)
+  })))
 }

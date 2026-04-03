@@ -27,7 +27,7 @@ export async function GET() {
   if (packageIds.length > 0) {
     const [{ data: plans }, { data: productPkgs }] = await Promise.all([
       supabase.from('package_plans').select('package_id').in('package_id', packageIds),
-      supabase.from('product_packages').select('package_id').in('package_id', packageIds),
+      supabase.from('country_packages').select('package_id').in('package_id', packageIds),
     ])
 
     for (const p of plans || []) {
@@ -115,8 +115,8 @@ export async function DELETE(request: Request) {
   // 3. 刪除 package_plans
   await supabase.from('package_plans').delete().eq('package_id', id)
 
-  // 4. 刪除 product_packages 關聯
-  await supabase.from('product_packages').delete().eq('package_id', id)
+  // 4. 刪除 country_packages 關聯
+  await supabase.from('country_packages').delete().eq('package_id', id)
 
   // 5. 刪除套餐本身
   await supabase.from('packages').delete().eq('id', id)

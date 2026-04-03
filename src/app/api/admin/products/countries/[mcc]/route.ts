@@ -1,54 +1,24 @@
 import { NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkAdminAuth, getUnauthorizedResponse } from '@/lib/admin'
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ mcc: string }> }
 ) {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('admin_token')?.value
-  if (token !== process.env.ADMIN_PASSWORD) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
+  if (!(await checkAdminAuth())) return getUnauthorizedResponse()
   const { mcc } = await params
   const supabase = createAdminClient()
 
-  // 取得國家資訊
   const { data: country } = await supabase
     .from('bc_countries')
     .select('mcc, name, name_zh, continent, continent_zh, flag_url, icon_url, scope')
     .eq('mcc', mcc)
     .single()
 
-  // 取得此國家的商品
-  const { data: products } = await supabase
-    .from('products')
-    .select('*')
-    .eq('country_code', mcc)
-    .order('sort_order')
-    .order('created_at', { ascending: false })
-
-  // 計算每個商品綁定的套餐數
-  const productIds = (products || []).map((p) => p.id)
-
-  const pkgCounts = new Map<string, number>()
-  if (productIds.length > 0) {
-    const { data: links } = await supabase
-      .from('product_packages')
-      .select('product_id')
-      .in('product_id', productIds)
-
-    for (const l of links || []) {
-      pkgCounts.set(l.product_id, (pkgCounts.get(l.product_id) || 0) + 1)
-    }
-  }
-
-  const productsWithCount = (products || []).map((p) => ({
-    ...p,
-    _plan_count: pkgCounts.get(p.id) || 0,
-  }))
+  // 套餐數量
+  const { data: links } = await supabase.from('country_packages').select('package_id').eq('mcc', mcc)
+  const pkgCount = (links || []).length
 
   const countryZh = country ? {
     mcc: country.mcc,
@@ -57,7 +27,8 @@ export async function GET(
     flag_url: country.flag_url,
     icon_url: country.icon_url,
     scope: country.scope,
+    package_count: pkgCount,
   } : null
 
-  return NextResponse.json({ country: countryZh, products: productsWithCount })
+  return NextResponse.json({ country: countryZh })
 }
