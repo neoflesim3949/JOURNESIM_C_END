@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle, Wifi, CreditCard } from 'lucide-react'
+import { ArrowLeft, CheckCircle, Wifi, CreditCard, Gift } from 'lucide-react'
 import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
@@ -30,6 +30,9 @@ function CheckoutContent() {
   const [shippingName, setShippingName] = useState('')
   const [shippingPhone, setShippingPhone] = useState('')
   const [shippingAddress, setShippingAddress] = useState('')
+  const [pointsToRedeem, setPointsToRedeem] = useState<number>(0)
+  const [availablePoints, setAvailablePoints] = useState<number>(0)
+  const [isPointsLoading, setIsPointsLoading] = useState(false)
   const hasSim = simItems.length > 0
 
   useEffect(() => {
@@ -39,6 +42,12 @@ function CheckoutContent() {
 
   useEffect(() => {
     fetch('/api/shop/saved-cards').then((r) => r.json()).then(setSavedCards).catch(() => {})
+    
+    // 獲取用戶點數
+    setIsPointsLoading(true)
+    fetch('/api/account/affiliate').then(r => r.json()).then(data => {
+      if (data.member) setAvailablePoints(data.member.points || 0)
+    }).finally(() => setIsPointsLoading(false))
   }, [])
 
   async function handlePrime(prime: string, method: string) {
@@ -59,6 +68,7 @@ function CheckoutContent() {
           result_url: resultUrl,
           save_card: saveCard,
           card_id: selectedCardId || undefined,
+          points_to_redeem: pointsToRedeem,
           ...(hasSim ? { shipping_name: shippingName, shipping_phone: shippingPhone, shipping_address: shippingAddress } : {}),
         }),
       })
@@ -161,8 +171,13 @@ function CheckoutContent() {
           )}
 
           <div className="flex justify-between pt-3 border-t border-border">
+            <span className="font-medium text-muted-foreground">折抵點數</span>
+            <span className="font-medium text-orange-600">-{formatPrice(pointsToRedeem)}</span>
+          </div>
+
+          <div className="flex justify-between pt-3 border-t border-border">
             <span className="font-medium">合計</span>
-            <span className="text-lg font-bold text-primary">{formatPrice(totalPrice)}</span>
+            <span className="text-lg font-bold text-primary">{formatPrice(Math.max(0, totalPrice - pointsToRedeem))}</span>
           </div>
 
           {esimItems.length > 0 && simItems.length > 0 && (
@@ -206,7 +221,43 @@ function CheckoutContent() {
           )}
         </div>
 
-        {/* TapPay Form */}
+          {/* Points Redemption */}
+          {availablePoints > 0 && (
+            <div className="p-4 bg-orange-50 border border-orange-100 rounded-lg space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold text-orange-700">
+                  <Gift className="w-4 h-4" /> 點數折抵
+                </div>
+                <div className="text-xs text-orange-600">
+                  可用餘額: {Math.floor(availablePoints)} P
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="number"
+                    value={pointsToRedeem || ''}
+                    onChange={(e) => {
+                      const val = Math.min(Number(e.target.value), Math.floor(availablePoints), totalPrice)
+                      setPointsToRedeem(val > 0 ? val : 0)
+                    }}
+                    placeholder="輸入折抵點數"
+                    className="w-full pl-3 pr-8 py-2 border border-orange-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-orange-400 font-bold">P</span>
+                </div>
+                <button
+                  onClick={() => setPointsToRedeem(Math.min(Math.floor(availablePoints), totalPrice))}
+                  className="px-3 py-2 bg-orange-100 text-orange-700 text-xs font-bold rounded-md hover:bg-orange-200 transition-colors"
+                >
+                  全部折抵
+                </button>
+              </div>
+              <p className="text-[10px] text-orange-600/80">1 點可折抵 NT$1</p>
+            </div>
+          )}
+
+          {/* TapPay Form */}
         <TapPayForm
           onPrimeReady={handlePrime}
           loading={loading}

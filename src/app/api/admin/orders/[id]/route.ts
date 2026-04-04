@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { calculateOrderRewards, reverseRewards } from '@/lib/referral'
 
 
 // GET — 取得訂單完整 L1/L2/L3 結構
@@ -75,6 +76,17 @@ export async function PATCH(
   // 更新主訂單狀態
   if (body.order_status) {
     await supabase.from('orders').update({ status: body.order_status, updated_at: new Date().toISOString() }).eq('id', id)
+    
+    // 如果狀態變為 completed，發放點數獎勵
+    if (body.order_status === 'completed') {
+      await calculateOrderRewards(supabase, id)
+    }
+    
+    // 如果狀態變為 refunded，追回點數
+    if (body.order_status === 'refunded') {
+      await reverseRewards(supabase, id)
+    }
+
     return NextResponse.json({ ok: true })
   }
 

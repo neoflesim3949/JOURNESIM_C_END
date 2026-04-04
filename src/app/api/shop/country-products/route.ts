@@ -8,7 +8,7 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient()
 
-  // country_packages → packages
+  // 取得關聯的套餐 IDs (修正橋接表名稱)
   const { data: links } = await supabase
     .from('country_packages')
     .select('package_id')
@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const packageIds = [...new Set((links || []).map((l) => l.package_id))]
   if (packageIds.length === 0) return NextResponse.json([])
 
+  // 取得套餐資訊 (使用正確的 packages 表)
   const { data: packages } = await supabase
     .from('packages')
     .select('id, name, description, product_type, is_active')

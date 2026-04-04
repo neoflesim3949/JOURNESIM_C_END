@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { generateReferralCode, bindReferrer } from '@/lib/referral'
 
 // GET — 取得暫存的第三方登入資料
 export async function GET() {
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
       display_name: socialData.display_name || null,
       avatar_url: socialData.avatar_url || null,
       auth_provider: socialData.provider,
+      referral_code: generateReferralCode(), // 生成唯一推薦碼
     }
     if (socialData.provider === 'line') memberData.line_user_id = socialData.provider_id
     if (socialData.provider === 'google') memberData.google_user_id = socialData.provider_id
@@ -108,6 +110,13 @@ export async function POST(request: Request) {
     if (socialData.provider === 'facebook') memberData.facebook_user_id = socialData.provider_id
 
     await supabase.from('members').upsert(memberData, { onConflict: 'id' })
+
+    // 處理推薦綁定
+    const referralCode = cookieStore.get('flesim_ref')?.value
+    if (referralCode) {
+      await bindReferrer(supabase, authUser.user.id, referralCode)
+      cookieStore.delete('flesim_ref') // 綁定後刪除推薦 Cookie
+    }
 
     // 用 magic link 登入
     const { data: link } = await supabase.auth.admin.generateLink({ type: 'magiclink', email })

@@ -10,13 +10,25 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient()
 
-  // 從 packages 表查套餐
-  const { data: pkg } = await supabase
+  // 取得套餐資訊 (使用正確的 packages 表)
+  let { data: pkg } = await supabase
     .from('packages')
     .select('*')
     .eq('id', packageId)
     .eq('is_active', true)
     .single()
+
+  // 如果透過 ID 找不到，且 ID 看起來像 MCC (例如 SEA6)，則嘗試搜尋 country_code
+  if (!pkg && packageId) {
+    const { data: fallbackPkg } = await supabase
+      .from('packages')
+      .select('*')
+      .eq('country_code', packageId)
+      .eq('is_active', true)
+      .limit(1)
+      .single()
+    if (fallbackPkg) pkg = fallbackPkg
+  }
 
   if (!pkg) return NextResponse.json({ error: '套餐不存在' }, { status: 404 })
 

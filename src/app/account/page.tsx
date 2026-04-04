@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import {
   Package, Smartphone, CreditCard, User, Globe, DollarSign,
-  HelpCircle, Mail, Info, LogOut, ChevronRight
+  HelpCircle, Mail, Info, LogOut, ChevronRight, TrendingUp
 } from 'lucide-react'
 
 interface UserProfile {
@@ -17,6 +17,7 @@ export default function AccountPage() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [cardCount, setCardCount] = useState(0)
+  const [userPoints, setUserPoints] = useState<number | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -35,6 +36,10 @@ export default function AccountPage() {
 
       // 取得已儲存卡片數量
       fetch('/api/shop/saved-cards').then((r) => r.json()).then((cards) => setCardCount(cards.length))
+      // 取得點數
+      fetch('/api/account/affiliate').then((r) => r.json()).then((data) => {
+        if (data.member) setUserPoints(data.member.points)
+      })
 
       setLoading(false)
     }
@@ -56,6 +61,7 @@ export default function AccountPage() {
       items: [
         { href: '/orders', icon: Package, label: '我的訂單', desc: '查看訂單記錄與狀態' },
         { href: '/account/esims', icon: Smartphone, label: '我的卡片', desc: '查看 eSIM / SIM 卡狀態與用量' },
+        { href: '/account/affiliate', icon: TrendingUp, label: '聯盟行銷', desc: userPoints !== null ? `${userPoints} P` : '查看推薦獎勵' },
         { href: '/account/cards', icon: CreditCard, label: '卡片', desc: `已儲存 ${cardCount} 張卡片`, badge: cardCount > 0 ? String(cardCount) : undefined },
       ],
     },

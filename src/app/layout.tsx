@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ConditionalLayout } from "@/components/layout/conditional-layout";
 import { CartProvider } from "@/lib/cart";
 import { AnalyticsScripts } from "@/components/tracking/analytics";
+import { ReferralTracker } from "@/components/referral/ReferralTracker";
+import { Suspense } from "react";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -59,6 +61,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <CartProvider>
           <AnalyticsScripts />
+          <Suspense fallback={null}>
+            <ReferralTracker />
+          </Suspense>
           <ConditionalLayout>{children}</ConditionalLayout>
         </CartProvider>
       </body>

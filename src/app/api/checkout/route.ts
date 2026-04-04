@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateOrderId, generateSubOrderId, generateSkuId } from '@/lib/utils'
+import { generateReferralCode } from '@/lib/referral'
 import { payByPrime, payByToken } from '@/lib/tappay'
 import { createEsimOrder } from '@/lib/billionconnect'
 
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
     shipping_name?: string
     shipping_phone?: string
     shipping_address?: string
+    points_to_redeem?: number
   }
 
   if (!email || !items || items.length === 0) {
@@ -46,13 +48,29 @@ export async function POST(request: Request) {
         id: user.id, email: user.email || email,
         display_name: user.user_metadata?.display_name || null,
         auth_provider: user.app_metadata?.provider || 'email',
+        referral_code: generateReferralCode(),
       })
     }
     memberId = user.id
   }
 
-  // 計算總金額
-  const totalAmount = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
+  // 計算購物車總計
+  const cartTotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
+  let redeemAmount = 0
+
+  // 處理點數抵扣
+  if (memberId && body.points_to_redeem && body.points_to_redeem > 0) {
+    const { data: member } = await supabase.from('members').select('points').eq('id', memberId).single()
+    if (member && member.points >= body.points_to_redeem) {
+      redeemAmount = Math.min(body.points_to_redeem, cartTotal)
+      // 這裡暫時不扣除，等付款成功再扣，以免付款失敗點數卻消失
+    } else {
+      return NextResponse.json({ error: '點數不足' }, { status: 400 })
+    }
+  }
+
+  // 最終應付金額
+  const totalAmount = Math.max(0, cartTotal - redeemAmount)
   const orderNumber = generateOrderId()
 
   // =====================================================
@@ -131,6 +149,7 @@ export async function POST(request: Request) {
       order_number: orderNumber,
       status: paymentStatus === 'paid' ? 'paid' : 'pending_payment',
       total_amount: totalAmount,
+      redeem_points: redeemAmount, // 儲存抵扣點數
       payment_method,
       tappay_trade_id: tappayTradeId,
       cart_items: items,
@@ -150,6 +169,23 @@ export async function POST(request: Request) {
       status: paymentStatus === 'paid' ? 'success' : 'pending',
       raw_response: tappayRaw,
     })
+  }
+
+  // 如果付款成功且有點數抵扣，更新點數日誌與餘額
+  if (paymentStatus === 'paid' && memberId && redeemAmount > 0) {
+    await supabase.from('point_logs').insert({
+      member_id: memberId,
+      source_order_id: order.id,
+      amount: -redeemAmount,
+      point_type: 'redeem',
+      status: 'confirmed',
+      available_at: new Date().toISOString()
+    })
+    
+    const { data: member } = await supabase.from('members').select('points').eq('id', memberId).single()
+    if (member) {
+      await supabase.from('members').update({ points: member.points - redeemAmount }).eq('id', memberId)
+    }
   }
 
   // =====================================================
