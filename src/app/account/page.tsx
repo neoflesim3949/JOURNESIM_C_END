@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import {
   Package, Smartphone, CreditCard, User, Globe, DollarSign,
-  HelpCircle, Mail, Info, LogOut, ChevronRight, TrendingUp
+  HelpCircle, Mail, Info, LogOut, ChevronRight, TrendingUp, Trophy, Wallet, Gift
 } from 'lucide-react'
 
 interface UserProfile {
@@ -60,9 +60,8 @@ export default function AccountPage() {
     {
       items: [
         { href: '/orders', icon: Package, label: '我的訂單', desc: '查看訂單記錄與狀態' },
-        { href: '/account/esims', icon: Smartphone, label: '我的卡片', desc: '查看 eSIM / SIM 卡狀態與用量' },
-        { href: '/account/affiliate', icon: TrendingUp, label: '聯盟行銷', desc: userPoints !== null ? `${userPoints} P` : '查看推薦獎勵' },
-        { href: '/account/cards', icon: CreditCard, label: '卡片', desc: `已儲存 ${cardCount} 張卡片`, badge: cardCount > 0 ? String(cardCount) : undefined },
+        { href: '/account/simcards', icon: Smartphone, label: '我的卡片', desc: '查看 eSIM / SIM 卡狀態與用量' },
+        { href: '/account/cards', icon: CreditCard, label: '支付方式', desc: `已儲存 ${cardCount} 張卡片`, badge: cardCount > 0 ? String(cardCount) : undefined },
       ],
     },
     {
@@ -87,15 +86,65 @@ export default function AccountPage() {
 
       {/* Profile Header */}
       <div className="mt-6 flex flex-col items-center">
-        <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+        <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center relative">
           <span className="text-2xl font-bold text-primary">
             {(user?.display_name || user?.email || '?').charAt(0).toUpperCase()}
           </span>
+          <div className="absolute -bottom-1 -right-1 bg-yellow-400 p-1 rounded-full border-2 border-white shadow-sm">
+            <Trophy className="w-3 h-3 text-white" />
+          </div>
         </div>
         <h2 className="mt-3 text-lg font-semibold">{user?.display_name || user?.email}</h2>
-        {user?.display_name && (
-          <p className="text-sm text-muted-foreground">{user.email}</p>
-        )}
+        <div className="mt-1 px-2 py-0.5 bg-muted rounded-full text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+          白銀會員
+        </div>
+      </div>
+
+      {/* Main Feature Cards */}
+      <div className="mt-8 grid gap-4">
+        {/* F Points Card */}
+        <Link href="/account/points" className="group p-5 bg-gray-900 text-white rounded-2xl border border-gray-800 flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98] shadow-xl overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+            <Wallet size={100} />
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-white/10 rounded-xl">
+              <Wallet className="w-6 h-6 text-yellow-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-400">F Point 餘額</p>
+              <div className="mt-1 flex items-baseline gap-1">
+                <span className="text-2xl font-extrabold">{userPoints !== null ? Math.floor(userPoints) : '--'}</span>
+                <span className="text-xs font-bold text-gray-500">P</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-xl text-sm font-bold hover:bg-white/20 transition-colors">
+            兌換碼 <ChevronRight className="w-4 h-4" />
+          </div>
+        </Link>
+
+        {/* Affiliate Marketing Card (Purple Refernce style) */}
+        <Link href="/account/affiliate" className="group p-5 bg-gradient-to-br from-[#8E2DE2] to-[#4A00E0] text-white rounded-2xl flex items-center justify-between transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-purple-500/20 overflow-hidden relative">
+          <div className="absolute top-0 right-0 p-3 opacity-20 transform translate-x-4 -translate-y-4 group-hover:scale-110 transition-transform">
+            <div className="flex -space-x-4">
+              <div className="w-20 h-20 bg-white/20 rounded-full backdrop-blur-sm" />
+              <div className="w-20 h-20 bg-white/10 rounded-full backdrop-blur-sm mt-8" />
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-white/20 rounded-xl backdrop-blur-md">
+              <TrendingUp className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-bold opacity-90">邀請好友 賺取獎勵</p>
+              <p className="text-[11px] opacity-70 mt-0.5">最高可賺取 6% + 3% 分潤</p>
+            </div>
+          </div>
+          <div className="px-4 py-2 bg-white text-[#4A00E0] rounded-xl text-sm font-black shadow-lg">
+            立即邀請
+          </div>
+        </Link>
       </div>
 
       {/* Menu Sections */}
@@ -104,9 +153,8 @@ export default function AccountPage() {
           <div key={si} className="bg-white rounded-xl border border-border overflow-hidden">
             {section.items.map((item, ii) => {
               const isLink = item.href !== '#' && !('disabled' in item && item.disabled)
-              const cls = `flex items-center gap-4 px-4 py-3.5 transition-colors ${
-                ii > 0 ? 'border-t border-border' : ''
-              } ${isLink ? 'hover:bg-muted cursor-pointer' : 'opacity-60'}`
+              const cls = `flex items-center gap-4 px-4 py-3.5 transition-colors ${ii > 0 ? 'border-t border-border' : ''
+                } ${isLink ? 'hover:bg-muted cursor-pointer' : 'opacity-60'}`
 
               const content = (
                 <>

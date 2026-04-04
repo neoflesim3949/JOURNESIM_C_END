@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, ShoppingCart, RefreshCw, LogOut,
-  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard
+  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -35,7 +35,20 @@ const NAV_ITEMS: NavItem[] = [
   },
   { href: '/admin/orders', label: '訂單管理', icon: ShoppingCart },
   { href: '/admin/cards', label: '卡片管理', icon: CreditCard },
-  { href: '/admin/members', label: '會員管理', icon: Users },
+  { 
+    href: '/admin/members', label: '會員管理', icon: Users,
+    children: [
+      { href: '/admin/members', label: '會員名單' },
+      { href: '/admin/members/points', label: '點數管理 (F Point)' },
+    ]
+  },
+  {
+    href: '/admin/marketing', label: '行銷管理', icon: Gift,
+    children: [
+        { href: '/admin/params/referral', label: '聯盟行銷設定' },
+        { href: '/admin/marketing/tiers', label: '會員等級管理' },
+    ]
+  },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
   {
     href: '/admin/params', label: '參數管理', icon: Globe,
@@ -44,7 +57,6 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/params/ads', label: '廣告追蹤' },
       { href: '/admin/params/exchange-rate', label: '匯率管理' },
       { href: '/admin/params/countries', label: '國家 MCC 管理' },
-      { href: '/admin/params/referral', label: '聯盟行銷設定' },
       { href: '/admin/params/login', label: '登入管理' },
     ],
   },

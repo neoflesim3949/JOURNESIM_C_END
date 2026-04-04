@@ -1,63 +1,33 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 
 /**
- * 綁定推薦人邏輯
- * 規則：僅限新用戶（無訂單紀錄），且驗證推薦碼有效
+ * 綁定推薦人邏輯 (永久綁定)
  */
-export async function bindReferrer(
-  supabase: SupabaseClient,
-  userId: string,
-  referralCode: string
-) {
+export async function bindReferrer(supabase: SupabaseClient, userId: string, referralCode: string) {
   if (!referralCode) return { success: false, error: '缺少推薦碼' }
 
-  // 1. 檢查用戶是否已有推薦人
-  const { data: member } = await supabase
-    .from('members')
-    .select('id, referrer_id')
-    .eq('id', userId)
-    .single()
-
+  const { data: member } = await supabase.from('members').select('id, referrer_id').eq('id', userId).single()
   if (!member) return { success: false, error: '用戶不存在' }
   if (member.referrer_id) return { success: false, error: '用戶已綁定過推薦人' }
 
-  // 2. 搜尋推薦人 (L1)
-  const { data: l1Referrer } = await supabase
-    .from('members')
-    .select('id, referrer_id')
-    .eq('referral_code', referralCode)
-    .single()
-
+  const { data: l1Referrer } = await supabase.from('members').select('id, referrer_id').eq('referral_code', referralCode).single()
   if (!l1Referrer) return { success: false, error: '無效的推薦碼' }
   if (l1Referrer.id === userId) return { success: false, error: '不能推薦自己' }
 
-  // 3. 獲取 L2 推薦人 (推薦人的推薦人)
-  const l2ReferrerId = l1Referrer.referrer_id
+  await supabase.from('members').update({ referrer_id: l1Referrer.id }).eq('id', userId)
+  
+  await supabase.from('referral_logs').upsert({
+    user_id: userId,
+    l1_referrer_id: l1Referrer.id,
+    l2_referrer_id: l1Referrer.referrer_id || null,
+  }, { onConflict: 'user_id' })
 
-  // 4. 更新用戶的基礎推薦資訊
-  await supabase
-    .from('members')
-    .update({ referrer_id: l1Referrer.id })
-    .eq('id', userId)
-
-  // 5. 寫入 Referral_Log 建立永久兩級關係
-  const { error: logError } = await supabase
-    .from('referral_logs')
-    .upsert({
-      user_id: userId,
-      l1_referrer_id: l1Referrer.id,
-      l2_referrer_id: l2ReferrerId || null,
-    }, { onConflict: 'user_id' })
-
-  if (logError) return { success: false, error: logError.message }
-
-  // 6. 發放註冊禮 (例如 $50 優惠券 - 這裡暫時以 Logs 紀錄或未來對接優惠券系統)
-  // 點數發放
+  // 發放註冊禮 F Point (50 點)
   await supabase.from('point_logs').insert({
     member_id: userId,
     amount: 50,
     point_type: 'signup',
-    status: 'confirmed', // 註冊禮直接生效
+    status: 'confirmed',
     available_at: new Date().toISOString()
   })
 
@@ -65,150 +35,143 @@ export async function bindReferrer(
 }
 
 /**
- * 計算與分發點數獎勵
- * 觸發時機：訂單狀態轉為 Completed
+ * 級差獎金計算邏輯 (Differential Logic)
+ * 當訂單 Completed 時，根據鏈條發放分潤
  */
-export async function calculateOrderRewards(
-  supabase: SupabaseClient,
-  orderId: string
-) {
-  // 1. 獲取推薦配置 (從 system_settings 讀取)
-  const { data: settings } = await supabase.from('system_settings').select('key, value')
-  const settingMap = new Map((settings || []).map(s => [s.key, Number(s.value)]))
-  
-  const l1Percent = settingMap.get('referral_l1_percent') || 0.05
-  const l2Percent = settingMap.get('referral_l2_percent') || 0.02
-  const l1FirstBuyBonus = settingMap.get('referral_l1_bonus') || 50
-  const minSpend = settingMap.get('referral_min_spend') || 100
-  const lockDays = settingMap.get('referral_lock_days') || 14
-
-  // 2. 獲取訂單詳情
-  const { data: order } = await supabase
-    .from('orders')
-    .select('id, member_id, total_amount, status, created_at')
-    .eq('id', orderId)
-    .single()
-
+export async function calculateOrderRewards(supabase: SupabaseClient, orderId: string) {
+  // 1. 取得訂單與會員資料
+  const { data: order } = await supabase.from('orders').select('*').eq('id', orderId).single()
   if (!order || order.status !== 'completed') return { success: false, error: '訂單未完成' }
 
-  // 3. 獲取推薦關係
-  const { data: refLog } = await supabase
-    .from('referral_logs')
-    .select('*')
-    .eq('user_id', order.member_id)
-    .single()
-
-  if (!refLog) return { success: true, message: '無推薦關係' }
-
-  const rewards = []
+  // 2. 獲取所有等級配置
+  const { data: tiers } = await supabase.from('member_tiers').select('*').order('sort_order', { ascending: true })
+  const tierMap = new Map((tiers || []).map(t => [t.id, t]))
+  
+  // 3. 獲取系統基礎設定 (如鎖定期)
+  const { data: settings } = await supabase.from('system_settings').select('key, value')
+  const settingMap = new Map((settings || []).map(s => [s.key, Number(s.value)]))
+  const lockDays = settingMap.get('referral_lock_days') || 14
   const availableAt = new Date()
   availableAt.setDate(availableAt.getDate() + lockDays)
 
-  const { count: previousOrders } = await supabase
-    .from('orders')
-    .select('id', { count: 'exact', head: true })
-    .eq('member_id', order.member_id)
-    .eq('status', 'completed')
+  // 4. 計算分潤鏈 (Ancestors Chain)
+  // 獲取購買者的直接上級
+  const chain: any[] = []
+  let currentId = order.member_id
   
-  const isFirstBuy = (previousOrders || 0) <= 1 // 本次是第一筆 Completed
+  // 獲取購買者的資訊（決定是否首購）
+  const { count: previousOrders } = await supabase.from('orders').select('id', { count: 'exact', head: true }).eq('member_id', order.member_id).eq('status', 'completed')
+  const isFirstBuy = (previousOrders || 0) <= 1
 
-  // 4. L1 獎勵計算
-  if (refLog.l1_referrer_id) {
-    // 首購加碼點數 (需滿門檻)
-    if (isFirstBuy && order.total_amount >= minSpend) {
-      rewards.push({
-        member_id: refLog.l1_referrer_id,
-        source_order_id: orderId,
-        amount: l1FirstBuyBonus,
-        point_type: 'first_buy',
-        status: 'pending',
-        available_at: availableAt.toISOString()
-      })
-    }
-    // 5% 分潤
-    const l1Comm = Math.floor(order.total_amount * l1Percent)
-    if (l1Comm > 0) {
-      rewards.push({
-        member_id: refLog.l1_referrer_id,
-        source_order_id: orderId,
-        amount: l1Comm,
-        point_type: 'l1_commission',
-        status: 'pending',
-        available_at: availableAt.toISOString()
-      })
-    }
+  // 追溯上級 (最多往上追 10 級以防死循環)
+  for (let i = 0; i < 10; i++) {
+    const { data: member } = await supabase.from('members').select('id, referrer_id, tier_id').eq('id', currentId).single()
+    if (!member || !member.referrer_id) break
+    const { data: parent } = await supabase.from('members').select('id, referrer_id, tier_id').eq('id', member.referrer_id).single()
+    if (!parent) break
+    chain.push(parent)
+    currentId = parent.id
   }
 
-  // 5. L2 獎勵計算 (2% 分潤)
-  if (refLog.l2_referrer_id) {
-    const l2Comm = Math.floor(order.total_amount * l2Percent)
-    if (l2Comm > 0) {
-      rewards.push({
-        member_id: refLog.l2_referrer_id,
-        source_order_id: orderId,
-        amount: l2Comm,
-        point_type: 'l2_commission',
-        status: 'pending',
-        available_at: availableAt.toISOString()
-      })
+  const rewards: any[] = []
+
+  // 🧪 級差計算規則：
+  // L1 總支出上限 6% (最高等級)，L2 總支出上限 3% (最高等級)
+  let paidL1Rate = 0
+  let paidL2Rate = 0
+
+  // 鏈條： purchaser -> chain[0](Parent) -> chain[1](Grandparent) -> ...
+  for (let level = 0; level < chain.length; level++) {
+    const member = chain[level]
+    const tier = tierMap.get(member.tier_id)
+    if (!tier) continue
+
+    // 🏆 一級獎金 (直接或差額遞補)
+    if (paidL1Rate < 0.06) {
+      const currentRate = Number(tier.l1_rate) || 0
+      const diff = Math.max(0, currentRate - paidL1Rate)
+      if (diff > 0) {
+        rewards.push({
+          member_id: member.id,
+          source_order_id: orderId,
+          amount: Math.floor(order.total_amount * diff),
+          point_type: level === 0 ? 'l1_commission' : 'l1_commission_diff', // 標註是首層還是級差
+          status: 'pending',
+          available_at: availableAt.toISOString()
+        })
+        paidL1Rate = currentRate
+      }
+    }
+
+    // 🏆 二級獎金 (從 Grandparent 開始計算，支援級差)
+    if (level >= 1 && paidL2Rate < 0.03) {
+      const currentRate = Number(tier.l2_rate) || 0
+      const diff = Math.max(0, currentRate - paidL2Rate)
+      if (diff > 0) {
+        rewards.push({
+          member_id: member.id,
+          source_order_id: orderId,
+          amount: Math.floor(order.total_amount * diff),
+          point_type: level === 1 ? 'l2_commission' : 'l2_commission_diff',
+          status: 'pending',
+          available_at: availableAt.toISOString()
+        })
+        paidL2Rate = currentRate
+      }
+    }
+
+    // 🏆 首購加碼 (僅限直接推薦人 L1)
+    if (level === 0 && isFirstBuy) {
+        const bonus = settingMap.get('referral_l1_bonus') || 50
+        if (bonus > 0) {
+            rewards.push({
+                member_id: member.id,
+                source_order_id: orderId,
+                amount: bonus,
+                point_type: 'first_buy',
+                status: 'pending',
+                available_at: availableAt.toISOString()
+            })
+        }
     }
   }
 
   if (rewards.length > 0) {
-    const { error } = await supabase.from('point_logs').insert(rewards)
-    if (error) return { success: false, error: error.message }
+    await supabase.from('point_logs').insert(rewards)
   }
 
   return { success: true }
 }
 
 /**
- * 追回點數 (Refund Clawback)
- * 觸發條件：訂單退款 (Refunded)
+ * 追回點數 (Clawback Logic)
  */
-export async function reverseRewards(
-  supabase: SupabaseClient,
-  orderId: string
-) {
-  // 1. 找出所有與此訂單相關的 Pending 或 Confirmed 點數
-  const { data: logs } = await supabase
-    .from('point_logs')
-    .select('*')
-    .eq('source_order_id', orderId)
-    .neq('status', 'void')
-
+export async function reverseRewards(supabase: SupabaseClient, orderId: string) {
+  const { data: logs } = await supabase.from('point_logs').select('*').eq('source_order_id', orderId).neq('status', 'void')
   if (!logs || logs.length === 0) return { success: true }
 
   for (const log of logs) {
-    // 建立一筆負向的 Clawback 記錄
     await supabase.from('point_logs').insert({
       member_id: log.member_id,
       source_order_id: orderId,
       amount: -log.amount,
       point_type: 'clawback',
-      status: 'confirmed', // 扣除立即生效
+      status: 'confirmed',
       available_at: new Date().toISOString()
     })
-
-    // 更新原始記錄狀態為已作廢
     await supabase.from('point_logs').update({ status: 'void' }).eq('id', log.id)
-
-    // TODO: 如果已轉為可用 (Confirmed)，需要同步扣除 members.points 餘額 (或依賴 Cron 累加)
-    // 這裡我們採用「即時扣除」策略
+    
+    // 扣除份數
     const { data: member } = await supabase.from('members').select('points').eq('id', log.member_id).single()
     if (member) {
-      await supabase.from('members').update({ points: member.points - log.amount }).eq('id', log.member_id)
+      await supabase.from('members').update({ points: Number(member.points) - Number(log.amount) }).eq('id', log.member_id)
     }
   }
-
   return { success: true }
 }
 
-/**
- * 生成隨機推薦碼
- */
 export function generateReferralCode() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // 移除容易混淆的字元
   let code = ''
   for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length))

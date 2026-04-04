@@ -13,20 +13,47 @@ export async function GET() {
 
   const supabase = createAdminClient()
 
-  // 1. 獲取用戶基础資料 (點數, 推薦碼)
-  const { data: member } = await supabase
+  // 1. 獲取用戶基础資料 (點數, 推薦碼, 等級)
+  let { data: member } = await supabase
     .from('members')
-    .select('id, email, points, referral_code, referrer_id')
+    .select(`
+      id, email, points, referral_code, referrer_id, tier_id,
+      member_tiers(name, l1_rate, l2_rate)
+    `)
     .eq('id', user.id)
     .single()
 
-  if (!member) return NextResponse.json({ error: 'Member profile not found' }, { status: 404 })
+  // 🛠️ 自動修復邏輯：如果沒有會員資料或推薦碼，自動建立
+  if (!member || !member.referral_code) {
+    const { generateReferralCode } = require('@/lib/referral')
+    const { data: silverTier } = await supabase.from('member_tiers').select('id').eq('name', '白銀會員').single()
+    
+    const newCode = generateReferralCode()
+    const { data: updated } = await supabase.from('members').upsert({
+      id: user.id,
+      email: user.email,
+      referral_code: newCode,
+      tier_id: silverTier?.id || null,
+      points: member?.points || 0
+    }).select().single()
+    
+    // 重新抓取包含關聯表的資料
+    const { data: refetched } = await supabase
+        .from('members')
+        .select('id, email, points, referral_code, referrer_id, tier_id, member_tiers(name, l1_rate, l2_rate)')
+        .eq('id', user.id)
+        .single()
+    member = refetched
+  }
 
-  // 2. 獲取推薦統計 (總人數)
-  const { count: referralCount } = await supabase
-    .from('referral_logs')
-    .select('id', { count: 'exact', head: true })
-    .eq('l1_referrer_id', user.id)
+  if (!member) return NextResponse.json({ error: 'Member profile failed to initialize' }, { status: 500 })
+
+  // 2. 獲取推薦統計與好友名單
+  const { data: friends, count: referralCount } = await supabase
+    .from('members')
+    .select('email, created_at', { count: 'exact' })
+    .eq('referrer_id', user.id)
+    .order('created_at', { ascending: false })
 
   // 3. 獲取點數日誌 (最新 50 筆)
   const { data: logs } = await supabase
@@ -39,6 +66,7 @@ export async function GET() {
   return NextResponse.json({
     member,
     referral_count: referralCount || 0,
+    friends: friends || [],
     point_logs: logs || [],
   })
 }

@@ -1,133 +1,179 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Save, Pencil, X, Award, Percent, DollarSign, Clock, Settings2 } from 'lucide-react'
+import { Save, Pencil, X, Award, Percent, DollarSign, Clock, Settings2, Trophy } from 'lucide-react'
+
+interface Tier {
+  id: string
+  name: string
+  l1_rate: number
+  l2_rate: number
+  sort_order: number
+}
 
 interface Setting {
   key: string
   value: string
   description: string
-  updated_at?: string
 }
 
 export default function AdminReferralSettingsPage() {
+  const [tiers, setTiers] = useState<Tier[]>([])
   const [settings, setSettings] = useState<Setting[]>([])
   const [loading, setLoading] = useState(true)
+  const [editingTierId, setEditingTierId] = useState<string | null>(null)
   const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
+  const [editValue, setEditValue] = useState<any>(null)
 
   async function load() {
-    const res = await fetch('/api/admin/params/referral')
-    if (res.ok) setSettings(await res.json())
+    const [tiersRes, settingsRes] = await Promise.all([
+      fetch('/api/admin/params/tiers'),
+      fetch('/api/admin/params/referral')
+    ])
+    if (tiersRes.ok) setTiers(await tiersRes.json())
+    if (settingsRes.ok) setSettings(await settingsRes.json())
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
+  async function saveTier(id: string) {
+    const res = await fetch('/api/admin/params/tiers', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...editValue }),
+    })
+    if (res.ok) {
+      setEditingTierId(null)
+      load()
+    }
+  }
+
   async function saveSetting(key: string) {
     const res = await fetch('/api/admin/params/referral', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value: editValue }),
+      body: JSON.stringify({ key, value: String(editValue) }),
     })
     if (res.ok) {
       setEditingKey(null)
       load()
-    } else {
-      alert('更新失敗')
     }
   }
 
-  const getIcon = (key: string) => {
-    if (key.includes('percent')) return <Percent className="w-4 h-4 text-primary" />
-    if (key.includes('bonus')) return <Award className="w-4 h-4 text-orange-500" />
-    if (key.includes('min_spend')) return <DollarSign className="w-4 h-4 text-green-600" />
-    if (key.includes('lock_days')) return <Clock className="w-4 h-4 text-blue-600" />
-    return <Settings2 className="w-4 h-4 text-gray-500" />
-  }
-
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-4xl space-y-8 pb-32">
       <div>
-        <h1 className="text-2xl font-bold">聯盟行銷與點數規則設定</h1>
-        <p className="mt-1 text-sm text-muted-foreground">在此設定推薦分潤比例、獎勵門檻與解凍天數。</p>
+        <h1 className="text-2xl font-bold">聯盟行銷與階級規則設定</h1>
+        <p className="mt-1 text-sm text-muted-foreground">在此設定不同階級的分潤比例與全站獎勵門檻。</p>
       </div>
 
-      <div className="mt-8 bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+      {/* Tiers Table */}
+      <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-muted/30 px-6 py-4 flex items-center gap-2 border-b border-border">
+          <Trophy size={18} className="text-yellow-600" />
+          <h2 className="text-sm font-bold">階級級差分潤 (Commission Rates)</h2>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs font-bold uppercase text-muted-foreground border-b border-border">
             <tr>
-              <th className="px-6 py-4 text-left w-64">設定項目</th>
-              <th className="px-6 py-4 text-left">當前設定數值</th>
+              <th className="px-6 py-4 text-left">會員等級名稱</th>
+              <th className="px-6 py-4 text-left">一級分潤上限 (L1)</th>
+              <th className="px-6 py-4 text-left">二級分潤上限 (L2)</th>
               <th className="px-6 py-4 text-center w-24">操作</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {settings.map((s) => (
-              <tr key={s.key} className="hover:bg-muted/10 transition-colors">
-                <td className="px-6 py-5">
-                  <div className="flex items-center gap-2 font-bold text-foreground">
-                    {getIcon(s.key)}
-                    {s.key}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">{s.description}</p>
-                </td>
-                <td className="px-6 py-5">
-                  {editingKey === s.key ? (
-                    <div className="flex items-center gap-2">
-                       <input
-                         type="text"
-                         value={editValue}
-                         onChange={(e) => setEditValue(e.target.value)}
-                         className="flex-1 max-w-[200px] px-3 py-2 border border-primary rounded-lg text-sm focus:outline-none ring-2 ring-primary/20"
-                         autoFocus
-                       />
-                       {s.key.includes('percent') && <span className="text-xs text-muted-foreground font-mono"> (例如 0.05 代表 5%)</span>}
-                    </div>
-                  ) : (
-                    <div className="text-lg font-mono font-black text-primary">
-                      {s.key.includes('percent') ? `${(Number(s.value) * 100).toFixed(0)}%` : s.value}
-                      <span className="text-xs text-muted-foreground ml-1 font-sans font-medium">
-                        {s.key.includes('days') ? ' 天' : s.key.includes('percent') ? '' : ' 點/元'}
-                      </span>
-                    </div>
-                  )}
-                </td>
-                <td className="px-6 py-5 text-center">
-                   {editingKey === s.key ? (
-                      <div className="flex items-center gap-2 justify-center">
-                        <button onClick={() => saveSetting(s.key)} className="p-2 bg-primary text-white rounded-lg hover:opacity-90 active:scale-95 transition-all shadow-sm shadow-primary/20">
-                          <Save size={16} />
-                        </button>
-                        <button onClick={() => setEditingKey(null)} className="p-2 border border-border bg-white text-muted-foreground rounded-lg hover:bg-muted transition-all">
-                          <X size={16} />
-                        </button>
-                      </div>
-                   ) : (
-                      <button onClick={() => { setEditingKey(s.key); setEditValue(s.value); }} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/5 rounded-lg transition-all">
-                        <Pencil size={16} />
-                      </button>
-                   )}
-                </td>
-              </tr>
-            ))}
-            {loading && (
-              <tr>
-                <td colSpan={3} className="py-12 text-center text-muted-foreground">載入設定中...</td>
-              </tr>
-            )}
+            {tiers.map((t) => {
+              const isEditing = editingTierId === t.id
+              return (
+                <tr key={t.id} className="hover:bg-muted/10 transition-colors">
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                       t.name.includes('鑽石') ? 'bg-blue-50 text-blue-600' :
+                       t.name.includes('黃金') ? 'bg-yellow-50 text-yellow-600' : 'bg-gray-50 text-gray-600'
+                    }`}>{t.name}</span>
+                  </td>
+                  <td className="px-6 py-4">
+                     {isEditing ? (
+                        <input type="number" step="0.01" value={editValue.l1_rate} onChange={(e) => setEditValue({ ...editValue, l1_rate: e.target.value })}
+                          className="w-24 px-2 py-1 border border-primary rounded text-sm focus:outline-none ring-2 ring-primary/20" />
+                     ) : <span className="font-mono font-bold">{(t.l1_rate * 100).toFixed(0)}%</span>}
+                  </td>
+                  <td className="px-6 py-4">
+                     {isEditing ? (
+                        <input type="number" step="0.01" value={editValue.l2_rate} onChange={(e) => setEditValue({ ...editValue, l2_rate: e.target.value })}
+                          className="w-24 px-2 py-1 border border-primary rounded text-sm focus:outline-none ring-2 ring-primary/20" />
+                     ) : <span className="font-mono font-bold">{(t.l2_rate * 100).toFixed(0)}%</span>}
+                  </td>
+                  <td className="px-6 py-4 text-center">
+                     {isEditing ? (
+                         <div className="flex items-center gap-2">
+                             <button onClick={() => saveTier(t.id)} className="p-1.5 bg-green-600 text-white rounded"><Save size={14} /></button>
+                             <button onClick={() => setEditingTierId(null)} className="p-1.5 bg-gray-400 text-white rounded"><X size={14} /></button>
+                         </div>
+                     ) : (
+                         <button onClick={() => { setEditingTierId(t.id); setEditValue({ l1_rate: t.l1_rate, l2_rate: t.l2_rate }); }} className="text-muted-foreground hover:text-primary"><Pencil size={14} /></button>
+                     )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
-      </div>
+      </section>
 
-      <div className="mt-6 p-4 bg-blue-50 border border-blue-100 rounded-lg">
-        <h4 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2">
-          <Settings2 size={16} /> 設定說明
+      {/* Global Settings */}
+      <section className="bg-white border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-muted/30 px-6 py-4 flex items-center gap-2 border-b border-border">
+          <Settings2 size={18} className="text-primary" />
+          <h2 className="text-sm font-bold">全站基礎設定 (F Point 規則)</h2>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-xs font-bold border-b border-border">
+             <tr>
+                <th className="px-6 py-4 text-left w-64">設定項目</th>
+                <th className="px-6 py-4 text-left">數值</th>
+                <th className="px-6 py-4 text-center w-24">操作</th>
+             </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {settings.filter(s => !s.key.includes('percent')).map(s => {
+                const isEditing = editingKey === s.key
+                return (
+                    <tr key={s.key} className="hover:bg-muted/10 transition-colors">
+                        <td className="px-6 py-4 font-bold">{s.description || s.key}</td>
+                        <td className="px-6 py-4 font-mono">
+                            {isEditing ? (
+                                <input type="text" value={editValue} onChange={(e) => setEditValue(e.target.value)} autoFocus
+                                    className="w-full max-w-[200px] px-2 py-1 border border-primary rounded text-sm focus:outline-none ring-2 ring-primary/20" />
+                            ) : s.value}
+                        </td>
+                        <td className="px-6 py-4 text-center text-muted-foreground">
+                            {isEditing ? (
+                                <div className="flex items-center gap-2 justify-center">
+                                    <button onClick={() => saveSetting(s.key)} className="p-1.5 bg-green-600 text-white rounded"><Save size={14} /></button>
+                                    <button onClick={() => setEditingKey(null)} className="p-1.5 bg-gray-400 text-white rounded"><X size={14} /></button>
+                                </div>
+                            ) : (
+                                <button onClick={() => { setEditingKey(s.key); setEditValue(s.value); }}><Pencil size={14} /></button>
+                            )}
+                        </td>
+                    </tr>
+                )
+            })}
+          </tbody>
+        </table>
+      </section>
+
+      <div className="mt-6 p-4 bg-purple-50 border border-purple-100 rounded-lg space-y-2">
+        <h4 className="text-xs font-black text-purple-700 flex items-center gap-2 uppercase tracking-widest">
+          <Award size={14} /> 級差邏輯說明
         </h4>
-        <ul className="text-xs text-blue-700/80 space-y-1.5 list-disc pl-4 leading-relaxed">
-          <li><strong>分潤比例</strong>：請輸入小數點，例如 0.05 代表訂單實付金額的 5% 作為推薦獎勵。</li>
-          <li><strong>首購加碼</strong>：當推薦的好友完成第一筆訂單時，發放給推薦人的額外固定點數。</li>
-          <li><strong>鎖定期</strong>：訂單進入 Completed 後，點數會標記為 Pending，需經過此天數後排程才會將其解凍為可用點數，以防止退款套利。</li>
+        <ul className="text-xs text-purple-700/80 list-disc pl-4 space-y-1 font-medium">
+          <li>系統支援最高 6% 的累計撥出額。當低等級會員產出業績時，剩餘的差額會逐級往上遞補給對應等的高級主管。</li>
+          <li>一級獎金與二級獎金彼此獨立計算，皆遵循差額遞補原則。</li>
+          <li>鎖定期結束後，F Point 會自動撥入對應錢包帳戶。</li>
         </ul>
       </div>
     </div>
