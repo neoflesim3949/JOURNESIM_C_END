@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Menu, X, ShoppingCart, User, Cpu, ClipboardList } from 'lucide-react'
+import { Menu, X, ShoppingCart, User, Cpu, ClipboardList, LayoutGrid } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useCart } from '@/lib/cart'
 
@@ -45,9 +45,9 @@ export function Header() {
           {/* Right: Actions */}
           <div className="hidden lg:flex items-center gap-3">
             {isLoggedIn && (
-              <Link href="/account/esims" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors">
-                <Cpu className="w-4 h-4" />
-                卡片狀態
+              <Link href="/account/simcards" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors">
+                <LayoutGrid className="w-4 h-4" />
+                <span className="hidden sm:inline">卡片狀態</span>
               </Link>
             )}
             <Link href="/orders" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors">
@@ -90,7 +90,7 @@ export function Header() {
             <Link href="/guide#install" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>安裝教學</Link>
             <div className="border-t border-border pt-3 space-y-3">
               {isLoggedIn && (
-                <Link href="/account/esims" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>卡片狀態</Link>
+                <Link href="/account/simcards" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>卡片狀態</Link>
               )}
               <Link href="/orders" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>訂單查詢</Link>
               {isLoggedIn ? (

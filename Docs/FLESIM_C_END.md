@@ -209,7 +209,7 @@ null / "" / "-1"           → 顯示 "不限量" 或 "無限/天"
 /orders                     → 訂單列表
 /orders/[id]                → 訂單詳情（含 eSIM QR Code）
 /account                    → 會員中心
-/account/esims              → 我的 eSIM
+/account/simcards           → 我的卡片 (數位卡包)
 /guide                      → eSIM 安裝教學
 /after-sale                 → 售後服務
 ```
