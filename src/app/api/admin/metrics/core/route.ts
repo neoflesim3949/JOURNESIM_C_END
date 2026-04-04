@@ -39,12 +39,7 @@ export async function GET(request: Request) {
     .gte('created_at', startDate.toISOString())
     .lte('created_at', endDate.toISOString())
 
-  const skuIds = [...new Set((skuStats || []).map(s => s.bc_sku_id))]
-  const { data: bcProducts } = await supabase
-    .from('bc_products')
-    .select('sku_id, cost_price')
-    .in('sku_id', skuIds)
-  const costMap = new Map((bcProducts || []).map(p => [p.sku_id, Number(p.cost_price) || 0]))
+  // cost_price 已存在 order_skus 中（TWD，結帳時鎖定），不需要從 bc_products 讀取
 
   const { data: orderHistory } = await supabase
     .from('sub_orders')
@@ -106,7 +101,7 @@ export async function GET(request: Request) {
     const qty = Number(s.quantity) || 1
     m.revenue += rev
     m.volume += qty
-    m.cost += ((costMap.get(s.bc_sku_id) || 0) * qty)
+    m.cost += (Number(s.cost_price) || 0) * qty
   })
 
   // 補齊時間區間內的空缺
