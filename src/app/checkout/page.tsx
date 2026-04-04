@@ -6,6 +6,7 @@ import { ArrowLeft, CheckCircle, Wifi, CreditCard } from 'lucide-react'
 import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
+import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
 
 export default function CheckoutPage() {
   return (
@@ -33,6 +34,7 @@ function CheckoutContent() {
 
   useEffect(() => {
     setIsInLineApp(/Line/i.test(navigator.userAgent))
+    if (totalPrice > 0) trackBeginCheckout(totalPrice)
   }, [])
 
   useEffect(() => {
@@ -78,6 +80,11 @@ function CheckoutContent() {
       setOrderId(data.order_id)
       setOrderNumber(data.order_number)
       setOrderComplete(true)
+      trackPurchase({
+        orderId: data.order_number,
+        totalAmount: totalPrice,
+        items: items.map((i) => ({ name: i.displayName, price: i.unitPrice, quantity: i.quantity })),
+      })
       clearCart()
     } catch {
       alert('下單失敗，請稍後再試')

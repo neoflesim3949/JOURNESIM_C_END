@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ConditionalLayout } from "@/components/layout/conditional-layout";
 import { CartProvider } from "@/lib/cart";
+import { AnalyticsScripts } from "@/components/tracking/analytics";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,6 +32,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <CartProvider>
+          <AnalyticsScripts />
           <ConditionalLayout>{children}</ConditionalLayout>
         </CartProvider>
       </body>

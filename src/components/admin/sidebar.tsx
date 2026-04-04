@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/params', label: '參數管理', icon: Globe,
     children: [
       { href: '/admin/params/settings', label: '系統設定' },
+      { href: '/admin/params/ads', label: '廣告追蹤' },
       { href: '/admin/params/exchange-rate', label: '匯率管理' },
       { href: '/admin/params/countries', label: '國家 MCC 管理' },
       { href: '/admin/params/login', label: '登入管理' },

@@ -9,6 +9,7 @@ import { ArrowLeft, Minus, Plus, ShoppingBag, ShoppingCart, Check } from 'lucide
 import { formatPrice } from '@/lib/utils'
 import { formatCapacity } from '@/lib/format'
 import { useCart } from '@/lib/cart'
+import { trackAddToCart } from '@/components/tracking/analytics'
 
 interface CopyPrice {
   copies: string; sell_price: number
@@ -377,6 +378,7 @@ function ProductDetailContent() {
                 onClick={() => {
                   if (totalPrice <= 0 || !product) return
                   handleAddToCart()
+                  trackAddToCart({ name: product.name, price: totalPrice / quantity, quantity })
                   setAddedToCart(true)
                   setTimeout(() => setAddedToCart(false), 2000)
                 }}
