@@ -381,7 +381,7 @@ export default function ShopeeOrderDetailPage() {
                             {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
                           </div>
                           {expiry && (
-                            <div style={{ fontSize: `${ls.line3}px`, lineHeight: 1.2 }}>使用期限：{expiry.replace(/-/g, '/')}</div>
+                            <div style={{ fontSize: `${ls.line3}px`, lineHeight: 1.2, whiteSpace: 'nowrap' }}>使用期限：{expiry.replace(/-/g, '/')}</div>
                           )}
                         </div>
                       ))

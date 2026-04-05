@@ -159,7 +159,7 @@ export const COUNTRY_NAME_MAP: Record<string, { zh: string; en: string }> = {
   '布基纳法索': { zh: '布吉納法索', en: 'Burkina Faso' },
   '贝宁': { zh: '貝南', en: 'Benin' },
   '多哥': { zh: '多哥', en: 'Togo' },
-  '塞拉利昂': { zh: '乄獅子山', en: 'Sierra Leone' },
+  '塞拉利昂': { zh: '獅子山', en: 'Sierra Leone' },
   '利比里亚': { zh: '賴比瑞亞', en: 'Liberia' },
   '几内亚': { zh: '幾內亞', en: 'Guinea' },
   '冈比亚': { zh: '甘比亞', en: 'Gambia' },
@@ -173,7 +173,7 @@ export const COUNTRY_NAME_MAP: Record<string, { zh: string; en: string }> = {
   '厄立特里亚': { zh: '厄立乄特里亞', en: 'Eritrea' },
   '吉布提': { zh: '吉布地', en: 'Djibouti' },
   '科摩罗': { zh: '葛摩', en: 'Comoros' },
-  '塞舌尔': { zh: '塞乄席爾', en: 'Seychelles' },
+  '塞舌尔': { zh: '塞席爾', en: 'Seychelles' },
   // 北美洲
   '美国': { zh: '美國', en: 'United States' },
   '加拿大': { zh: '加拿大', en: 'Canada' },
@@ -254,3 +254,4 @@ export function translateContinent(cnContinent: string): string {
 export function translateContinentEn(cnContinent: string): string {
   return CONTINENT_MAP[cnContinent]?.en || cnContinent
 }
+
