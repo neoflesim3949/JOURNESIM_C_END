@@ -9,6 +9,15 @@ export async function POST(request: Request) {
   const { rows, account_id } = await request.json() as { rows: Record<string, string>[]; account_id?: string }
   if (!rows || rows.length === 0) return NextResponse.json({ error: '無資料' }, { status: 400 })
 
+  // 模糊找欄位名（Excel 表頭可能有微妙差異）
+  function findCol(row: Record<string, string>, ...keywords: string[]): string | null {
+    for (const kw of keywords) {
+      const key = Object.keys(row).find(k => k.includes(kw))
+      if (key && row[key]) return row[key]
+    }
+    return null
+  }
+
   const supabase = createAdminClient()
 
   // 取得所有商品對應
@@ -47,9 +56,9 @@ export async function POST(request: Request) {
       payment_processing_fee: parseFloat(first['金流與系統處理費']) || null,
       payment_processing_rate: first['金流與系統處理費率'] || null,
       recipient_name: first['收件者姓名'] || null,
-      recipient_phone: first['收件者電話 (若您是自行配送請使用後方蝦皮專線和包裹查詢碼聯繫買家)'] || first['收件者電話'] || null,
+      recipient_phone: findCol(first, '收件者電話') || null,
       shipping_address: first['收件地址'] || null,
-      shopee_tracking_code: first['蝦皮專線和包裹查詢碼 (請複製下方完整編號提供給您配合的物流商當做聯絡電話)'] || first['蝦皮專線和包裹查詢碼'] || null,
+      shopee_tracking_code: findCol(first, '包裹查詢碼', '蝦皮專線') || null,
       pickup_store_id: first['取件門市店號'] || null,
       city: first['城市'] || null,
       district: first['行政區'] || null,
@@ -82,7 +91,7 @@ export async function POST(request: Request) {
 
     // 處理商品明細
     for (const row of orderRows) {
-      const skuCode = row['蝦皮商品編碼 (商品ID_規格ID)'] || row['蝦皮商品編碼'] || ''
+      const skuCode = findCol(row, '蝦皮商品編碼') || ''
       const productId = row['商品ID'] || ''
       const variationId = row['規格ID'] || ''
 

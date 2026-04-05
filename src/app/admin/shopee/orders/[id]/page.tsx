@@ -235,7 +235,7 @@ export default function ShopeeOrderDetailPage() {
           <div><span className="text-gray-500">收件人：</span>{order.recipient_name || '-'}</div>
           <div><span className="text-gray-500">電話：</span>{order.recipient_phone || '-'}</div>
           <div className="col-span-2"><span className="text-gray-500">地址：</span>{order.zip_code} {order.city}{order.district} {order.shipping_address || '-'}</div>
-          <div><span className="text-gray-500">查詢碼：</span><span className="font-mono text-xs">{order.shopee_tracking_code || '-'}</span></div>
+          <div className="col-span-2"><span className="text-gray-500">包裹查詢號碼：</span><span className="font-mono text-xs font-medium">{order.shopee_tracking_code || '-'}</span></div>
           <div><span className="text-gray-500">取件門市：</span>{order.pickup_store_id || '-'}</div>
           <div><span className="text-gray-500">寄送方式：</span>{order.shipping_method || '-'}</div>
           <div><span className="text-gray-500">出貨方式：</span>{order.fulfillment_method || '-'}</div>
@@ -454,7 +454,14 @@ export default function ShopeeOrderDetailPage() {
                     <div><strong>地址：</strong>{order.zip_code} {order.city}{order.district} {order.shipping_address}</div>
                     {order.shipping_method && <div><strong>寄送：</strong>{order.shipping_method}</div>}
                     {order.pickup_store_id && <div><strong>門市：</strong>{order.pickup_store_id}</div>}
+                    {order.shopee_tracking_code && <div><strong>包裹查詢號碼：</strong><span style={{ fontFamily: 'monospace' }}>{order.shopee_tracking_code}</span></div>}
                   </div>
+                  {order.shopee_tracking_code && (
+                    <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                      <div style={{ fontSize: '10px', fontWeight: 'bold', marginBottom: '1mm' }}>包裹查詢號碼：{order.shopee_tracking_code}</div>
+                      <div dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_tracking_code, 28, 1.2) }} />
+                    </div>
+                  )}
                   <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>商品明細：</div>
                   {items.map((item, i) => (
                     <div key={i} style={{ border: '1px solid #000', borderRadius: '2mm', padding: '2mm', marginBottom: '2mm' }}>
