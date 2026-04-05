@@ -54,12 +54,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ ok: true })
   }
 
-  // 更新訂單狀態
-  if (body.internal_status) {
-    await supabase.from('shopee_orders').update({
-      internal_status: body.internal_status,
-      updated_at: new Date().toISOString(),
-    }).eq('id', id)
+  // 更新訂單層級欄位（狀態、使用期限、標籤設定）
+  if (body.internal_status || body.expiry_date !== undefined || body.label_settings) {
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+    if (body.internal_status) updates.internal_status = body.internal_status
+    if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null
+    if (body.label_settings) updates.label_settings = body.label_settings
+    await supabase.from('shopee_orders').update(updates).eq('id', id)
     return NextResponse.json({ ok: true })
   }
 
