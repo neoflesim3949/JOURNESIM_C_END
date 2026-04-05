@@ -154,8 +154,16 @@ export default function ShopeeOrderDetailPage() {
     if (!confirm('確定送出 BC 訂單？')) return
     const res = await fetch(`/api/admin/shopee/orders/${id}/bc-order`, { method: 'POST' })
     const data = await res.json()
-    if (!res.ok) alert(data.error || '送出失敗')
-    else alert(`送出完成：${data.results?.length || 0} 項`)
+    if (!res.ok) {
+      alert(data.error || '送出失敗')
+    } else {
+      const errors = (data.results || []).filter((r: { error?: string }) => r.error)
+      if (errors.length > 0) {
+        alert(`部分失敗：\n${errors.map((e: { error: string }) => e.error).join('\n')}`)
+      } else {
+        alert(`送出完成：${data.results?.length || 0} 項`)
+      }
+    }
     load()
   }
 
@@ -271,7 +279,7 @@ export default function ShopeeOrderDetailPage() {
                       </div>
                     </div>
                     {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {bcSkuNameMap.get(item.bc_sku_id) || ''} · {item.bc_sku_id} · copies: {item.matched_copies}</div>}
-                    {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}</div>}
+                    {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}{item.bc_sub_order_id && ` · 子訂單: ${item.bc_sub_order_id}`}</div>}
                   </div>
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${st.color}`}>{st.label}</span>

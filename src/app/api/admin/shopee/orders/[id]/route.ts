@@ -31,19 +31,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.bc_sku_id !== undefined) updates.bc_sku_id = body.bc_sku_id
     if (body.iccid !== undefined) updates.iccid = body.iccid
     if (body.status !== undefined) updates.status = body.status
-    if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null
-
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
     // 如果有對應 + shopee_sku_code，自動記錄到 mappings
-    if (body.save_mapping && body.shopee_sku_code && body.matched_package_id) {
+    if (body.save_mapping && body.shopee_sku_code && (body.matched_package_id || body.bc_sku_id)) {
       await supabase.from('shopee_product_mappings').upsert({
         shopee_sku_code: body.shopee_sku_code,
         shopee_product_id: body.shopee_product_id || null,
         shopee_variation_id: body.shopee_variation_id || null,
         shopee_product_name: body.shopee_product_name || null,
         shopee_variation_name: body.shopee_variation_name || null,
-        package_id: body.matched_package_id,
+        package_id: body.matched_package_id || null,
         package_plan_id: body.matched_plan_id || null,
         copies: body.matched_copies || null,
         bc_sku_id: body.bc_sku_id || null,
