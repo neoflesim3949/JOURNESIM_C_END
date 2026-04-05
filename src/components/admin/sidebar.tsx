@@ -49,6 +49,13 @@ const NAV_ITEMS: NavItem[] = [
         { href: '/admin/marketing/tiers', label: '會員等級管理' },
     ]
   },
+  {
+    href: '/admin/shopee', label: '平台銷售', icon: Landmark,
+    children: [
+      { href: '/admin/shopee/orders', label: '蝦皮訂單' },
+      { href: '/admin/shopee/mappings', label: '商品對應' },
+    ],
+  },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
   {
     href: '/admin/params', label: '參數管理', icon: Globe,

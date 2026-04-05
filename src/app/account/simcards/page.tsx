@@ -180,7 +180,7 @@ export default function MyCardsPage() {
                         {loadingIccid === c.iccid ? (
                             <div className="flex flex-col items-center justify-center py-16 text-center">
                                 <RefreshCw className="w-10 h-10 text-primary animate-spin mb-4" />
-                                <p className="text-[10px] font-black text-primary uppercase tracking-widest italic">正在獲取實時數據與用量分析...</p>
+                                <p className="text-xs font-black text-primary uppercase tracking-widest italic">正在獲取實時數據與用量分析...</p>
                             </div>
                         ) : (
                             <div className="space-y-8">
@@ -188,18 +188,18 @@ export default function MyCardsPage() {
                                     <div className="p-4 rounded-3xl bg-orange-50/50 border border-orange-100 flex flex-col gap-1">
                                         <div className="flex items-center gap-2 mb-1">
                                             <Calendar size={14} className="text-orange-600" />
-                                            <span className="text-[9px] font-black text-orange-600 uppercase tracking-widest">有效期至</span>
+                                            <span className="text-[11px] font-black text-orange-600 uppercase tracking-widest">有效期至</span>
                                         </div>
-                                        <p className="text-sm font-black text-orange-900 leading-tight">
+                                        <p className="text-base font-black text-orange-900 leading-tight">
                                             {detailsCache[c.iccid]?.expiry?.expirationDate?.split(' ')[0] || '永久有效'}
                                         </p>
                                     </div>
                                     <div className="p-4 rounded-3xl bg-blue-50/50 border border-blue-100 flex flex-col gap-1">
                                         <div className="flex items-center gap-2 mb-1">
                                             <Signal size={14} className="text-blue-600" />
-                                            <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest">服務狀態</span>
+                                            <span className="text-[11px] font-black text-blue-600 uppercase tracking-widest">服務狀態</span>
                                         </div>
-                                        <p className="text-sm font-black text-blue-900 leading-tight">
+                                        <p className="text-base font-black text-blue-900 leading-tight">
                                             {detailsCache[c.iccid]?.service_status?.status || detailsCache[c.iccid]?.service_status?.esimStatus || '正常'}
                                         </p>
                                     </div>
@@ -210,7 +210,7 @@ export default function MyCardsPage() {
                                 <div className="space-y-4">
                                    <div className="flex items-center gap-2 px-1">
                                       <Package size={14} className="text-muted-foreground" />
-                                      <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">關聯訂單紀錄與即時套餐</span>
+                                      <span className="text-xs font-black text-muted-foreground uppercase tracking-widest">關聯訂單紀錄與即時套餐</span>
                                    </div>
                                    <div className="space-y-3">
                                       {cards.filter(o => o.iccid === c.iccid).map((order, idx) => (
@@ -282,14 +282,14 @@ function OrderHistoryItem({ order, usageList }: { order: CardItem, usageList: an
         <div className="bg-gray-50 rounded-[2rem] border border-gray-100 overflow-hidden group hover:border-primary/20 transition-all">
             <div className="p-5 flex items-center justify-between">
                 <div className="flex-1 min-w-0 pr-4">
-                    <p className="text-xs font-black text-gray-900 leading-tight">
+                    <p className="text-sm font-black text-gray-900 leading-tight">
                         {order.product_name || order.display_name}
                     </p>
-                    <p className="mt-1 text-[9px] text-muted-foreground uppercase font-bold tracking-widest">{order.status}</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground uppercase font-bold tracking-widest">{order.status}</p>
                 </div>
                 <button 
                   onClick={() => setExpanded(!expanded)}
-                  className="px-4 py-2 bg-white rounded-xl border border-gray-200 text-[10px] font-black uppercase text-primary hover:bg-primary hover:text-white transition-all shadow-sm flex items-center gap-1 active:scale-95"
+                  className="px-4 py-2 bg-white rounded-xl border border-gray-200 text-xs font-black uppercase text-primary hover:bg-primary hover:text-white transition-all shadow-sm flex items-center gap-1 active:scale-95"
                 >
                   詳情 {expanded ? <X size={10} /> : <ChevronRight size={10} />}
                 </button>
@@ -306,10 +306,10 @@ function OrderHistoryItem({ order, usageList }: { order: CardItem, usageList: an
                                 subLabel="天數預估"
                             />
                             <div>
-                                <p className="text-sm font-black text-orange-600">
+                                <p className="text-base font-black text-orange-600">
                                     {usage?.remainingDays || '0'} <span className="opacity-50">/ {usage?.totalDays || '0'}</span>
                                 </p>
-                                <p className="text-[11px] text-muted-foreground uppercase font-black tracking-widest mt-1">剩餘天數</p>
+                                <p className="text-xs text-muted-foreground uppercase font-black tracking-widest mt-1">剩餘天數</p>
                             </div>
                         </div>
 
@@ -321,15 +321,15 @@ function OrderHistoryItem({ order, usageList }: { order: CardItem, usageList: an
                                 subLabel="流量分析"
                             />
                             <div>
-                                <p className="text-sm font-black text-blue-600">
+                                <p className="text-base font-black text-blue-600">
                                     {formatTraffic(usage?.remainingTraffic)} <span className="opacity-50">/ {formatTraffic(usage?.totalTraffic)}</span>
                                 </p>
-                                <p className="text-[11px] text-muted-foreground uppercase font-black tracking-widest mt-1">剩餘流量</p>
+                                <p className="text-xs text-muted-foreground uppercase font-black tracking-widest mt-1">剩餘流量</p>
                             </div>
                         </div>
                     </div>
                     {usage?.planStartTime && (
-                        <div className="mt-8 p-4 bg-white rounded-2xl border border-gray-100 flex justify-between items-center text-[10px] font-bold text-muted-foreground">
+                        <div className="mt-8 p-4 bg-white rounded-2xl border border-gray-100 flex justify-between items-center text-xs font-bold text-muted-foreground">
                             <span>啟用時間：{usage.planStartTime}</span>
                             <span>至 {usage.planEndTime || '未激活'}</span>
                         </div>
@@ -367,7 +367,7 @@ function UsageCircle({ percent, color, subLabel }: { percent: number, color: str
                 />
             </svg>
             <div className="absolute flex flex-col items-center">
-                <span className="text-xl font-black tracking-tighter" style={{ color }}>{Math.round(percent)}<small className="text-xs ml-0.5">%</small></span>
+                <span className="text-2xl font-black tracking-tighter" style={{ color }}>{Math.round(percent)}<small className="text-xs ml-0.5">%</small></span>
             </div>
         </div>
     )
@@ -478,19 +478,47 @@ function TrafficQueryCard({ iccid }: { iccid: string }) {
         <button onClick={query} disabled={loading} className="p-3 bg-primary text-white rounded-xl active:scale-95 transition-all"><Search size={14} /></button>
       </div>
 
-      {queried && countryStats.countries.length > 0 && (
-        <div className="p-5 bg-muted/40 rounded-[2rem] border border-border/50">
-          <div className="flex justify-between items-center mb-4">
-              <span className="text-[9px] font-black uppercase text-muted-foreground tracking-widest">Consumption Totals</span>
-              <span className="text-sm font-black text-primary">{formatKB(countryStats.totalKB)}</span>
+      {queried && traffic.length > 0 && (
+        <div className="space-y-4">
+          {/* Country Totals (Horizontal Scroll) */}
+          <div className="p-5 bg-muted/40 rounded-[2rem] border border-border/50">
+            <div className="flex justify-between items-center mb-4 px-1">
+                <span className="text-xs font-black uppercase text-muted-foreground tracking-widest">國家總消耗</span>
+                <span className="text-base font-black text-primary">{formatKB(countryStats.totalKB)}</span>
+            </div>
+            <div className="flex gap-3 overflow-x-auto pb-2 px-1 no-scrollbar snapped-x scroll-smooth">
+              {countryStats.countries.map(([c, v]) => (
+                  <div key={c} className="flex-shrink-0 min-w-[120px] p-4 bg-white rounded-2xl border border-gray-100 text-center shadow-sm hover:border-blue-200 transition-colors">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase truncate px-1">{c}</p>
+                      <p className="text-base font-black text-blue-600 mt-1">{formatKB(v)}</p>
+                  </div>
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            {countryStats.countries.map(([c, v]) => (
-                <div key={c} className="p-3 bg-white rounded-2xl border border-gray-100 text-center">
-                    <p className="text-[8px] font-bold text-muted-foreground uppercase">{c}</p>
-                    <p className="text-xs font-black text-blue-600 mt-0.5">{formatKB(v)}</p>
-                </div>
-            ))}
+
+          <div className="p-6 bg-white rounded-[2rem] border border-gray-100 shadow-sm relative overflow-hidden">
+            <div className="flex items-center justify-between mb-5">
+               <p className="text-xs font-black uppercase text-muted-foreground tracking-[0.2em]">每日用量明細</p>
+               <div className="px-2 py-0.5 bg-purple-100 rounded text-[10px] font-black uppercase text-purple-500">History</div>
+            </div>
+
+            <div className="flex gap-3 overflow-x-auto pb-4 px-1 no-scrollbar snapped-x scroll-smooth">
+               {[...traffic]
+                .sort((a, b) => b.usedDate.localeCompare(a.usedDate))
+                .map((t, idx) => (
+                  <div key={idx} className="flex-shrink-0 w-[140px] p-4 bg-gray-50 rounded-2xl border border-gray-100 flex flex-col items-center justify-between gap-3 text-center hover:bg-white hover:shadow-md transition-all group">
+                     <span className="text-xs font-bold text-gray-400 font-mono tracking-tighter">{t.usedDate}</span>
+                     <div className="space-y-0.5">
+                        <span className="block text-[10px] font-black text-muted-foreground uppercase opacity-40">地區</span>
+                        <span className="block text-sm font-black text-gray-800 truncate px-1 max-w-full">{t.country}</span>
+                     </div>
+                     <div className="pt-2 border-t border-gray-200 w-full">
+                        <span className="block text-sm font-black text-purple-600 italic">{formatKB(t.usedAmountKB)}</span>
+                        <span className="block text-[9px] font-black text-purple-400 uppercase tracking-widest mt-0.5">Consumed</span>
+                     </div>
+                  </div>
+                ))}
+            </div>
           </div>
         </div>
       )}
