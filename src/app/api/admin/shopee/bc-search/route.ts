@@ -10,6 +10,14 @@ export async function GET(request: Request) {
   const action = searchParams.get('action') || 'search'
   const supabase = createAdminClient()
 
+  // ─── names：根據 sku_ids 查名稱 ──────────────────────────
+  if (action === 'names') {
+    const skuIds = (searchParams.get('sku_ids') || '').split(',').filter(Boolean)
+    if (skuIds.length === 0) return NextResponse.json([])
+    const { data } = await supabase.from('bc_products').select('sku_id, name').in('sku_id', skuIds)
+    return NextResponse.json(data || [])
+  }
+
   // ─── options：下拉選項 ──────────────────────────────────
   if (action === 'options') {
     const { data: countries } = await supabase.from('bc_countries')

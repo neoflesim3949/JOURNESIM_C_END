@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Upload, Search, Package, ChevronRight } from 'lucide-react'
+import { Upload, Search, Package, ChevronRight, Settings } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 interface ShopeeOrder {
@@ -27,6 +27,28 @@ export default function ShopeeOrdersPage() {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const [showLabelSettings, setShowLabelSettings] = useState(false)
+  const [expiryDate, setExpiryDate] = useState('')
+  const [labelSettings, setLabelSettings] = useState({ line1: 12, line2: 12, line3: 10 })
+
+  // 從 localStorage 載入設定
+  useEffect(() => {
+    const saved = localStorage.getItem('shopee_label_settings')
+    if (saved) { try { setLabelSettings(JSON.parse(saved)) } catch {} }
+    const savedExpiry = localStorage.getItem('shopee_expiry_date')
+    if (savedExpiry) setExpiryDate(savedExpiry)
+  }, [])
+
+  function saveExpiryDate(date: string) {
+    setExpiryDate(date)
+    localStorage.setItem('shopee_expiry_date', date)
+  }
+
+  function saveLabelSettings(s: { line1: number; line2: number; line3: number }) {
+    setLabelSettings(s)
+    localStorage.setItem('shopee_label_settings', JSON.stringify(s))
+    setShowLabelSettings(false)
+  }
 
   async function load() {
     setLoading(true)
@@ -69,10 +91,20 @@ export default function ShopeeOrdersPage() {
           <h1 className="text-2xl font-bold">蝦皮訂單</h1>
           <p className="mt-1 text-sm text-gray-500">共 {total} 筆訂單</p>
         </div>
-        <label className={`flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer ${importing ? 'opacity-50' : ''}`}>
-          <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入 Excel'}
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" disabled={importing} />
-        </label>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mr-2">
+            <span className="text-xs text-gray-500">使用期限：</span>
+            <input type="date" value={expiryDate} onChange={(e) => saveExpiryDate(e.target.value)}
+              className="px-2 py-1.5 border border-gray-300 rounded text-sm" />
+          </div>
+          <button onClick={() => setShowLabelSettings(true)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50" title="標籤設定">
+            <Settings className="w-4 h-4" />
+          </button>
+          <label className={`flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer ${importing ? 'opacity-50' : ''}`}>
+            <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入 Excel'}
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" disabled={importing} />
+          </label>
+        </div>
       </div>
 
       {importResult && (
@@ -141,6 +173,35 @@ export default function ShopeeOrdersPage() {
               <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
               <span className="px-3 py-1 text-sm">{page} / {totalPages || 1}</span>
               <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 標籤字體設定彈窗 */}
+      {showLabelSettings && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLabelSettings(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="font-bold mb-4">商品標籤字體設定</h2>
+            <div className="space-y-3">
+              {([['line1', '第一行（商品名稱）'], ['line2', '第二行（規格名稱）'], ['line3', '第三行（使用期限）']] as const).map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-sm">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={labelSettings[key]} onChange={(e) => setLabelSettings({ ...labelSettings, [key]: Number(e.target.value) })}
+                      className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center" /> <span className="text-xs text-gray-400">pt</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-center" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', border: '1px solid #ccc' }}>
+              <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2 }}>商品名稱預覽</div>
+              <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.2 }}>規格名稱預覽</div>
+              <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2 }}>使用期限：2026/04/06</div>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => saveLabelSettings(labelSettings)} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
+              <button onClick={() => setShowLabelSettings(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
             </div>
           </div>
         </div>

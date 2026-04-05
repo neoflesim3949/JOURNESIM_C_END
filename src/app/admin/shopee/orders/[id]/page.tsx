@@ -33,7 +33,7 @@ interface ShopeeItem {
   original_price: number | null; sale_price: number | null; quantity: number; return_quantity: number
   matched_package_id: string | null; matched_plan_id: string | null; matched_copies: string | null
   bc_sku_id: string | null; iccid: string[] | null; bc_order_id: string | null; bc_sub_order_id: string | null
-  status: string; expiry_date: string | null
+  status: string
 }
 
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
@@ -50,7 +50,7 @@ interface ShopeeOrder {
   city: string | null; district: string | null; zip_code: string | null
   shipping_method: string | null; fulfillment_method: string | null; payment_method: string | null
   buyer_note: string | null; seller_note: string | null; internal_status: string
-  expiry_date: string | null; label_settings: { line1: number; line2: number; line3: number } | null
+  expiry_date: string | null
 }
 
 interface BcResult {
@@ -74,11 +74,11 @@ export default function ShopeeOrderDetailPage() {
   const [items, setItems] = useState<ShopeeItem[]>([])
   const [loading, setLoading] = useState(true)
   const [matchingItem, setMatchingItem] = useState<ShopeeItem | null>(null)
-  // 標籤設定彈窗
-  const [showLabelSettings, setShowLabelSettings] = useState(false)
   // ID 對應名稱
   const [productIdMap, setProductIdMap] = useState<Map<string, string>>(new Map())
   const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
+  // BC SKU 名稱
+  const [bcSkuNameMap, setBcSkuNameMap] = useState<Map<string, string>>(new Map())
   // 列印彈窗
   const [printModal, setPrintModal] = useState<'detail' | 'product' | null>(null)
 
@@ -90,6 +90,13 @@ export default function ShopeeOrderDetailPage() {
     setOrder(orderRes.order); setItems(orderRes.items || [])
     setProductIdMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
     setVariationIdMap(new Map((idRes.variations || []).map((v: IdMapping) => [v.shopee_variation_id!, v.display_name])))
+    // 查 BC SKU 名稱
+    const bcSkuIds = [...new Set((orderRes.items || []).map((i: ShopeeItem) => i.bc_sku_id).filter(Boolean))]
+    if (bcSkuIds.length > 0) {
+      const params = new URLSearchParams({ action: 'names', sku_ids: bcSkuIds.join(',') })
+      const bcRes = await fetch(`/api/admin/shopee/bc-search?${params}`).then(r => r.json())
+      setBcSkuNameMap(new Map((bcRes || []).map((b: { sku_id: string; name: string }) => [b.sku_id, b.name])))
+    }
     setLoading(false)
   }
   useEffect(() => { load() }, [id])
@@ -148,22 +155,6 @@ export default function ShopeeOrderDetailPage() {
   }
 
 
-  // 儲存訂單層級使用期限
-  async function saveOrderExpiry(date: string) {
-    await fetch(`/api/admin/shopee/orders/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expiry_date: date || null }),
-    }); load()
-  }
-
-  // 儲存標籤字體設定
-  async function saveLabelSettings(settings: { line1: number; line2: number; line3: number }) {
-    await fetch(`/api/admin/shopee/orders/${id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label_settings: settings }),
-    }); load()
-  }
-
   if (loading) return <div className="text-gray-500">載入中...</div>
   if (!order) return <div>找不到訂單</div>
 
@@ -182,12 +173,6 @@ export default function ShopeeOrderDetailPage() {
           <p className="text-sm text-gray-500">{order.order_date} · {order.buyer_account}</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 mr-2">
-            <span className="text-xs text-gray-500">使用期限：</span>
-            <input type="date" value={order.expiry_date || ''} onChange={(e) => saveOrderExpiry(e.target.value)}
-              className="px-2 py-1.5 border border-gray-300 rounded text-sm" />
-          </div>
-          <button onClick={() => setShowLabelSettings(true)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50" title="標籤設定">⚙</button>
           <button onClick={() => setPrintModal('detail')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
             <Printer className="w-4 h-4" /> 明細標籤
           </button>
@@ -280,7 +265,7 @@ export default function ShopeeOrderDetailPage() {
                         {!item.shopee_variation_id && '-'}
                       </div>
                     </div>
-                    {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {item.bc_sku_id} · copies: {item.matched_copies}</div>}
+                    {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {bcSkuNameMap.get(item.bc_sku_id) || ''} · {item.bc_sku_id} · copies: {item.matched_copies}</div>}
                     {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}</div>}
                   </div>
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
@@ -312,7 +297,7 @@ export default function ShopeeOrderDetailPage() {
                 <button onClick={() => {
                   const el = document.getElementById('print-area')
                   if (!el) return
-                  const w = window.open('', '', 'width=400,height=600')
+                  const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
                   if (!w) return
                   if (printModal === 'product') {
                     // 商品標籤：頁面尺寸 30mm×15mm，每標籤一頁
@@ -368,8 +353,9 @@ export default function ShopeeOrderDetailPage() {
                 /* 商品標籤 30mm × 15mm — 每標籤獨立一頁，頁面尺寸即標籤尺寸 */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
                   {(() => {
-                    const ls = order.label_settings || { line1: 12, line2: 12, line3: 10 }
-                    const expiry = order.expiry_date
+                    let ls = { line1: 12, line2: 12, line3: 10 }
+                    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) ls = JSON.parse(saved) } catch {}
+                    const expiry = localStorage.getItem('shopee_expiry_date') || ''
                     return items.flatMap(item =>
                       Array.from({ length: item.quantity }, (_, j) => (
                         <div key={`${item.id}-${j}`} className="label"
@@ -403,14 +389,6 @@ export default function ShopeeOrderDetailPage() {
         />
       )}
 
-      {/* 標籤設定彈窗 */}
-      {showLabelSettings && order && (
-        <LabelSettingsModal
-          settings={order.label_settings || { line1: 12, line2: 12, line3: 10 }}
-          onSave={(s) => { saveLabelSettings(s); setShowLabelSettings(false) }}
-          onClose={() => setShowLabelSettings(false)}
-        />
-      )}
     </div>
   )
 }
@@ -456,54 +434,6 @@ function IccidInput({ item, onSave }: { item: ShopeeItem; onSave: (id: string, i
           className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 flex items-center gap-1">
           <Save className="w-3 h-3" /> 儲存
         </button>
-      </div>
-    </div>
-  )
-}
-
-// 標籤字體設定彈窗
-function LabelSettingsModal({ settings, onSave, onClose }: {
-  settings: { line1: number; line2: number; line3: number }
-  onSave: (s: { line1: number; line2: number; line3: number }) => void
-  onClose: () => void
-}) {
-  const [s, setS] = useState(settings)
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-        <h2 className="font-bold mb-4">商品標籤字體設定</h2>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm">第一行（商品名稱）</span>
-            <div className="flex items-center gap-2">
-              <input type="number" value={s.line1} onChange={(e) => setS({ ...s, line1: Number(e.target.value) })}
-                className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center" /> <span className="text-xs text-gray-400">pt</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm">第二行（規格名稱）</span>
-            <div className="flex items-center gap-2">
-              <input type="number" value={s.line2} onChange={(e) => setS({ ...s, line2: Number(e.target.value) })}
-                className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center" /> <span className="text-xs text-gray-400">pt</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm">第三行（使用期限）</span>
-            <div className="flex items-center gap-2">
-              <input type="number" value={s.line3} onChange={(e) => setS({ ...s, line3: Number(e.target.value) })}
-                className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center" /> <span className="text-xs text-gray-400">pt</span>
-            </div>
-          </div>
-        </div>
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg text-center" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', border: '1px solid #ccc' }}>
-          <div style={{ fontSize: `${s.line1}px`, fontWeight: 'bold', lineHeight: 1.2 }}>商品名稱預覽</div>
-          <div style={{ fontSize: `${s.line2}px`, lineHeight: 1.2 }}>規格名稱預覽</div>
-          <div style={{ fontSize: `${s.line3}px`, lineHeight: 1.2 }}>使用期限：2026/04/05</div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <button onClick={() => onSave(s)} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
-          <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
-        </div>
       </div>
     </div>
   )
