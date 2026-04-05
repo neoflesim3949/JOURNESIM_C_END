@@ -443,23 +443,22 @@ export default function ShopeeOrderDetailPage() {
               {printModal === 'detail' ? (
                 /* 明細標籤 100mm × 150mm */
                 <div style={{ width: '100mm', minHeight: '150mm', padding: '5mm', fontSize: '11px', fontFamily: 'sans-serif', border: '1px solid #ccc', margin: '0 auto' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
-                    蝦皮訂單：{order.shopee_order_number}
-                    <div style={{ marginTop: '2mm' }} dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_order_number, 28, 1.2) }} />
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm', display: 'flex', alignItems: 'center', gap: '3mm' }}>
+                    <span>蝦皮訂單：{order.shopee_order_number}</span>
+                    <span dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_order_number, 22, 1) }} />
                   </div>
                   <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{order.order_date}</div>
                   <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
-                    <div><strong>收件人：</strong>{order.recipient_name}</div>
-                    <div><strong>電話：</strong>{order.recipient_phone}</div>
-                    <div><strong>地址：</strong>{order.zip_code} {order.city}{order.district} {order.shipping_address}</div>
-                    {order.shipping_method && <div><strong>寄送：</strong>{order.shipping_method}</div>}
-                    {order.pickup_store_id && <div><strong>門市：</strong>{order.pickup_store_id}</div>}
-                    {order.shopee_tracking_code && <div><strong>包裹查詢號碼：</strong><span style={{ fontFamily: 'monospace' }}>{order.shopee_tracking_code}</span></div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span><strong>收件人：</strong>{order.recipient_name}</span><span><strong>電話：</strong>{order.recipient_phone}</span></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span><strong>地址：</strong>{order.zip_code} {order.city}{order.district} {order.shipping_address}</span>
+                      <span>{order.shipping_method && <><strong>寄送：</strong>{order.shipping_method}</>}{order.pickup_store_id && <> · <strong>門市：</strong>{order.pickup_store_id}</>}</span>
+                    </div>
                   </div>
                   {order.shopee_tracking_code && (
-                    <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
-                      <div style={{ fontSize: '10px', fontWeight: 'bold', marginBottom: '1mm' }}>包裹查詢號碼：{order.shopee_tracking_code}</div>
-                      <div dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_tracking_code, 28, 1.2) }} />
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm', display: 'flex', alignItems: 'center', gap: '3mm' }}>
+                      <span>包裹查詢號碼：{order.shopee_tracking_code}</span>
+                      <span dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_tracking_code, 22, 1) }} />
                     </div>
                   )}
                   <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>商品明細：</div>

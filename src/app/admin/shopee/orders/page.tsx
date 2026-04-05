@@ -17,6 +17,7 @@ interface ShopeeOrder {
   buyer_account: string | null; order_date: string | null
   buyer_total_payment: number | null; recipient_name: string | null
   product_total: number | null; created_at: string
+  shopee_account_id: string | null
   internal_status: string; shopee_order_items: { id: string; status: string }[]
   shopee_settlements: ShopeeSettlement[]
 }
@@ -112,6 +113,7 @@ export default function ShopeeOrdersPage() {
     else { setSortBy(col); setSortDir('desc') }
   }
 
+  const accountMap = new Map(accounts.map(a => [a.id, a.name]))
   // 金流狀態在前端過濾（因為是計算欄位）
   const displayOrders = filterFinanceStatus
     ? orders.filter(o => getFinanceStatus(o).label === filterFinanceStatus)
@@ -273,9 +275,9 @@ export default function ShopeeOrdersPage() {
                 <th className="text-left px-4 py-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('created_at')}>
                   匯入日期 {sortBy === 'created_at' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </th>
+                <th className="text-left px-4 py-3 font-medium">帳號</th>
                 <th className="text-left px-4 py-3 font-medium">蝦皮訂單號</th>
                 <th className="text-left px-4 py-3 font-medium">買家</th>
-                <th className="text-left px-4 py-3 font-medium">收件人</th>
                 <th className="text-left px-4 py-3 font-medium">金額</th>
                 <th className="text-left px-4 py-3 font-medium">商品數</th>
                 <th className="text-left px-4 py-3 font-medium">蝦皮狀態</th>
@@ -300,9 +302,9 @@ export default function ShopeeOrdersPage() {
                   <tr key={o.id} className="hover:bg-gray-50">
                     <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.order_date)}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.created_at)}</td>
+                    <td className="px-4 py-2 text-xs">{o.shopee_account_id ? accountMap.get(o.shopee_account_id) || '-' : '-'}</td>
                     <td className="px-4 py-2 font-mono text-xs">{o.shopee_order_number}</td>
                     <td className="px-4 py-2 text-xs">{o.buyer_account || '-'}</td>
-                    <td className="px-4 py-2 text-xs">{o.recipient_name || '-'}</td>
                     <td className="px-4 py-2 text-xs font-medium">NT$ {o.buyer_total_payment || '-'}</td>
                     <td className="px-4 py-2 text-xs">
                       {o.shopee_order_items?.length || 0}
