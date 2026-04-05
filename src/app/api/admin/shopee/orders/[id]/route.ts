@@ -12,7 +12,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!order) return NextResponse.json({ error: '找不到訂單' }, { status: 404 })
 
   const { data: items } = await supabase.from('shopee_order_items').select('*').eq('shopee_order_id', id).order('created_at')
-  return NextResponse.json({ order, items: items || [] })
+  const { data: settlements } = await supabase.from('shopee_settlements').select('*').eq('shopee_order_id', id).order('created_at')
+  return NextResponse.json({ order, items: items || [], settlements: settlements || [] })
 }
 
 // PATCH — 更新訂單明細（對應商品、回填 ICCID、更新狀態）

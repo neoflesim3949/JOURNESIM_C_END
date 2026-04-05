@@ -38,3 +38,18 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true })
 }
+
+// DELETE — 刪除對應
+export async function DELETE(request: Request) {
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { type, id } = await request.json()
+  const supabase = createAdminClient()
+
+  if (type === 'product') {
+    await supabase.from('shopee_product_id_mappings').delete().eq('id', id)
+  } else if (type === 'variation') {
+    await supabase.from('shopee_variation_id_mappings').delete().eq('id', id)
+  }
+
+  return NextResponse.json({ ok: true })
+}

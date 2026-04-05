@@ -53,6 +53,20 @@ interface ShopeeOrder {
   expiry_date: string | null
 }
 
+interface Settlement {
+  id: string; shopee_order_number: string; refund_number: string | null
+  buyer_account: string | null; order_date: string | null; payment_method: string | null
+  wallet_date: string | null; original_price: number | null; promo_discount: number | null
+  refund_amount: number | null; shopee_subsidy: number | null; seller_coupon: number | null
+  seller_coin_cashback: number | null; buyer_shipping_fee: number | null
+  shopee_shipping_subsidy: number | null; shopee_paid_shipping: number | null
+  return_shipping_fee: number | null; installment_periods: string | null
+  processing_rate: string | null; ams_fee: number | null; transaction_fee: number | null
+  other_service_fee: number | null; processing_fee: number | null
+  wallet_amount: number | null; payment_source: string | null
+  promo_code: string | null; damage_compensation: number | null
+}
+
 interface CopiesOption {
   copies: string; days: number; costCny: number; costTwd: number
 }
@@ -77,6 +91,7 @@ export default function ShopeeOrderDetailPage() {
   const { id } = useParams() as { id: string }
   const [order, setOrder] = useState<ShopeeOrder | null>(null)
   const [items, setItems] = useState<ShopeeItem[]>([])
+  const [settlements, setSettlements] = useState<Settlement[]>([])
   const [loading, setLoading] = useState(true)
   const [matchingItem, setMatchingItem] = useState<ShopeeItem | null>(null)
   // ID 對應名稱
@@ -92,7 +107,7 @@ export default function ShopeeOrderDetailPage() {
       fetch(`/api/admin/shopee/orders/${id}`).then(r => r.json()),
       fetch('/api/admin/shopee/id-mappings').then(r => r.json()),
     ])
-    setOrder(orderRes.order); setItems(orderRes.items || [])
+    setOrder(orderRes.order); setItems(orderRes.items || []); setSettlements(orderRes.settlements || [])
     setProductIdMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
     setVariationIdMap(new Map((idRes.variations || []).map((v: IdMapping) => [v.shopee_variation_id!, v.display_name])))
     // 查 BC SKU 名稱
@@ -246,6 +261,79 @@ export default function ShopeeOrderDetailPage() {
         </div>
       </div>
 
+      {/* 金流結算 & 利潤結算 */}
+      {(() => {
+        const s = settlements.length > 0 ? settlements[0] : null
+        const productTotal = order.product_total ?? 0
+        const sellerCoupon = Math.abs(s?.seller_coupon ?? order.seller_coupon ?? 0)
+        const amsFee = Math.abs(s?.ams_fee ?? 0)
+        const txFee = Math.abs(s?.transaction_fee ?? order.transaction_fee ?? 0)
+        const otherFee = Math.abs(s?.other_service_fee ?? order.other_service_fee ?? 0)
+        const processingFee = Math.abs(s?.processing_fee ?? order.payment_processing_fee ?? 0)
+        const walletAmount = s?.wallet_amount ?? null
+        const platformFees = sellerCoupon + amsFee + txFee + otherFee + processingFee
+        const grossMargin = productTotal > 0 && walletAmount !== null ? ((walletAmount / productTotal) * 100) : null
+        const platformRate = productTotal > 0 ? ((platformFees / productTotal) * 100) : 0
+        const netProfit = walletAmount !== null ? walletAmount - platformFees : null
+        const netRate = productTotal > 0 && netProfit !== null ? ((netProfit / productTotal) * 100) : null
+        const expectedAmount = productTotal - platformFees
+        const hasDiscrepancy = walletAmount !== null && Math.abs(expectedAmount - walletAmount) > 1
+
+        return (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 金流結算 */}
+            <div className="bg-white p-5 rounded-xl border border-gray-200">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-700">金流結算</h3>
+                {!s && <span className="text-xs text-gray-400">尚未匯入金流資料</span>}
+              </div>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">訂單編號：</span><span>{s?.shopee_order_number ?? order.shopee_order_number}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">退款編號：</span><span>{s?.refund_number || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">買家付款方式：</span><span>{s?.payment_method || order.payment_method || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">錢包入帳日期：</span><span>{s?.wallet_date || '-'}</span></div>
+                <div className="border-t border-gray-100 my-2" />
+                <div className="flex justify-between"><span className="text-gray-500">退款金額：</span><span>NT$ {s?.refund_amount ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">退貨運費：</span><span>NT$ {s?.return_shipping_fee ?? order.return_shipping_fee ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">金流與系統處理費率：</span><span>{s?.processing_rate || order.payment_processing_rate || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">AMS 推廣費用：</span><span>NT$ {s?.ams_fee ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">成交手續費：</span><span>NT$ {s?.transaction_fee ?? order.transaction_fee ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">其他服務費：</span><span>NT$ {s?.other_service_fee ?? order.other_service_fee ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">金流與系統處理費：</span><span>NT$ {s?.processing_fee ?? order.payment_processing_fee ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">損失賠償：</span><span>NT$ {s?.damage_compensation ?? '-'}</span></div>
+                <div className="border-t border-gray-200 my-2" />
+                <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
+              </div>
+            </div>
+
+            {/* 利潤結算 */}
+            <div className="bg-white p-5 rounded-xl border border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">利潤結算</h3>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">商品總價：</span><span className="font-medium">NT$ {productTotal}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">賣家優惠券：</span><span>-NT$ {sellerCoupon}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">AMS 推廣費用：</span><span>-NT$ {amsFee}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">成交手續費：</span><span>-NT$ {txFee}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">其他服務費：</span><span>-NT$ {otherFee}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">金流與系統處理費：</span><span>-NT$ {processingFee}</span></div>
+                <div className="border-t border-gray-200 my-2" />
+                <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
+                <div className="border-t border-gray-100 my-2" />
+                <div className="flex justify-between"><span className="text-gray-500">平台費用合計：</span><span className="text-red-500">-NT$ {platformFees.toFixed(0)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">毛利率：</span><span className={grossMargin !== null ? (grossMargin >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{grossMargin !== null ? `${grossMargin.toFixed(1)}%` : '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">平台費用率：</span><span className="text-orange-500">{platformRate.toFixed(1)}%</span></div>
+                <div className="flex justify-between font-semibold"><span>淨利率：</span><span className={netRate !== null ? (netRate >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{netRate !== null ? `${netRate.toFixed(1)}%` : '-'}</span></div>
+                {hasDiscrepancy && (
+                  <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600">
+                    ⚠ 異常：商品總價(NT${productTotal}) - 平台費用(NT${platformFees.toFixed(0)}) = NT${expectedAmount.toFixed(0)}，與入帳金額(NT${walletAmount}) 不符
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* 商品明細 */}
       <div className="mt-6">
         <h2 className="text-lg font-semibold">商品明細（{items.length}）{pendingCount > 0 && <span className="text-orange-500 text-sm ml-2">{pendingCount} 待對應</span>}</h2>
@@ -280,6 +368,11 @@ export default function ShopeeOrderDetailPage() {
                     </div>
                     {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {bcSkuNameMap.get(item.bc_sku_id) || ''} · {item.bc_sku_id} · copies: {item.matched_copies}</div>}
                     {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}{item.bc_sub_order_id && ` · 子訂單: ${item.bc_sub_order_id}`}</div>}
+                    {item.iccid && item.iccid.length > 0 && item.status !== 'matched' && item.status !== 'iccid_filled' && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {item.iccid.map((ic, j) => <span key={j} className="text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded">ICCID: {ic}</span>)}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${st.color}`}>{st.label}</span>

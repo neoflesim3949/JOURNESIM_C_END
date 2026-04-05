@@ -25,8 +25,10 @@ export default function ShopeeOrdersPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [importing, setImporting] = useState(false)
+  const [importingSettlement, setImportingSettlement] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const settlementFileRef = useRef<HTMLInputElement>(null)
   const [showLabelSettings, setShowLabelSettings] = useState(false)
   const [expiryDate, setExpiryDate] = useState('')
   const [labelSettings, setLabelSettings] = useState({ line1: 12, line2: 12, line3: 10 })
@@ -82,6 +84,30 @@ export default function ShopeeOrdersPage() {
     load()
   }
 
+  async function handleSettlementImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImportingSettlement(true); setImportResult(null)
+
+    const buffer = await file.arrayBuffer()
+    const wb = XLSX.read(buffer, { type: 'array' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' })
+
+    const res = await fetch('/api/admin/shopee/import-settlement', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    })
+    const data = await res.json()
+    if (res.ok) {
+      setImportResult(`金流匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆`)
+    } else {
+      setImportResult(`金流匯入失敗：${data.error}`)
+    }
+    setImportingSettlement(false)
+    if (settlementFileRef.current) settlementFileRef.current.value = ''
+  }
+
   const totalPages = Math.ceil(total / 20)
 
   return (
@@ -103,6 +129,10 @@ export default function ShopeeOrdersPage() {
           <label className={`flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer ${importing ? 'opacity-50' : ''}`}>
             <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入 Excel'}
             <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" disabled={importing} />
+          </label>
+          <label className={`flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 cursor-pointer ${importingSettlement ? 'opacity-50' : ''}`}>
+            <Upload className="w-4 h-4" /> {importingSettlement ? '匯入中...' : '匯入金流 Excel'}
+            <input ref={settlementFileRef} type="file" accept=".xlsx,.xls" onChange={handleSettlementImport} className="hidden" disabled={importingSettlement} />
           </label>
         </div>
       </div>
