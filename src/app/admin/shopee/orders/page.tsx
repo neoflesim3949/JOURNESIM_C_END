@@ -5,11 +5,34 @@ import Link from 'next/link'
 import { Upload, Search, Package, ChevronRight, Settings } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
+interface ShopeeSettlement {
+  wallet_amount: number | null; original_price: number | null; seller_coupon: number | null
+  ams_fee: number | null; transaction_fee: number | null; other_service_fee: number | null
+  processing_fee: number | null
+}
+
 interface ShopeeOrder {
   id: string; shopee_order_number: string; order_status: string | null
+  return_status: string | null
   buyer_account: string | null; order_date: string | null
   buyer_total_payment: number | null; recipient_name: string | null
+  product_total: number | null; created_at: string
   internal_status: string; shopee_order_items: { id: string; status: string }[]
+  shopee_settlements: ShopeeSettlement[]
+}
+
+function getFinanceStatus(order: ShopeeOrder): { label: string; color: string } {
+  const settlements = order.shopee_settlements || []
+  if (settlements.length === 0) return { label: '未匯入', color: 'bg-gray-100 text-gray-500' }
+  const s = settlements[0]
+  const originalPrice = s.original_price ?? order.product_total ?? 0
+  const sellerCoupon = Math.abs(s.seller_coupon ?? 0)
+  const platformFees = Math.abs(s.ams_fee ?? 0) +
+    Math.abs(s.transaction_fee ?? 0) + Math.abs(s.other_service_fee ?? 0) + Math.abs(s.processing_fee ?? 0)
+  const walletAmount = s.wallet_amount ?? 0
+  const expected = originalPrice - sellerCoupon - platformFees
+  if (Math.abs(expected - walletAmount) > 1) return { label: '金流異常', color: 'bg-red-100 text-red-700' }
+  return { label: '已匯入', color: 'bg-green-100 text-green-700' }
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -24,6 +47,17 @@ export default function ShopeeOrdersPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  // 篩選
+  const [filterOrderDateFrom, setFilterOrderDateFrom] = useState('')
+  const [filterOrderDateTo, setFilterOrderDateTo] = useState('')
+  const [filterCreatedFrom, setFilterCreatedFrom] = useState('')
+  const [filterCreatedTo, setFilterCreatedTo] = useState('')
+  const [filterReturnStatus, setFilterReturnStatus] = useState('')
+  const [filterFinanceStatus, setFilterFinanceStatus] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  // 排序
+  const [sortBy, setSortBy] = useState('created_at')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [importing, setImporting] = useState(false)
   const [importingSettlement, setImportingSettlement] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
@@ -54,14 +88,30 @@ export default function ShopeeOrdersPage() {
 
   async function load() {
     setLoading(true)
-    const params = new URLSearchParams({ page: String(page), pageSize: '20' })
+    const params = new URLSearchParams({ page: String(page), pageSize: '20', sort_by: sortBy, sort_dir: sortDir })
     if (search) params.set('search', search)
+    if (filterStatus) params.set('status', filterStatus)
+    if (filterReturnStatus) params.set('return_status', filterReturnStatus)
+    if (filterOrderDateFrom) params.set('order_date_from', filterOrderDateFrom)
+    if (filterOrderDateTo) params.set('order_date_to', filterOrderDateTo)
+    if (filterCreatedFrom) params.set('created_from', filterCreatedFrom)
+    if (filterCreatedTo) params.set('created_to', filterCreatedTo)
     const res = await fetch(`/api/admin/shopee/orders?${params}`)
     if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0) }
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page])
+  function toggleSort(col: string) {
+    if (sortBy === col) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
+    else { setSortBy(col); setSortDir('desc') }
+  }
+
+  // 金流狀態在前端過濾（因為是計算欄位）
+  const displayOrders = filterFinanceStatus
+    ? orders.filter(o => getFinanceStatus(o).label === filterFinanceStatus)
+    : orders
+
+  useEffect(() => { load() }, [page, sortBy, sortDir])
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -141,14 +191,53 @@ export default function ShopeeOrdersPage() {
         <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-lg text-sm">{importResult}</div>
       )}
 
-      <div className="mt-4 flex gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="搜尋訂單號、買家、收件人..." value={search}
-            onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (setPage(1), load())}
-            className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
+      <div className="mt-4 space-y-3">
+        <div className="flex gap-3">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input type="text" placeholder="搜尋訂單號、買家、收件人..." value={search}
+              onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (setPage(1), load())}
+              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+          <button onClick={() => { setPage(1); load() }} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
         </div>
-        <button onClick={() => { setPage(1); load() }} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+        <div className="flex flex-wrap gap-2 items-center text-xs">
+          <span className="text-gray-500">訂單日期：</span>
+          <input type="date" value={filterOrderDateFrom} onChange={e => setFilterOrderDateFrom(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <span className="text-gray-400">~</span>
+          <input type="date" value={filterOrderDateTo} onChange={e => setFilterOrderDateTo(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <span className="text-gray-500 ml-2">匯入日期：</span>
+          <input type="date" value={filterCreatedFrom} onChange={e => setFilterCreatedFrom(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <span className="text-gray-400">~</span>
+          <input type="date" value={filterCreatedTo} onChange={e => setFilterCreatedTo(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <select value={filterReturnStatus} onChange={e => setFilterReturnStatus(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs ml-2">
+            <option value="">退貨/退款</option>
+            <option value="has">有退貨/退款</option>
+            <option value="none">無退貨/退款</option>
+          </select>
+          <select value={filterFinanceStatus} onChange={e => setFilterFinanceStatus(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+            <option value="">金流狀態</option>
+            <option value="未匯入">未匯入</option>
+            <option value="已匯入">已匯入</option>
+            <option value="金流異常">金流異常</option>
+          </select>
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+            <option value="">系統狀態</option>
+            <option value="pending">待處理</option>
+            <option value="processing">處理中</option>
+            <option value="completed">已完成</option>
+          </select>
+          <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
+          <button onClick={() => { setFilterOrderDateFrom(''); setFilterOrderDateTo(''); setFilterCreatedFrom(''); setFilterCreatedTo(''); setFilterReturnStatus(''); setFilterFinanceStatus(''); setFilterStatus(''); setSearch(''); setPage(1); setTimeout(load, 0) }}
+            className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
+        </div>
       </div>
 
       {loading ? <p className="mt-8 text-sm text-gray-500">載入中...</p> : orders.length === 0 ? (
@@ -162,22 +251,39 @@ export default function ShopeeOrdersPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
+                <th className="text-left px-4 py-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('order_date')}>
+                  訂單日期 {sortBy === 'order_date' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                </th>
+                <th className="text-left px-4 py-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('created_at')}>
+                  匯入日期 {sortBy === 'created_at' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                </th>
                 <th className="text-left px-4 py-3 font-medium">蝦皮訂單號</th>
                 <th className="text-left px-4 py-3 font-medium">買家</th>
                 <th className="text-left px-4 py-3 font-medium">收件人</th>
                 <th className="text-left px-4 py-3 font-medium">金額</th>
                 <th className="text-left px-4 py-3 font-medium">商品數</th>
                 <th className="text-left px-4 py-3 font-medium">蝦皮狀態</th>
+                <th className="text-left px-4 py-3 font-medium">退貨/退款</th>
+                <th className="text-left px-4 py-3 font-medium">金流狀態</th>
                 <th className="text-left px-4 py-3 font-medium">系統狀態</th>
                 <th className="text-left px-4 py-3 font-medium w-10"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {orders.map((o) => {
+              {displayOrders.map((o) => {
                 const s = STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' }
+                const fs = getFinanceStatus(o)
                 const pendingItems = o.shopee_order_items?.filter(i => i.status === 'pending').length || 0
+                const fmtDate = (d: string | null) => d ? d.slice(0, 10) : '-'
+                const simplifyStatus = (st: string | null) => {
+                  if (!st) return '-'
+                  if (st.includes('已完成')) return '已完成'
+                  return st
+                }
                 return (
                   <tr key={o.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.order_date)}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.created_at)}</td>
                     <td className="px-4 py-2 font-mono text-xs">{o.shopee_order_number}</td>
                     <td className="px-4 py-2 text-xs">{o.buyer_account || '-'}</td>
                     <td className="px-4 py-2 text-xs">{o.recipient_name || '-'}</td>
@@ -186,7 +292,9 @@ export default function ShopeeOrdersPage() {
                       {o.shopee_order_items?.length || 0}
                       {pendingItems > 0 && <span className="ml-1 text-orange-500">({pendingItems} 待對應)</span>}
                     </td>
-                    <td className="px-4 py-2 text-xs">{o.order_status || '-'}</td>
+                    <td className="px-4 py-2 text-xs">{simplifyStatus(o.order_status)}</td>
+                    <td className="px-4 py-2 text-xs">{o.return_status || '-'}</td>
+                    <td className="px-4 py-2"><span className={`px-2 py-0.5 text-xs rounded-full ${fs.color}`}>{fs.label}</span></td>
                     <td className="px-4 py-2"><span className={`px-2 py-0.5 text-xs rounded-full ${s.color}`}>{s.label}</span></td>
                     <td className="px-4 py-2">
                       <Link href={`/admin/shopee/orders/${o.id}`} className="text-gray-400 hover:text-blue-600"><ChevronRight className="w-4 h-4" /></Link>

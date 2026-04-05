@@ -15,6 +15,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   if (!items || items.length === 0) return NextResponse.json({ error: '無可下單的商品' }, { status: 400 })
 
+  // 查詢成本價（從 bc_products.prices + 匯率）
+  const skuIds = [...new Set(items.map(i => i.bc_sku_id).filter(Boolean))]
+  const { data: bcProducts } = await supabase.from('bc_products').select('sku_id, prices').in('sku_id', skuIds)
+  const bcPriceMap = new Map((bcProducts || []).map(p => [p.sku_id, p.prices as { copies: string; settlementPrice: string }[] | null]))
+  const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
+  const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
+
   // 蝦皮訂單全部是 SIM → F007（帶 ICCID）
   const results: { item_id: string; bc_order_id?: string; error?: string }[] = []
 
@@ -41,11 +48,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       console.log('[BC F007] result:', JSON.stringify(bcResult))
       for (let i = 0; i < itemsWithIccid.length; i++) {
         const bcSub = bcResult.subOrderList?.[i]
+        const item = itemsWithIccid[i]
+        // 計算成本價
+        const prices = bcPriceMap.get(item.bc_sku_id) || []
+        const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
+        const costCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
+        const costTwd = Math.ceil(costCny / cnyRate)
         await supabase.from('shopee_order_items').update({
           bc_order_id: bcResult.orderId,
           bc_sub_order_id: bcSub?.subOrderId || null,
           status: 'bc_ordered',
-        }).eq('id', itemsWithIccid[i].id)
+          cost_cny: costCny,
+          cost_twd: costTwd,
+        }).eq('id', item.id)
         results.push({ item_id: itemsWithIccid[i].id, bc_order_id: bcResult.orderId })
       }
     } catch (err) {
@@ -57,9 +72,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
   }
 
-  // 更新訂單狀態
+  // 重新查詢所有商品，判斷訂單狀態
+  const { data: allItems } = await supabase.from('shopee_order_items')
+    .select('iccid, bc_order_id').eq('shopee_order_id', id)
+  const allDone = (allItems || []).every(i => i.bc_order_id && i.iccid && (i.iccid as string[]).length > 0)
+
   await supabase.from('shopee_orders').update({
-    internal_status: 'processing', updated_at: new Date().toISOString(),
+    internal_status: allDone ? 'completed' : 'processing',
+    updated_at: new Date().toISOString(),
   }).eq('id', id)
 
   return NextResponse.json({ results })

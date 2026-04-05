@@ -33,6 +33,7 @@ interface ShopeeItem {
   original_price: number | null; sale_price: number | null; quantity: number; return_quantity: number
   matched_package_id: string | null; matched_plan_id: string | null; matched_copies: string | null
   bc_sku_id: string | null; iccid: string[] | null; bc_order_id: string | null; bc_sub_order_id: string | null
+  cost_cny: number | null; cost_twd: number | null
   status: string
 }
 
@@ -264,19 +265,23 @@ export default function ShopeeOrderDetailPage() {
       {/* 金流結算 & 利潤結算 */}
       {(() => {
         const s = settlements.length > 0 ? settlements[0] : null
-        const productTotal = order.product_total ?? 0
+        // 用金流 Excel 的商品原價（original_price），沒有就用訂單的 product_total
+        const originalPrice = s?.original_price ?? order.product_total ?? 0
         const sellerCoupon = Math.abs(s?.seller_coupon ?? order.seller_coupon ?? 0)
         const amsFee = Math.abs(s?.ams_fee ?? 0)
         const txFee = Math.abs(s?.transaction_fee ?? order.transaction_fee ?? 0)
         const otherFee = Math.abs(s?.other_service_fee ?? order.other_service_fee ?? 0)
         const processingFee = Math.abs(s?.processing_fee ?? order.payment_processing_fee ?? 0)
         const walletAmount = s?.wallet_amount ?? null
-        const platformFees = sellerCoupon + amsFee + txFee + otherFee + processingFee
-        const grossMargin = productTotal > 0 && walletAmount !== null ? ((walletAmount / productTotal) * 100) : null
-        const platformRate = productTotal > 0 ? ((platformFees / productTotal) * 100) : 0
-        const netProfit = walletAmount !== null ? walletAmount - platformFees : null
-        const netRate = productTotal > 0 && netProfit !== null ? ((netProfit / productTotal) * 100) : null
-        const expectedAmount = productTotal - platformFees
+        const platformFees = amsFee + txFee + otherFee + processingFee
+        // 毛利率：入帳金額 / 商品原價
+        const grossMargin = originalPrice > 0 && walletAmount !== null ? ((walletAmount / originalPrice) * 100) : null
+        const platformRate = originalPrice > 0 ? ((platformFees / originalPrice) * 100) : 0
+        const totalCost = items.reduce((sum, i) => sum + ((i.cost_twd ?? 0) * i.quantity), 0)
+        const netProfit = walletAmount !== null ? walletAmount - totalCost : null
+        const netRate = originalPrice > 0 && netProfit !== null ? ((netProfit / originalPrice) * 100) : null
+        // 金流異常：原價 - 優惠券 - 平台費用 應等於入帳金額
+        const expectedAmount = originalPrice - sellerCoupon - platformFees
         const hasDiscrepancy = walletAmount !== null && Math.abs(expectedAmount - walletAmount) > 1
 
         return (
@@ -310,22 +315,25 @@ export default function ShopeeOrderDetailPage() {
             <div className="bg-white p-5 rounded-xl border border-gray-200">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">利潤結算</h3>
               <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">商品總價：</span><span className="font-medium">NT$ {productTotal}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">商品原價：</span><span className="font-medium">NT$ {originalPrice}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">賣家優惠券：</span><span>-NT$ {sellerCoupon}</span></div>
+                <div className="border-t border-gray-100 my-2" />
                 <div className="flex justify-between"><span className="text-gray-500">AMS 推廣費用：</span><span>-NT$ {amsFee}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">成交手續費：</span><span>-NT$ {txFee}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">其他服務費：</span><span>-NT$ {otherFee}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">金流與系統處理費：</span><span>-NT$ {processingFee}</span></div>
                 <div className="border-t border-gray-200 my-2" />
-                <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
-                <div className="border-t border-gray-100 my-2" />
                 <div className="flex justify-between"><span className="text-gray-500">平台費用合計：</span><span className="text-red-500">-NT$ {platformFees.toFixed(0)}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">毛利率：</span><span className={grossMargin !== null ? (grossMargin >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{grossMargin !== null ? `${grossMargin.toFixed(1)}%` : '-'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">平台費用率：</span><span className="text-orange-500">{platformRate.toFixed(1)}%</span></div>
+                <div className="border-t border-gray-200 my-2" />
+                <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">毛利率：</span><span className={grossMargin !== null ? (grossMargin >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{grossMargin !== null ? `${grossMargin.toFixed(1)}%` : '-'}</span></div>
+                <div className="border-t border-gray-200 my-2" />
+                <div className="flex justify-between"><span className="text-gray-500">商品成本：</span><span className={totalCost > 0 ? 'text-gray-700' : 'text-gray-400'}>{totalCost > 0 ? `NT$ ${totalCost}` : '-'}</span></div>
                 <div className="flex justify-between font-semibold"><span>淨利率：</span><span className={netRate !== null ? (netRate >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{netRate !== null ? `${netRate.toFixed(1)}%` : '-'}</span></div>
                 {hasDiscrepancy && (
                   <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600">
-                    ⚠ 異常：商品總價(NT${productTotal}) - 平台費用(NT${platformFees.toFixed(0)}) = NT${expectedAmount.toFixed(0)}，與入帳金額(NT${walletAmount}) 不符
+                    ⚠ 金流異常：商品原價(NT${originalPrice}) - 優惠券(NT${sellerCoupon}) - 平台費用(NT${platformFees.toFixed(0)}) = NT${expectedAmount.toFixed(0)}，與入帳金額(NT${walletAmount}) 差額 NT${Math.abs(expectedAmount - (walletAmount ?? 0)).toFixed(0)}
                   </div>
                 )}
               </div>
@@ -368,6 +376,7 @@ export default function ShopeeOrderDetailPage() {
                     </div>
                     {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {bcSkuNameMap.get(item.bc_sku_id) || ''} · {item.bc_sku_id} · copies: {item.matched_copies}</div>}
                     {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}{item.bc_sub_order_id && ` · 子訂單: ${item.bc_sub_order_id}`}</div>}
+                    {item.cost_twd != null && <div className="text-xs text-gray-500 mt-0.5">成本：¥{item.cost_cny ?? 0} · NT${item.cost_twd}</div>}
                     {item.iccid && item.iccid.length > 0 && item.status !== 'matched' && item.status !== 'iccid_filled' && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {item.iccid.map((ic, j) => <span key={j} className="text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded">ICCID: {ic}</span>)}
