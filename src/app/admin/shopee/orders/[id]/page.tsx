@@ -460,6 +460,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
   const [results, setResults] = useState<BcResult[]>([])
   const [searching, setSearching] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [sortPrice, setSortPrice] = useState<'asc' | 'desc' | null>(null)
 
   // 國家下拉
   const [countryOpen, setCountryOpen] = useState(false)
@@ -598,18 +599,33 @@ function BcMatchModal({ item, onMatch, onClose }: {
                   <th className="text-left px-4 py-2.5 font-medium w-16">限速</th>
                   <th className="text-left px-4 py-2.5 font-medium w-36">適用國家</th>
                   <th className="text-right px-4 py-2.5 font-medium w-20">天數</th>
-                  <th className="text-right px-4 py-2.5 font-medium w-24">結算價</th>
+                  <th className="text-right px-4 py-2.5 font-medium w-24 cursor-pointer select-none hover:text-blue-600" onClick={() => setSortPrice(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}>
+                    結算價 {sortPrice === 'asc' ? '↑' : sortPrice === 'desc' ? '↓' : ''}
+                  </th>
                   <th className="text-center px-4 py-2.5 font-medium w-14">詳情</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {results.map((bc, i) => {
+                {(() => {
+                  let sorted = results
+                  if (sortPrice && selDays) {
+                    const target = parseInt(selDays)
+                    sorted = [...results].sort((a, b) => {
+                      const aP = a.copies_options.find(o => o.days === target)?.costCny ?? Infinity
+                      const bP = b.copies_options.find(o => o.days === target)?.costCny ?? Infinity
+                      return sortPrice === 'asc' ? aP - bP : bP - aP
+                    })
+                  }
+                  return sorted
+                })().map((bc, i) => {
                   const isExpanded = expanded.has(bc.sku_id)
                   const toggleExpand = () => setExpanded(prev => {
                     const next = new Set(prev)
                     next.has(bc.sku_id) ? next.delete(bc.sku_id) : next.add(bc.sku_id)
                     return next
                   })
+                  // 如果有篩選天數，找到匹配的 copies option
+                  const matchedOpt = selDays ? bc.copies_options.find(o => o.days === parseInt(selDays)) : null
                   return (
                     <Fragment key={`${bc.sku_id}-${i}`}>
                       <tr className={`hover:bg-blue-50/50 cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`} onClick={toggleExpand}>
@@ -617,7 +633,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
                           <div className="flex items-center gap-1.5">
                             <span className="text-gray-400 flex-shrink-0 w-3">{isExpanded ? '▾' : '▸'}</span>
                             <div>
-                              <div className={`font-medium text-sm truncate max-w-[280px] ${isExpanded ? 'text-blue-700' : ''}`}>{bc.name}</div>
+                              <div className={`font-medium text-sm ${isExpanded ? 'text-blue-700' : 'truncate max-w-[350px]'}`}>{bc.name}</div>
                               <div className="text-gray-400 font-mono text-[10px]">{bc.sku_id}</div>
                             </div>
                           </div>
@@ -631,13 +647,18 @@ function BcMatchModal({ item, onMatch, onClose }: {
                           </div>
                         </td>
                         <td className="px-4 py-2.5 text-right font-medium">
-                          {bc.copies_options.length} 規格
+                          {matchedOpt ? `${matchedOpt.days} 天` : `${bc.copies_options.length} 規格`}
                         </td>
                         <td className="px-4 py-2.5 text-right font-medium text-blue-600">
-                          {isExpanded ? '' : '展開查看'}
+                          {matchedOpt ? `¥${matchedOpt.costCny.toFixed(2)}` : (isExpanded ? '' : '展開查看')}
                         </td>
                         <td className="px-4 py-2.5 text-center">
-                          📋
+                          {matchedOpt ? (
+                            <button onClick={(e) => { e.stopPropagation(); onMatch(bc.sku_id, matchedOpt.copies) }}
+                              className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
+                              選取
+                            </button>
+                          ) : '📋'}
                         </td>
                       </tr>
                       {isExpanded && bc.copies_options.map((opt, oi) => (
@@ -646,7 +667,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
                           <td className="px-4 py-2 text-right font-medium">{opt.days} 天</td>
                           <td className="px-4 py-2 text-right font-medium text-blue-600">¥{opt.costCny.toFixed(2)}</td>
                           <td className="px-4 py-2 text-center">
-                            <button onClick={() => onMatch(bc.sku_id, opt.copies)}
+                            <button onClick={(e) => { e.stopPropagation(); onMatch(bc.sku_id, opt.copies) }}
                               className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
                               選取
                             </button>
