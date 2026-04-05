@@ -1,59 +1,94 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { formatCapacity, formatSpeed } from '@/lib/format'
 
-// GET — 搜尋 BC 商品（支援國家/天數/流量篩選，回傳 TWD 成本）
 export async function GET(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(request.url)
-  const countries = searchParams.get('countries') || '' // 逗號分隔的 MCC
-  const days = searchParams.get('days') || ''
+  const action = searchParams.get('action') || 'search'
+  const supabase = createAdminClient()
+
+  // ─── options：下拉選項 ──────────────────────────────────
+  if (action === 'options') {
+    const { data: countries } = await supabase.from('bc_countries')
+      .select('mcc, name, name_zh').or('scope.eq.local,scope.is.null').order('name')
+
+    // 從 bc_products 取天數和流量選項
+    const { data: products } = await supabase.from('bc_products')
+      .select('days, high_flow_size, capacity, plan_type, prices')
+
+    const daysSet = new Set<number>()
+    const capMap = new Map<string, boolean>()
+    for (const p of products || []) {
+      // 天數 = unitDays × copies
+      const unitDays = Number(p.days) || 1
+      const prices = p.prices as { copies: string }[] | null
+      if (prices) {
+        for (const pr of prices) daysSet.add(unitDays * parseInt(pr.copies))
+      } else {
+        daysSet.add(unitDays)
+      }
+      const raw = p.high_flow_size || p.capacity
+      if (raw) capMap.set(formatCapacity(raw, p.plan_type === '1'), true)
+    }
+
+    return NextResponse.json({
+      countries: (countries || []).map(c => ({ mcc: c.mcc, name: c.name_zh || c.name })),
+      days: Array.from(daysSet).sort((a, b) => a - b).map(String),
+      capacities: Array.from(capMap.keys()).sort(),
+    })
+  }
+
+  // ─── search：搜尋商品（每個 SKU 一行，不展開 copies）────────
+  const countries = searchParams.get('countries') || ''
+  const selectedDays = searchParams.get('days') || ''
   const capacity = searchParams.get('capacity') || ''
   const search = searchParams.get('search') || ''
 
-  const supabase = createAdminClient()
+  // 至少要有一個篩選條件
+  if (!countries && !selectedDays && !capacity && !search) {
+    return NextResponse.json([])
+  }
 
-  // 匯率
   const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
   const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
 
-  // 查 BC 商品
-  let query = supabase.from('bc_products')
-    .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, prices, country_data, rechargeable_product')
-    .limit(200)
-
-  // 文字搜尋
-  if (search) {
-    query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
-  }
-
-  // 天數篩選
-  if (days) {
-    query = query.eq('days', days)
-  }
-
-  const { data: products } = await query
-
-  if (!products || products.length === 0) return NextResponse.json([])
-
-  // 國家篩選（在應用層過濾 country_data）
-  const countryMccs = countries ? countries.split(',').map(c => c.trim().toUpperCase()).filter(Boolean) : []
-
-  // 如果搜尋詞像國家名，先查 bc_countries 找 MCC
+  // 如果 search 像國家名，先找 MCC
   let searchMccs: string[] = []
-  if (search && !countries) {
-    const { data: matchedCountries } = await supabase.from('bc_countries')
-      .select('mcc')
-      .or(`mcc.ilike.${search},name.ilike.%${search}%,name_zh.ilike.%${search}%,name_en.ilike.%${search}%`)
-    searchMccs = (matchedCountries || []).map(c => c.mcc.toUpperCase())
+  if (search && /^[A-Za-z]{2,3}$/.test(search)) {
+    searchMccs = [search.toUpperCase()]
+  } else if (search) {
+    const { data: matched } = await supabase.from('bc_countries')
+      .select('mcc').or(`name.ilike.%${search}%,name_zh.ilike.%${search}%,name_en.ilike.%${search}%`)
+    searchMccs = (matched || []).map(c => c.mcc.toUpperCase())
   }
 
-  const allMccs = [...countryMccs, ...searchMccs]
-
-  let filtered = products
+  // 查 bc_products
+  let allProducts: any[] = []
+  let from = 0
+  while (true) {
+    let query = supabase.from('bc_products')
+      .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, prices, country_data')
+      .range(from, from + 999)
+    // 名稱或 SKU 搜尋（如果不是國家名搜尋）
+    if (search && searchMccs.length === 0) {
+      query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
+    }
+    const { data } = await query
+    if (!data || data.length === 0) break
+    allProducts.push(...data)
+    if (data.length < 1000) break
+    from += 1000
+  }
 
   // 國家篩選
+  const allMccs = [
+    ...(countries ? countries.split(',').map(c => c.trim().toUpperCase()).filter(Boolean) : []),
+    ...searchMccs,
+  ]
+  let filtered = allProducts
   if (allMccs.length > 0) {
     filtered = filtered.filter(p => {
       const cd = p.country_data as { mcc: string }[] | null
@@ -61,40 +96,59 @@ export async function GET(request: Request) {
     })
   }
 
-  // 流量篩選（模糊匹配）
+  // 流量篩選
   if (capacity) {
-    const cap = capacity.toLowerCase()
+    filtered = filtered.filter(p => formatCapacity(p.high_flow_size || p.capacity, p.plan_type === '1') === capacity)
+  }
+
+  // 天數篩選（天數 = unitDays × copies，任一 copies 匹配就保留）
+  if (selectedDays) {
+    const target = parseInt(selectedDays)
     filtered = filtered.filter(p => {
-      const hfs = p.high_flow_size ? String(p.high_flow_size) : ''
-      const c = p.capacity ? String(p.capacity) : ''
-      return hfs.includes(cap) || c.includes(cap)
+      const unitDays = Number(p.days) || 1
+      const prices = p.prices as { copies: string }[] | null
+      if (prices) return prices.some(pr => unitDays * parseInt(pr.copies) === target)
+      return unitDays === target
     })
   }
 
-  // 組裝結果，計算 TWD 成本
+  // 國家繁體名
+  const mccSet = new Set<string>()
+  for (const p of filtered) (p.country_data as { mcc: string }[] | null)?.forEach(c => mccSet.add(c.mcc))
+  const { data: cNames } = mccSet.size > 0
+    ? await supabase.from('bc_countries').select('mcc, name_zh, name').in('mcc', Array.from(mccSet))
+    : { data: [] }
+  const cMap = new Map((cNames || []).map(c => [c.mcc, c.name_zh || c.name]))
+
+  // 組裝結果（每個 SKU 一行）
   const result = filtered.slice(0, 100).map(p => {
     const prices = p.prices as { copies: string; settlementPrice: string }[] | null
-    const costCny = prices?.find(pr => pr.copies === '1')?.settlementPrice
-    const costTwd = costCny ? Math.ceil(Number(costCny) / cnyRate) : null
+    const firstPrice = prices?.[0]
+    const costCny = firstPrice ? Number(firstPrice.settlementPrice) || 0 : 0
+    const costTwd = Math.ceil(costCny / cnyRate)
+    const unitDays = Number(p.days) || 1
 
-    // 所有 copies 選項
+    // copies 選項
     const copiesOptions = (prices || []).map(pr => ({
       copies: pr.copies,
+      days: unitDays * parseInt(pr.copies),
       costCny: Number(pr.settlementPrice) || 0,
       costTwd: Math.ceil((Number(pr.settlementPrice) || 0) / cnyRate),
-    })).sort((a, b) => parseInt(a.copies) - parseInt(b.copies))
+    })).sort((a, b) => a.days - b.days)
 
+    const cd = p.country_data as { mcc: string }[] | null
     return {
       sku_id: p.sku_id,
       name: p.name,
-      type: p.type,
-      days: p.days,
-      capacity: p.capacity,
-      high_flow_size: p.high_flow_size,
+      capacity: formatCapacity(p.high_flow_size || p.capacity, p.plan_type === '1'),
+      speed: formatSpeed(p.limit_flow_speed),
       plan_type: p.plan_type,
+      unit_days: unitDays,
+      cost_cny: costCny,
       cost_twd: costTwd,
       copies_options: copiesOptions,
-      country_count: (p.country_data as { mcc: string }[] | null)?.length || 0,
+      countries: (cd || []).slice(0, 5).map(c => cMap.get(c.mcc) || c.mcc),
+      country_total: cd?.length || 0,
     }
   })
 

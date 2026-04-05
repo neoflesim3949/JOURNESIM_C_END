@@ -1,9 +1,31 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Search, Printer, Send, X, Undo2 } from 'lucide-react'
+import { ArrowLeft, Save, Printer, Send, X, Undo2 } from 'lucide-react'
+
+// ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
+function generateCode128SVG(text: string, height = 30, barWidth = 1.5): string {
+  const P = '212222,222122,222221,121223,121322,131222,122213,122312,132212,221213,221312,231212,112232,122132,122231,113222,123122,123221,223211,221132,221231,213212,223112,312131,311222,321122,321221,312212,322112,322211,212123,212321,232121,111323,131123,131321,112313,132113,132311,211313,231113,231311,112133,112331,132131,113123,113321,133121,313121,211331,231131,213113,213311,213131,311123,311321,331121,312113,312311,332111,314111,221411,431111,111224,111422,121124,121421,141122,141221,112214,112412,122114,122411,142112,142211,241211,221114,413111,241112,134111,111242,121142,121241,114212,124112,124211,411212,421112,421211,212141,214121,412121,111143,111341,131141,114113,114311,411113,411311,113141,114131,311141,411131,211412,211214,211232'.split(',')
+  const STOP = '2331112'
+  const START_B = 104
+  const vals = Array.from(text).map(c => c.charCodeAt(0) - 32)
+  let checksum = START_B
+  vals.forEach((v, i) => { checksum += v * (i + 1) })
+  checksum = checksum % 103
+  const codes = [P[START_B], ...vals.map(v => P[v]), P[checksum], STOP]
+  let x = 0
+  const bars: string[] = []
+  for (const code of codes) {
+    for (let i = 0; i < code.length; i++) {
+      const w = Number(code[i]) * barWidth
+      if (i % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${w}" height="${height}"/>`)
+      x += w
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x}" height="${height}" viewBox="0 0 ${x} ${height}">${bars.join('')}</svg>`
+}
 
 interface ShopeeItem {
   id: string; shopee_product_name: string | null; shopee_variation_name: string | null
@@ -32,10 +54,10 @@ interface ShopeeOrder {
 }
 
 interface BcResult {
-  sku_id: string; name: string; type: string | null; days: number | null
-  capacity: string | null; high_flow_size: string | null; plan_type: string | null
-  cost_twd: number | null; country_count: number
-  copies_options: { copies: string; costCny: number; costTwd: number }[]
+  sku_id: string; name: string; days: number; copies: string
+  capacity: string; speed: string
+  cost_cny: number; cost_twd: number
+  countries: string[]; country_total: number
 }
 
 const ITEM_STATUS: Record<string, { label: string; color: string }> = {
@@ -52,12 +74,6 @@ export default function ShopeeOrderDetailPage() {
   const [items, setItems] = useState<ShopeeItem[]>([])
   const [loading, setLoading] = useState(true)
   const [matchingItem, setMatchingItem] = useState<ShopeeItem | null>(null)
-  const [bcSearch, setBcSearch] = useState('')
-  const [bcCountry, setBcCountry] = useState('')
-  const [bcDays, setBcDays] = useState('')
-  const [bcCapacity, setBcCapacity] = useState('')
-  const [bcResults, setBcResults] = useState<BcResult[]>([])
-  const [bcSearching, setBcSearching] = useState(false)
   // 標籤設定彈窗
   const [showLabelSettings, setShowLabelSettings] = useState(false)
   // ID 對應名稱
@@ -131,18 +147,6 @@ export default function ShopeeOrderDetailPage() {
     load()
   }
 
-  // 搜尋 BC 商品
-  async function searchBcProducts() {
-    setBcSearching(true)
-    const params = new URLSearchParams()
-    if (bcSearch) params.set('search', bcSearch)
-    if (bcCountry) params.set('countries', bcCountry)
-    if (bcDays) params.set('days', bcDays)
-    if (bcCapacity) params.set('capacity', bcCapacity)
-    const res = await fetch(`/api/admin/shopee/bc-search?${params}`)
-    if (res.ok) setBcResults(await res.json())
-    setBcSearching(false)
-  }
 
   // 儲存訂單層級使用期限
   async function saveOrderExpiry(date: string) {
@@ -282,7 +286,7 @@ export default function ShopeeOrderDetailPage() {
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${st.color}`}>{st.label}</span>
                     {item.status === 'pending' && (
-                      <button onClick={() => { setMatchingItem(item); setBcSearch(''); setBcResults([]) }}
+                      <button onClick={() => setMatchingItem(item)}
                         className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">對應</button>
                     )}
                     {(item.status === 'matched' || item.status === 'iccid_filled') && (
@@ -305,7 +309,23 @@ export default function ShopeeOrderDetailPage() {
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : '商品標籤預覽'}</h2>
               <div className="flex items-center gap-2">
-                <button onClick={() => { const el = document.getElementById('print-area'); if (el) { const w = window.open('', '', 'width=400,height=600'); if (w) { w.document.write('<html><head><style>body{margin:0;font-family:sans-serif}@page{margin:0}</style></head><body>' + el.innerHTML + '</body></html>'); w.document.close(); w.print(); w.close() } } }}
+                <button onClick={() => {
+                  const el = document.getElementById('print-area')
+                  if (!el) return
+                  const w = window.open('', '', 'width=400,height=600')
+                  if (!w) return
+                  if (printModal === 'product') {
+                    // 商品標籤：頁面尺寸 30mm×15mm，每標籤一頁
+                    w.document.write(`<html><head><style>
+                      @page{size:30mm 15mm;margin:0}
+                      body{margin:0;font-family:sans-serif}
+                      .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;page-break-after:always}
+                    </style></head><body>${el.innerHTML}</body></html>`)
+                  } else {
+                    w.document.write(`<html><head><style>body{margin:0;font-family:sans-serif}@page{margin:0}</style></head><body>${el.innerHTML}</body></html>`)
+                  }
+                  w.document.close(); w.print(); w.close()
+                }}
                   className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-2">
                   <Printer className="w-4 h-4" /> 列印
                 </button>
@@ -318,6 +338,7 @@ export default function ShopeeOrderDetailPage() {
                 <div style={{ width: '100mm', minHeight: '150mm', padding: '5mm', fontSize: '11px', fontFamily: 'sans-serif', border: '1px solid #ccc', margin: '0 auto' }}>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
                     蝦皮訂單：{order.shopee_order_number}
+                    <div style={{ marginTop: '2mm' }} dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_order_number, 28, 1.2) }} />
                   </div>
                   <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{order.order_date}</div>
                   <div style={{ borderBottom: '1px dashed #ccc', paddingBottom: '3mm', marginBottom: '3mm' }}>
@@ -340,15 +361,15 @@ export default function ShopeeOrderDetailPage() {
                   <div style={{ marginTop: '3mm', textAlign: 'right', fontWeight: 'bold' }}>金額：NT$ {order.buyer_total_payment}</div>
                 </div>
               ) : (
-                /* 商品標籤 30mm × 15mm — 每張卡獨立一張，全部置中，字體可設定 */
+                /* 商品標籤 30mm × 15mm — 每標籤獨立一頁，頁面尺寸即標籤尺寸 */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
                   {(() => {
                     const ls = order.label_settings || { line1: 12, line2: 12, line3: 10 }
                     const expiry = order.expiry_date
                     return items.flatMap(item =>
                       Array.from({ length: item.quantity }, (_, j) => (
-                        <div key={`${item.id}-${j}`}
-                          style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', pageBreakAfter: 'always' }}>
+                        <div key={`${item.id}-${j}`} className="label"
+                          style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', pageBreakAfter: 'always' }}>
                           <div style={{ fontSize: `${ls.line1}px`, fontWeight: 'bold', lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                             {productIdMap.get(item.shopee_product_id || '') || item.shopee_product_name}
                           </div>
@@ -371,77 +392,11 @@ export default function ShopeeOrderDetailPage() {
 
       {/* BC 商品對應彈窗 */}
       {matchingItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setMatchingItem(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-gray-200">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h2 className="font-bold">對應 BC 商品</h2>
-                  <p className="text-xs text-gray-500 mt-1">{matchingItem.shopee_product_name} · {matchingItem.shopee_variation_name}</p>
-                </div>
-                <button onClick={() => setMatchingItem(null)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input type="text" value={bcSearch} onChange={(e) => setBcSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && searchBcProducts()}
-                    placeholder="商品名稱或國家（中/英/MCC）" className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" autoFocus />
-                </div>
-                <input type="text" value={bcCountry} onChange={(e) => setBcCountry(e.target.value)}
-                  placeholder="MCC" className="w-20 px-2 py-2 border border-gray-300 rounded-lg text-sm" />
-                <input type="text" value={bcCapacity} onChange={(e) => setBcCapacity(e.target.value)}
-                  placeholder="流量" className="w-20 px-2 py-2 border border-gray-300 rounded-lg text-sm" />
-                <input type="text" value={bcDays} onChange={(e) => setBcDays(e.target.value)}
-                  placeholder="天數" className="w-16 px-2 py-2 border border-gray-300 rounded-lg text-sm" />
-                <button onClick={searchBcProducts} disabled={bcSearching}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                  {bcSearching ? '搜尋中' : '搜尋'}
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5">
-              {bcResults.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">輸入國家、天數或名稱搜尋 BC 商品</p>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead className="text-gray-500 bg-gray-50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">商品名稱</th>
-                      <th className="text-left px-3 py-2 font-medium w-12">天數</th>
-                      <th className="text-left px-3 py-2 font-medium w-16">類型</th>
-                      <th className="text-right px-3 py-2 font-medium w-20">成本(TWD)</th>
-                      <th className="text-center px-3 py-2 font-medium w-32">選擇 Copies</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {bcResults.map(bc => (
-                      <tr key={bc.sku_id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2">
-                          <div className="font-medium truncate max-w-[300px]">{bc.name}</div>
-                          <div className="text-gray-400 font-mono">{bc.sku_id}</div>
-                        </td>
-                        <td className="px-3 py-2">{bc.days || '-'}</td>
-                        <td className="px-3 py-2">{bc.plan_type === '1' ? '單日' : '總量'}</td>
-                        <td className="px-3 py-2 text-right font-medium">{bc.cost_twd ? `NT$${bc.cost_twd}` : '-'}</td>
-                        <td className="px-3 py-2 text-center">
-                          <div className="flex items-center justify-center gap-1 flex-wrap">
-                            {bc.copies_options.slice(0, 6).map(co => (
-                              <button key={co.copies} onClick={() => matchBcItem(matchingItem.id, bc.sku_id, co.copies)}
-                                className="px-2 py-0.5 border border-blue-300 text-blue-600 rounded hover:bg-blue-50" title={`NT$${co.costTwd}`}>
-                                {co.copies}
-                              </button>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
+        <BcMatchModal
+          item={matchingItem}
+          onMatch={(skuId, copies) => matchBcItem(matchingItem.id, skuId, copies)}
+          onClose={() => setMatchingItem(null)}
+        />
       )}
 
       {/* 標籤設定彈窗 */}
@@ -544,6 +499,197 @@ function LabelSettingsModal({ settings, onSave, onClose }: {
         <div className="mt-4 flex gap-2">
           <button onClick={() => onSave(s)} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
           <button onClick={onClose} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── BC 商品對應彈窗（JOURNESIM 風格）──────────────────────────
+function BcMatchModal({ item, onMatch, onClose }: {
+  item: ShopeeItem
+  onMatch: (skuId: string, copies: string) => void
+  onClose: () => void
+}) {
+  const [countries, setCountries] = useState<{ mcc: string; name: string }[]>([])
+  const [daysOpts, setDaysOpts] = useState<string[]>([])
+  const [capacityOpts, setCapacityOpts] = useState<string[]>([])
+  const [selCountries, setSelCountries] = useState<string[]>([])
+  const [selDays, setSelDays] = useState('')
+  const [selCapacity, setSelCapacity] = useState('')
+  const [search, setSearch] = useState('')
+  const [results, setResults] = useState<BcResult[]>([])
+  const [searching, setSearching] = useState(false)
+
+  // 國家下拉
+  const [countryOpen, setCountryOpen] = useState(false)
+  const [countryQ, setCountryQ] = useState('')
+  const countryRef = useRef<HTMLDivElement>(null)
+
+  // 點擊外部關閉國家下拉
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (countryRef.current && !countryRef.current.contains(e.target as Node)) setCountryOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // 載入選項
+  useEffect(() => {
+    fetch('/api/admin/shopee/bc-search?action=options').then(r => r.json()).then(d => {
+      setCountries(d.countries || [])
+      setDaysOpts(d.days || [])
+      setCapacityOpts(d.capacities || [])
+    })
+  }, [])
+
+  async function doSearch() {
+    setSearching(true)
+    const params = new URLSearchParams({ action: 'search' })
+    if (selCountries.length > 0) params.set('countries', selCountries.join(','))
+    if (selDays) params.set('days', selDays)
+    if (selCapacity) params.set('capacity', selCapacity)
+    if (search) params.set('search', search)
+    const res = await fetch(`/api/admin/shopee/bc-search?${params}`)
+    if (res.ok) setResults(await res.json())
+    setSearching(false)
+  }
+
+  function toggleCountry(mcc: string) {
+    setSelCountries(prev => prev.includes(mcc) ? prev.filter(m => m !== mcc) : [...prev, mcc])
+  }
+
+  const filteredCountries = countryQ
+    ? countries.filter(c => c.name.toLowerCase().includes(countryQ.toLowerCase()) || c.mcc.toLowerCase().includes(countryQ.toLowerCase()))
+    : countries
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* 標題 */}
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-lg">對應 BC 商品</h2>
+            <p className="text-xs text-gray-500 mt-1">{item.shopee_product_name} · {item.shopee_variation_name}</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+        </div>
+
+        {/* 篩選列 */}
+        <div className="p-5 border-b border-gray-100 space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            {/* 國家多選 */}
+            <div ref={countryRef} className="relative">
+              <button type="button" onClick={() => setCountryOpen(v => !v)}
+                className="w-full text-left px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+                {selCountries.length > 0 ? (
+                  <span className="flex items-center gap-1 flex-wrap">
+                    {selCountries.slice(0, 3).map(mcc => {
+                      const c = countries.find(o => o.mcc === mcc)
+                      return <span key={mcc} className="inline-flex items-center gap-0.5 bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs">
+                        {c?.name || mcc} <span className="cursor-pointer" onClick={(e) => { e.stopPropagation(); toggleCountry(mcc) }}>×</span>
+                      </span>
+                    })}
+                    {selCountries.length > 3 && <span className="text-xs text-gray-400">+{selCountries.length - 3}</span>}
+                  </span>
+                ) : <span className="text-gray-400">搜索國家或地區</span>}
+              </button>
+              {countryOpen && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-gray-100">
+                    <input value={countryQ} onChange={e => setCountryQ(e.target.value)} placeholder="搜索國家..."
+                      className="w-full px-2 py-1.5 bg-gray-50 rounded text-sm" autoFocus />
+                  </div>
+                  {selCountries.length > 0 && (
+                    <div className="px-3 py-1.5 flex items-center justify-between border-b border-gray-100">
+                      <span className="text-xs text-gray-500">已選 {selCountries.length} 個</span>
+                      <button onClick={() => setSelCountries([])} className="text-xs text-blue-600 hover:underline">清除全部</button>
+                    </div>
+                  )}
+                  <div className="max-h-48 overflow-y-auto">
+                    {filteredCountries.map(c => (
+                      <label key={c.mcc} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm ${selCountries.includes(c.mcc) ? 'bg-blue-50' : ''}`}>
+                        <input type="checkbox" checked={selCountries.includes(c.mcc)} onChange={() => toggleCountry(c.mcc)} className="accent-blue-600" />
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 天數 */}
+            <select value={selDays} onChange={e => setSelDays(e.target.value)}
+              className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">全部天數</option>
+              {daysOpts.map(d => <option key={d} value={d}>{d} 天</option>)}
+            </select>
+
+            {/* 流量 */}
+            <select value={selCapacity} onChange={e => setSelCapacity(e.target.value)}
+              className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">選擇流量</option>
+              {capacityOpts.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && doSearch()}
+              placeholder="搜索套餐名稱或 SKU ID" className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+            <span className="text-xs text-gray-400 whitespace-nowrap">符合：{results.length} 個</span>
+            <button onClick={doSearch} disabled={searching}
+              className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {searching ? '搜尋中...' : '查 詢'}
+            </button>
+          </div>
+        </div>
+
+        {/* 結果表格 */}
+        <div className="flex-1 overflow-y-auto">
+          {results.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-12">輸入篩選條件後點擊查詢</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="text-gray-500 bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-medium">套餐名稱</th>
+                  <th className="text-left px-4 py-2.5 font-medium w-16">流量</th>
+                  <th className="text-left px-4 py-2.5 font-medium w-16">限速</th>
+                  <th className="text-left px-4 py-2.5 font-medium w-36">適用國家</th>
+                  <th className="text-left px-4 py-2.5 font-medium w-14">天數</th>
+                  <th className="text-right px-4 py-2.5 font-medium w-20">結算價</th>
+                  <th className="text-center px-4 py-2.5 font-medium w-14"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {results.map((bc, i) => (
+                  <tr key={`${bc.sku_id}-${bc.copies}-${i}`} className="hover:bg-blue-50/50 group">
+                    <td className="px-4 py-2.5">
+                      <div className="font-medium text-sm truncate max-w-[280px]">{bc.name}</div>
+                      <div className="text-gray-400 font-mono text-[10px]">{bc.sku_id}</div>
+                    </td>
+                    <td className="px-4 py-2.5">{bc.capacity}</td>
+                    <td className="px-4 py-2.5">{bc.speed}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex flex-wrap gap-0.5">
+                        {bc.countries.map((c, j) => <span key={j} className="px-1 bg-gray-100 rounded text-[10px]">{c}</span>)}
+                        {bc.country_total > 5 && <span className="text-[10px] text-gray-400">+{bc.country_total - 5}</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 font-medium">{bc.days} 天</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-blue-600">NT${bc.cost_twd}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <button onClick={() => onMatch(bc.sku_id, bc.copies)}
+                        className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                        選取
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
