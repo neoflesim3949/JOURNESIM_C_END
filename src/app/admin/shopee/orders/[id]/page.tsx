@@ -318,8 +318,9 @@ export default function ShopeeOrderDetailPage() {
                     // 商品標籤：頁面尺寸 30mm×15mm，每標籤一頁
                     w.document.write(`<html><head><style>
                       @page{size:30mm 15mm;margin:0}
-                      body{margin:0;font-family:sans-serif}
-                      .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;page-break-after:always}
+                      body{margin:0;padding:0;font-family:sans-serif}
+                      body>div{gap:0!important}
+                      .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1mm;page-break-after:always;border:none!important}
                     </style></head><body>${el.innerHTML}</body></html>`)
                   } else {
                     // 明細標籤：頁面尺寸 100mm×150mm
@@ -345,7 +346,7 @@ export default function ShopeeOrderDetailPage() {
                     <div style={{ marginTop: '2mm' }} dangerouslySetInnerHTML={{ __html: generateCode128SVG(order.shopee_order_number, 28, 1.2) }} />
                   </div>
                   <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{order.order_date}</div>
-                  <div style={{ borderBottom: '1px dashed #ccc', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                  <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
                     <div><strong>收件人：</strong>{order.recipient_name}</div>
                     <div><strong>電話：</strong>{order.recipient_phone}</div>
                     <div><strong>地址：</strong>{order.zip_code} {order.city}{order.district} {order.shipping_address}</div>
@@ -354,10 +355,9 @@ export default function ShopeeOrderDetailPage() {
                   </div>
                   <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>商品明細：</div>
                   {items.map((item, i) => (
-                    <div key={i} style={{ border: '1px solid #ddd', borderRadius: '2mm', padding: '2mm', marginBottom: '2mm' }}>
+                    <div key={i} style={{ border: '1px solid #000', borderRadius: '2mm', padding: '2mm', marginBottom: '2mm' }}>
                       <div><strong>{i + 1}. {item.shopee_product_name}</strong> × {item.quantity}</div>
                       <div style={{ fontSize: '10px', color: '#666' }}>{item.shopee_variation_name}</div>
-                      {item.expiry_date && <div style={{ fontSize: '9px' }}>使用期限：{item.expiry_date}</div>}
                       {item.iccid?.map((ic, j) => <div key={j} style={{ fontSize: '9px', fontFamily: 'monospace' }}>ICCID: {ic}</div>)}
                     </div>
                   ))}
