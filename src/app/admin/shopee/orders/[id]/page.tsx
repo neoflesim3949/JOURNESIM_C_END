@@ -322,7 +322,11 @@ export default function ShopeeOrderDetailPage() {
                       .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;page-break-after:always}
                     </style></head><body>${el.innerHTML}</body></html>`)
                   } else {
-                    w.document.write(`<html><head><style>body{margin:0;font-family:sans-serif}@page{margin:0}</style></head><body>${el.innerHTML}</body></html>`)
+                    // 明細標籤：頁面尺寸 100mm×150mm
+                    w.document.write(`<html><head><style>
+                      @page{size:100mm 150mm;margin:0}
+                      body{margin:0;font-family:sans-serif}
+                    </style></head><body>${el.innerHTML}</body></html>`)
                   }
                   w.document.close(); w.print(); w.close()
                 }}
