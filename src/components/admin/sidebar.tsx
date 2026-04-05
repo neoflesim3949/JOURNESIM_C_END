@@ -52,6 +52,7 @@ const NAV_ITEMS: NavItem[] = [
   {
     href: '/admin/shopee', label: '平台銷售', icon: Landmark,
     children: [
+      { href: '/admin/shopee/dashboard', label: '蝦皮儀表板' },
       { href: '/admin/shopee/orders', label: '蝦皮訂單' },
       { href: '/admin/shopee/mappings', label: '商品對應' },
     ],

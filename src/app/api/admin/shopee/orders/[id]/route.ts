@@ -13,6 +13,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const { data: items } = await supabase.from('shopee_order_items').select('*').eq('shopee_order_id', id).order('created_at')
   const { data: settlements } = await supabase.from('shopee_settlements').select('*').eq('shopee_order_id', id).order('created_at')
+
+  // 自動修正訂單狀態
+  const allDone = (items || []).length > 0 && (items || []).every(i => i.bc_order_id && i.iccid && (i.iccid as string[]).length > 0)
+  const expectedStatus = allDone ? 'completed' : (items || []).some(i => i.bc_order_id) ? 'processing' : 'pending'
+  if (order.internal_status !== expectedStatus) {
+    await supabase.from('shopee_orders').update({ internal_status: expectedStatus, updated_at: new Date().toISOString() }).eq('id', id)
+    order.internal_status = expectedStatus
+  }
+
   return NextResponse.json({ order, items: items || [], settlements: settlements || [] })
 }
 
