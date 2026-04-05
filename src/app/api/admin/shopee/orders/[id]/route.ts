@@ -31,6 +31,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.bc_sku_id !== undefined) updates.bc_sku_id = body.bc_sku_id
     if (body.iccid !== undefined) updates.iccid = body.iccid
     if (body.status !== undefined) updates.status = body.status
+    if (body.expiry_date !== undefined) updates.expiry_date = body.expiry_date || null
 
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 

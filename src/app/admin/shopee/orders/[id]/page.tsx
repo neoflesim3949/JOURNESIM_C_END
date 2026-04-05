@@ -11,8 +11,10 @@ interface ShopeeItem {
   original_price: number | null; sale_price: number | null; quantity: number; return_quantity: number
   matched_package_id: string | null; matched_plan_id: string | null; matched_copies: string | null
   bc_sku_id: string | null; iccid: string[] | null; bc_order_id: string | null; bc_sub_order_id: string | null
-  status: string
+  status: string; expiry_date: string | null
 }
+
+interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
 
 interface ShopeeOrder {
   id: string; shopee_order_number: string; order_status: string | null; return_status: string | null
@@ -44,12 +46,41 @@ export default function ShopeeOrderDetailPage() {
   const [matchingItem, setMatchingItem] = useState<ShopeeItem | null>(null)
   const [matchSearch, setMatchSearch] = useState('')
   const [matchResults, setMatchResults] = useState<{ id: string; name: string; product_type: string; plans: { id: string; bc_sku_id: string; display_name: string | null; copies: string[] }[] }[]>([])
+  // ID 對應名稱
+  const [productIdMap, setProductIdMap] = useState<Map<string, string>>(new Map())
+  const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
+  // 列印彈窗
+  const [printModal, setPrintModal] = useState<'detail' | 'product' | null>(null)
 
   async function load() {
-    const res = await fetch(`/api/admin/shopee/orders/${id}`).then(r => r.json())
-    setOrder(res.order); setItems(res.items || []); setLoading(false)
+    const [orderRes, idRes] = await Promise.all([
+      fetch(`/api/admin/shopee/orders/${id}`).then(r => r.json()),
+      fetch('/api/admin/shopee/id-mappings').then(r => r.json()),
+    ])
+    setOrder(orderRes.order); setItems(orderRes.items || [])
+    setProductIdMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
+    setVariationIdMap(new Map((idRes.variations || []).map((v: IdMapping) => [v.shopee_variation_id!, v.display_name])))
+    setLoading(false)
   }
   useEffect(() => { load() }, [id])
+
+  // 儲存 ID 對應名稱
+  async function saveIdMapping(type: 'product' | 'variation', shopeeId: string, displayName: string) {
+    await fetch('/api/admin/shopee/id-mappings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, shopee_id: shopeeId, display_name: displayName }),
+    })
+    if (type === 'product') setProductIdMap(prev => new Map(prev).set(shopeeId, displayName))
+    else setVariationIdMap(prev => new Map(prev).set(shopeeId, displayName))
+  }
+
+  // 儲存使用期限
+  async function saveExpiryDate(itemId: string, date: string) {
+    await fetch(`/api/admin/shopee/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, expiry_date: date || null }),
+    }); load()
+  }
 
   async function saveIccid(itemId: string, iccids: string[]) {
     const filled = iccids.filter(Boolean)
@@ -130,9 +161,12 @@ export default function ShopeeOrderDetailPage() {
           <p className="text-sm text-gray-500">{order.order_date} · {order.buyer_account}</p>
         </div>
         <div className="flex gap-2">
-          <Link href={`/admin/shopee/labels?order=${id}`} className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
-            <Printer className="w-4 h-4" /> 列印標籤
-          </Link>
+          <button onClick={() => setPrintModal('detail')} className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+            <Printer className="w-4 h-4" /> 列印明細標籤
+          </button>
+          <button onClick={() => setPrintModal('product')} className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+            <Printer className="w-4 h-4" /> 列印商品標籤
+          </button>
           {canSubmitBc && (
             <button onClick={submitBcOrder} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
               <Send className="w-4 h-4" /> 送出 BC 訂單
@@ -200,13 +234,45 @@ export default function ShopeeOrderDetailPage() {
                     <div className="font-medium">{item.shopee_product_name || '-'}</div>
                     <div className="text-xs text-gray-500 mt-0.5">{item.shopee_variation_name || '-'}</div>
                     <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-500">
-                      <div>商品ID：<span className="font-mono">{item.shopee_product_id || '-'}</span></div>
-                      <div>規格ID：<span className="font-mono">{item.shopee_variation_id || '-'}</span></div>
+                      <div className="flex items-center gap-1">
+                        <span>商品ID：</span>
+                        <span className="font-mono">{item.shopee_product_id || '-'}</span>
+                        {item.shopee_product_id && (
+                          <EditableIdName
+                            value={productIdMap.get(item.shopee_product_id) || ''}
+                            onSave={(name) => saveIdMapping('product', item.shopee_product_id!, name)}
+                            placeholder="設定名稱"
+                          />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span>規格ID：</span>
+                        <span className="font-mono">{item.shopee_variation_id || '-'}</span>
+                        {item.shopee_variation_id && (
+                          <EditableIdName
+                            value={variationIdMap.get(item.shopee_variation_id) || ''}
+                            onSave={(name) => saveIdMapping('variation', item.shopee_variation_id!, name)}
+                            placeholder="設定名稱"
+                          />
+                        )}
+                      </div>
                       <div>商品編碼：<span className="font-mono text-blue-600">{item.shopee_sku_code || '-'}</span></div>
                       <div>數量：{item.quantity}{item.return_quantity > 0 && <span className="text-red-500 ml-1">（退 {item.return_quantity}）</span>}</div>
                       <div>原價：NT$ {item.original_price ?? '-'}</div>
                       <div>活動價：NT$ {item.sale_price ?? '-'}</div>
+                      <div className="flex items-center gap-1">
+                        <span>使用期限：</span>
+                        <input type="date" value={item.expiry_date || ''} onChange={(e) => saveExpiryDate(item.id, e.target.value)}
+                          className="px-1 py-0.5 border border-gray-200 rounded text-xs" />
+                      </div>
                     </div>
+                    {/* 顯示對應名稱 */}
+                    {(productIdMap.get(item.shopee_product_id || '') || variationIdMap.get(item.shopee_variation_id || '')) && (
+                      <div className="mt-1 text-xs">
+                        {productIdMap.get(item.shopee_product_id || '') && <span className="text-purple-600 mr-2">商品：{productIdMap.get(item.shopee_product_id || '')}</span>}
+                        {variationIdMap.get(item.shopee_variation_id || '') && <span className="text-teal-600">規格：{variationIdMap.get(item.shopee_variation_id || '')}</span>}
+                      </div>
+                    )}
                     {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {item.bc_sku_id} · copies: {item.matched_copies}</div>}
                     {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}</div>}
                   </div>
@@ -228,6 +294,73 @@ export default function ShopeeOrderDetailPage() {
           })}
         </div>
       </div>
+
+      {/* 列印彈窗 */}
+      {printModal && order && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPrintModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : '商品標籤預覽'}</h2>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { const el = document.getElementById('print-area'); if (el) { const w = window.open('', '', 'width=400,height=600'); if (w) { w.document.write('<html><head><style>body{margin:0;font-family:sans-serif}@page{margin:0}</style></head><body>' + el.innerHTML + '</body></html>'); w.document.close(); w.print(); w.close() } } }}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                  <Printer className="w-4 h-4" /> 列印
+                </button>
+                <button onClick={() => setPrintModal(null)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5" id="print-area">
+              {printModal === 'detail' ? (
+                /* 明細標籤 100mm × 150mm */
+                <div style={{ width: '100mm', minHeight: '150mm', padding: '5mm', fontSize: '11px', fontFamily: 'sans-serif', border: '1px solid #ccc', margin: '0 auto' }}>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                    蝦皮訂單：{order.shopee_order_number}
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{order.order_date}</div>
+                  <div style={{ borderBottom: '1px dashed #ccc', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                    <div><strong>收件人：</strong>{order.recipient_name}</div>
+                    <div><strong>電話：</strong>{order.recipient_phone}</div>
+                    <div><strong>地址：</strong>{order.zip_code} {order.city}{order.district} {order.shipping_address}</div>
+                    {order.shipping_method && <div><strong>寄送：</strong>{order.shipping_method}</div>}
+                    {order.pickup_store_id && <div><strong>門市：</strong>{order.pickup_store_id}</div>}
+                  </div>
+                  <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>商品明細：</div>
+                  {items.map((item, i) => (
+                    <div key={i} style={{ border: '1px solid #ddd', borderRadius: '2mm', padding: '2mm', marginBottom: '2mm' }}>
+                      <div><strong>{i + 1}. {productIdMap.get(item.shopee_product_id || '') || item.shopee_product_name}</strong> × {item.quantity}</div>
+                      <div style={{ fontSize: '10px', color: '#666' }}>{variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}</div>
+                      {item.expiry_date && <div style={{ fontSize: '9px' }}>使用期限：{item.expiry_date}</div>}
+                      {item.iccid?.map((ic, j) => <div key={j} style={{ fontSize: '9px', fontFamily: 'monospace' }}>ICCID: {ic}</div>)}
+                    </div>
+                  ))}
+                  {order.buyer_note && <div style={{ marginTop: '3mm', padding: '2mm', background: '#fff3cd', borderRadius: '2mm', fontSize: '10px' }}><strong>買家備註：</strong>{order.buyer_note}</div>}
+                  <div style={{ marginTop: '3mm', textAlign: 'right', fontWeight: 'bold' }}>金額：NT$ {order.buyer_total_payment}</div>
+                </div>
+              ) : (
+                /* 商品標籤 30mm × 15mm — 每張卡獨立一張 */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
+                  {items.flatMap(item =>
+                    Array.from({ length: item.quantity }, (_, j) => (
+                      <div key={`${item.id}-${j}`}
+                        style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', pageBreakAfter: 'always' }}>
+                        <div style={{ fontSize: '9px', fontWeight: 'bold', lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                          {productIdMap.get(item.shopee_product_id || '') || item.shopee_product_name}
+                        </div>
+                        <div style={{ fontSize: '9px', lineHeight: 1.3, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                          {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
+                        </div>
+                        {item.expiry_date && (
+                          <div style={{ fontSize: '8px', lineHeight: 1.3 }}>使用期限：{item.expiry_date}</div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 對應彈窗 */}
       {matchingItem && (
@@ -281,6 +414,30 @@ export default function ShopeeOrderDetailPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// 行內可編輯的 ID 對應名稱
+function EditableIdName({ value, onSave, placeholder }: { value: string; onSave: (name: string) => void; placeholder: string }) {
+  const [editing, setEditing] = useState(false)
+  const [input, setInput] = useState(value)
+
+  if (!editing) {
+    return value ? (
+      <button onClick={() => { setInput(value); setEditing(true) }} className="text-purple-600 hover:underline text-xs ml-1">({value})</button>
+    ) : (
+      <button onClick={() => setEditing(true)} className="text-gray-400 hover:text-blue-500 text-xs ml-1">[{placeholder}]</button>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-0.5 ml-1">
+      <input value={input} onChange={(e) => setInput(e.target.value)} autoFocus
+        onKeyDown={(e) => { if (e.key === 'Enter') { onSave(input); setEditing(false) } if (e.key === 'Escape') setEditing(false) }}
+        className="px-1 py-0 border border-blue-300 rounded text-xs w-20" />
+      <button onClick={() => { onSave(input); setEditing(false) }} className="text-blue-500 text-xs">✓</button>
+      <button onClick={() => setEditing(false)} className="text-gray-400 text-xs">✕</button>
+    </span>
   )
 }
 
