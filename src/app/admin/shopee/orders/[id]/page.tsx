@@ -355,8 +355,8 @@ export default function ShopeeOrderDetailPage() {
                   <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>商品明細：</div>
                   {items.map((item, i) => (
                     <div key={i} style={{ border: '1px solid #ddd', borderRadius: '2mm', padding: '2mm', marginBottom: '2mm' }}>
-                      <div><strong>{i + 1}. {productIdMap.get(item.shopee_product_id || '') || item.shopee_product_name}</strong> × {item.quantity}</div>
-                      <div style={{ fontSize: '10px', color: '#666' }}>{variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}</div>
+                      <div><strong>{i + 1}. {item.shopee_product_name}</strong> × {item.quantity}</div>
+                      <div style={{ fontSize: '10px', color: '#666' }}>{item.shopee_variation_name}</div>
                       {item.expiry_date && <div style={{ fontSize: '9px' }}>使用期限：{item.expiry_date}</div>}
                       {item.iccid?.map((ic, j) => <div key={j} style={{ fontSize: '9px', fontFamily: 'monospace' }}>ICCID: {ic}</div>)}
                     </div>
@@ -381,7 +381,7 @@ export default function ShopeeOrderDetailPage() {
                             {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
                           </div>
                           {expiry && (
-                            <div style={{ fontSize: `${ls.line3}px`, lineHeight: 1.2 }}>使用期限：{expiry}</div>
+                            <div style={{ fontSize: `${ls.line3}px`, lineHeight: 1.2 }}>使用期限：{expiry.replace(/-/g, '/')}</div>
                           )}
                         </div>
                       ))
