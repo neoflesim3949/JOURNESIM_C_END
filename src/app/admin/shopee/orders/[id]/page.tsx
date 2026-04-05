@@ -385,11 +385,13 @@ export default function ShopeeOrderDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${st.color}`}>{st.label}</span>
-                    {item.status === 'pending' && (
+                    {!item.bc_order_id && (
                       <button onClick={() => setMatchingItem(item)}
-                        className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">對應</button>
+                        className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
+                        {item.status === 'pending' ? '對應' : '重新對應'}
+                      </button>
                     )}
-                    {(item.status === 'matched' || item.status === 'iccid_filled') && (
+                    {!item.bc_order_id && item.bc_sku_id && (
                       <button onClick={() => unmatchItem(item.id)} title="取消對應"
                         className="p-1 text-gray-400 hover:text-red-500"><Undo2 className="w-4 h-4" /></button>
                     )}

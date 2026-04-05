@@ -55,6 +55,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/shopee/dashboard', label: '蝦皮儀表板' },
       { href: '/admin/shopee/orders', label: '蝦皮訂單' },
       { href: '/admin/shopee/mappings', label: '商品對應' },
+      { href: '/admin/shopee/accounts', label: '帳號管理' },
     ],
   },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },

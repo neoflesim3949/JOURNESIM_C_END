@@ -49,7 +49,7 @@ const NUM_FIELDS = new Set([
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { rows } = await request.json() as { rows: Record<string, string>[] }
+  const { rows, account_id } = await request.json() as { rows: Record<string, string>[]; account_id?: string }
   if (!rows || rows.length === 0) return NextResponse.json({ error: '無資料' }, { status: 400 })
 
   try {
@@ -78,8 +78,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // 關聯訂單
+    // 關聯訂單與帳號
     record.shopee_order_id = orderMap.get(orderNum) || null
+    if (account_id) record.shopee_account_id = account_id
 
     // upsert by shopee_order_number + refund_number
     const refundNum = record.refund_number as string | null

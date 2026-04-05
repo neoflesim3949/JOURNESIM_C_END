@@ -16,6 +16,7 @@ export async function GET(request: Request) {
   const orderDateTo = searchParams.get('order_date_to') || ''
   const createdFrom = searchParams.get('created_from') || ''
   const createdTo = searchParams.get('created_to') || ''
+  const accountId = searchParams.get('account_id') || ''
   const sortBy = searchParams.get('sort_by') || 'created_at'
   const sortDir = searchParams.get('sort_dir') === 'asc' ? true : false
 
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
   if (orderDateTo) query = query.lte('order_date', orderDateTo + 'T23:59:59')
   if (createdFrom) query = query.gte('created_at', createdFrom)
   if (createdTo) query = query.lte('created_at', createdTo + 'T23:59:59')
+  if (accountId) query = query.eq('shopee_account_id', accountId)
 
   const from = (page - 1) * pageSize
   query = query.order(sortBy, { ascending: sortDir }).range(from, from + pageSize - 1)

@@ -8,7 +8,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const from = searchParams.get('from') || ''
   const to = searchParams.get('to') || ''
-  const dateField = searchParams.get('date_field') || 'wallet_date' // wallet_date | order_date
+  const dateField = searchParams.get('date_field') || 'wallet_date'
+  const accountId = searchParams.get('account_id') || ''
 
   const supabase = createAdminClient()
 
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
   let settleQuery = supabase.from('shopee_settlements')
     .select('shopee_order_id, original_price, seller_coupon, ams_fee, transaction_fee, other_service_fee, processing_fee, wallet_amount, wallet_date')
 
+  if (accountId) settleQuery = settleQuery.eq('shopee_account_id', accountId)
   if (dateField === 'wallet_date') {
     if (from) settleQuery = settleQuery.gte('wallet_date', from)
     if (to) settleQuery = settleQuery.lte('wallet_date', to + 'T23:59:59')
@@ -61,6 +63,7 @@ export async function GET(request: Request) {
   let unsettledQuery = supabase.from('shopee_orders')
     .select('id, product_total, seller_coupon, transaction_fee, other_service_fee, payment_processing_fee, shopee_order_items(cost_twd, quantity)')
 
+  if (accountId) unsettledQuery = unsettledQuery.eq('shopee_account_id', accountId)
   if (dateField === 'order_date') {
     if (from) unsettledQuery = unsettledQuery.gte('order_date', from)
     if (to) unsettledQuery = unsettledQuery.lte('order_date', to + 'T23:59:59')

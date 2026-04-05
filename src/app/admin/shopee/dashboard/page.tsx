@@ -47,18 +47,24 @@ export default function ShopeeDashboardPage() {
   const [from, setFrom] = useState(firstDay)
   const [to, setTo] = useState(today)
   const [dateField, setDateField] = useState('wallet_date')
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
+  const [selectedAccount, setSelectedAccount] = useState('')
 
   async function load() {
     setLoading(true)
     const params = new URLSearchParams({ date_field: dateField })
     if (from) params.set('from', from)
     if (to) params.set('to', to)
+    if (selectedAccount) params.set('account_id', selectedAccount)
     const res = await fetch(`/api/admin/shopee/dashboard?${params}`)
     if (res.ok) setData(await res.json())
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
+    load()
+  }, [])
 
   const s = data?.settled
   const u = data?.unsettled
@@ -82,6 +88,11 @@ export default function ShopeeDashboardPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">蝦皮儀表板</h1>
         <div className="flex items-center gap-2">
+          <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">全部帳號</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
           <select value={dateField} onChange={e => setDateField(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="wallet_date">入帳日期</option>

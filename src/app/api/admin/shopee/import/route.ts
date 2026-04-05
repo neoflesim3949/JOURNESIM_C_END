@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { rows } = await request.json() as { rows: Record<string, string>[] }
+  const { rows, account_id } = await request.json() as { rows: Record<string, string>[]; account_id?: string }
   if (!rows || rows.length === 0) return NextResponse.json({ error: '無資料' }, { status: 400 })
 
   const supabase = createAdminClient()
@@ -61,6 +61,7 @@ export async function POST(request: Request) {
       seller_note: first['備註'] || null,
       raw_data: first,
       updated_at: new Date().toISOString(),
+      ...(account_id ? { shopee_account_id: account_id } : {}),
     }
 
     // 檢查是否已存在

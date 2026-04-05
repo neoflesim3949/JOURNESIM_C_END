@@ -56,7 +56,7 @@ export default function ShopeeOrdersPage() {
   const [filterFinanceStatus, setFilterFinanceStatus] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   // 排序
-  const [sortBy, setSortBy] = useState('created_at')
+  const [sortBy, setSortBy] = useState('order_date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [importing, setImporting] = useState(false)
   const [importingSettlement, setImportingSettlement] = useState(false)
@@ -66,13 +66,18 @@ export default function ShopeeOrdersPage() {
   const [showLabelSettings, setShowLabelSettings] = useState(false)
   const [expiryDate, setExpiryDate] = useState('')
   const [labelSettings, setLabelSettings] = useState({ line1: 12, line2: 12, line3: 10 })
+  // 帳號
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
+  const [selectedAccount, setSelectedAccount] = useState('')
+  const [filterAccount, setFilterAccount] = useState('')
 
-  // 從 localStorage 載入設定
+  // 從 localStorage 載入設定 + 載入帳號
   useEffect(() => {
     const saved = localStorage.getItem('shopee_label_settings')
     if (saved) { try { setLabelSettings(JSON.parse(saved)) } catch {} }
     const savedExpiry = localStorage.getItem('shopee_expiry_date')
     if (savedExpiry) setExpiryDate(savedExpiry)
+    fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
   }, [])
 
   function saveExpiryDate(date: string) {
@@ -96,6 +101,7 @@ export default function ShopeeOrdersPage() {
     if (filterOrderDateTo) params.set('order_date_to', filterOrderDateTo)
     if (filterCreatedFrom) params.set('created_from', filterCreatedFrom)
     if (filterCreatedTo) params.set('created_to', filterCreatedTo)
+    if (filterAccount) params.set('account_id', filterAccount)
     const res = await fetch(`/api/admin/shopee/orders?${params}`)
     if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0) }
     setLoading(false)
@@ -125,7 +131,7 @@ export default function ShopeeOrdersPage() {
 
     const res = await fetch('/api/admin/shopee/import', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
+      body: JSON.stringify({ rows, account_id: selectedAccount || undefined }),
     })
     const data = await res.json()
     setImportResult(`匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆、商品 ${data.items} 項`)
@@ -146,7 +152,7 @@ export default function ShopeeOrdersPage() {
 
     const res = await fetch('/api/admin/shopee/import-settlement', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
+      body: JSON.stringify({ rows, account_id: selectedAccount || undefined }),
     })
     const data = await res.json()
     if (res.ok) {
@@ -176,8 +182,13 @@ export default function ShopeeOrdersPage() {
           <button onClick={() => setShowLabelSettings(true)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50" title="標籤設定">
             <Settings className="w-4 h-4" />
           </button>
+          <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)}
+            className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
+            <option value="">選擇帳號</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
           <label className={`flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer ${importing ? 'opacity-50' : ''}`}>
-            <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入 Excel'}
+            <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入訂單 Excel'}
             <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" disabled={importing} />
           </label>
           <label className={`flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 cursor-pointer ${importingSettlement ? 'opacity-50' : ''}`}>
@@ -234,8 +245,13 @@ export default function ShopeeOrdersPage() {
             <option value="processing">處理中</option>
             <option value="completed">已完成</option>
           </select>
+          <select value={filterAccount} onChange={e => setFilterAccount(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+            <option value="">全部帳號</option>
+            {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
           <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
-          <button onClick={() => { setFilterOrderDateFrom(''); setFilterOrderDateTo(''); setFilterCreatedFrom(''); setFilterCreatedTo(''); setFilterReturnStatus(''); setFilterFinanceStatus(''); setFilterStatus(''); setSearch(''); setPage(1); setTimeout(load, 0) }}
+          <button onClick={() => { setFilterOrderDateFrom(''); setFilterOrderDateTo(''); setFilterCreatedFrom(''); setFilterCreatedTo(''); setFilterReturnStatus(''); setFilterFinanceStatus(''); setFilterStatus(''); setFilterAccount(''); setSearch(''); setPage(1); setTimeout(load, 0) }}
             className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
         </div>
       </div>
