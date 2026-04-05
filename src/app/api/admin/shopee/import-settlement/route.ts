@@ -52,10 +52,11 @@ export async function POST(request: Request) {
   const { rows } = await request.json() as { rows: Record<string, string>[] }
   if (!rows || rows.length === 0) return NextResponse.json({ error: '無資料' }, { status: 400 })
 
+  try {
   const supabase = createAdminClient()
 
   // 取得所有訂單 ID 對應
-  const orderNumbers = [...new Set(rows.map(r => r['訂單編號']?.trim()).filter(Boolean))]
+  const orderNumbers = [...new Set(rows.map(r => r['訂單編號'] != null ? String(r['訂單編號']).trim() : '').filter(Boolean))]
   const { data: orders } = await supabase.from('shopee_orders')
     .select('id, shopee_order_number').in('shopee_order_number', orderNumbers)
   const orderMap = new Map((orders || []).map(o => [o.shopee_order_number, o.id]))
@@ -63,12 +64,13 @@ export async function POST(request: Request) {
   let created = 0, updated = 0
 
   for (const row of rows) {
-    const orderNum = row['訂單編號']?.trim()
+    const orderNum = row['訂單編號'] != null ? String(row['訂單編號']).trim() : ''
     if (!orderNum) continue
 
     const record: Record<string, unknown> = { raw_data: row }
     for (const [zhKey, dbKey] of Object.entries(COL_MAP)) {
-      const val = row[zhKey]?.trim()
+      const raw = row[zhKey]
+      const val = raw != null ? String(raw).trim() : ''
       if (NUM_FIELDS.has(dbKey)) {
         record[dbKey] = toNum(val)
       } else {
@@ -79,22 +81,32 @@ export async function POST(request: Request) {
     // 關聯訂單
     record.shopee_order_id = orderMap.get(orderNum) || null
 
-    // upsert by shopee_order_number（一個訂單可能有多筆金流，用 order_number + refund_number 判斷）
+    // upsert by shopee_order_number + refund_number
     const refundNum = record.refund_number as string | null
-    const { data: existing } = await supabase.from('shopee_settlements')
+    let findQuery = supabase.from('shopee_settlements')
       .select('id')
       .eq('shopee_order_number', orderNum)
-      .eq('refund_number', refundNum || '')
-      .maybeSingle()
+    if (refundNum) {
+      findQuery = findQuery.eq('refund_number', refundNum)
+    } else {
+      findQuery = findQuery.is('refund_number', null)
+    }
+    const { data: existing } = await findQuery.maybeSingle()
 
     if (existing) {
-      await supabase.from('shopee_settlements').update(record).eq('id', existing.id)
+      const { error } = await supabase.from('shopee_settlements').update(record).eq('id', existing.id)
+      if (error) { console.error('[settlement update]', error.message); continue }
       updated++
     } else {
-      await supabase.from('shopee_settlements').insert(record)
+      const { error } = await supabase.from('shopee_settlements').insert(record)
+      if (error) { console.error('[settlement insert]', error.message); continue }
       created++
     }
   }
 
   return NextResponse.json({ created, updated, total: rows.length })
+  } catch (err) {
+    console.error('[import-settlement]', err)
+    return NextResponse.json({ error: err instanceof Error ? err.message : '匯入失敗' }, { status: 500 })
+  }
 }
