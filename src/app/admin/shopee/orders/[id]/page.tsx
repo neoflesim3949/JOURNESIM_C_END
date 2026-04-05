@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { Fragment, useEffect, useState, useRef } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Save, Printer, Send, X, Undo2 } from 'lucide-react'
@@ -53,10 +53,15 @@ interface ShopeeOrder {
   expiry_date: string | null
 }
 
+interface CopiesOption {
+  copies: string; days: number; costCny: number; costTwd: number
+}
+
 interface BcResult {
-  sku_id: string; name: string; days: number; copies: string
+  sku_id: string; name: string; unit_days: number
   capacity: string; speed: string
   cost_cny: number; cost_twd: number
+  copies_options: CopiesOption[]
   countries: string[]; country_total: number
 }
 
@@ -454,6 +459,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<BcResult[]>([])
   const [searching, setSearching] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   // 國家下拉
   const [countryOpen, setCountryOpen] = useState(false)
@@ -591,36 +597,65 @@ function BcMatchModal({ item, onMatch, onClose }: {
                   <th className="text-left px-4 py-2.5 font-medium w-16">流量</th>
                   <th className="text-left px-4 py-2.5 font-medium w-16">限速</th>
                   <th className="text-left px-4 py-2.5 font-medium w-36">適用國家</th>
-                  <th className="text-left px-4 py-2.5 font-medium w-14">天數</th>
-                  <th className="text-right px-4 py-2.5 font-medium w-20">結算價</th>
-                  <th className="text-center px-4 py-2.5 font-medium w-14"></th>
+                  <th className="text-right px-4 py-2.5 font-medium w-20">天數</th>
+                  <th className="text-right px-4 py-2.5 font-medium w-24">結算價</th>
+                  <th className="text-center px-4 py-2.5 font-medium w-14">詳情</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {results.map((bc, i) => (
-                  <tr key={`${bc.sku_id}-${bc.copies}-${i}`} className="hover:bg-blue-50/50 group">
-                    <td className="px-4 py-2.5">
-                      <div className="font-medium text-sm truncate max-w-[280px]">{bc.name}</div>
-                      <div className="text-gray-400 font-mono text-[10px]">{bc.sku_id}</div>
-                    </td>
-                    <td className="px-4 py-2.5">{bc.capacity}</td>
-                    <td className="px-4 py-2.5">{bc.speed}</td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex flex-wrap gap-0.5">
-                        {bc.countries.map((c, j) => <span key={j} className="px-1 bg-gray-100 rounded text-[10px]">{c}</span>)}
-                        {bc.country_total > 5 && <span className="text-[10px] text-gray-400">+{bc.country_total - 5}</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 font-medium">{bc.days} 天</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-blue-600">NT${bc.cost_twd}</td>
-                    <td className="px-4 py-2.5 text-center">
-                      <button onClick={() => onMatch(bc.sku_id, bc.copies)}
-                        className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                        選取
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {results.map((bc, i) => {
+                  const isExpanded = expanded.has(bc.sku_id)
+                  const toggleExpand = () => setExpanded(prev => {
+                    const next = new Set(prev)
+                    next.has(bc.sku_id) ? next.delete(bc.sku_id) : next.add(bc.sku_id)
+                    return next
+                  })
+                  return (
+                    <Fragment key={`${bc.sku_id}-${i}`}>
+                      <tr className={`hover:bg-blue-50/50 cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`} onClick={toggleExpand}>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-gray-400 flex-shrink-0 w-3">{isExpanded ? '▾' : '▸'}</span>
+                            <div>
+                              <div className={`font-medium text-sm truncate max-w-[280px] ${isExpanded ? 'text-blue-700' : ''}`}>{bc.name}</div>
+                              <div className="text-gray-400 font-mono text-[10px]">{bc.sku_id}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5">{bc.capacity}</td>
+                        <td className="px-4 py-2.5">{bc.speed}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex flex-wrap gap-0.5">
+                            {bc.countries.map((c, j) => <span key={j} className="px-1 bg-gray-100 rounded text-[10px]">{c}</span>)}
+                            {bc.country_total > 5 && <span className="text-[10px] text-gray-400">+{bc.country_total - 5}</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium">
+                          {bc.copies_options.length} 規格
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-medium text-blue-600">
+                          {isExpanded ? '' : '展開查看'}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          📋
+                        </td>
+                      </tr>
+                      {isExpanded && bc.copies_options.map((opt, oi) => (
+                        <tr key={`${bc.sku_id}-opt-${oi}`} className={`${oi % 2 === 0 ? 'bg-white' : 'bg-blue-50/20'} hover:bg-blue-50/50`}>
+                          <td colSpan={4}></td>
+                          <td className="px-4 py-2 text-right font-medium">{opt.days} 天</td>
+                          <td className="px-4 py-2 text-right font-medium text-blue-600">¥{opt.costCny.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-center">
+                            <button onClick={() => onMatch(bc.sku_id, opt.copies)}
+                              className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
+                              選取
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           )}
