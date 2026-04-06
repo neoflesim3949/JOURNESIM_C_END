@@ -98,8 +98,8 @@ export default function ShopeeOrderDetailPage() {
   const [settlements, setSettlements] = useState<Settlement[]>([])
   const [loading, setLoading] = useState(true)
   const [matchingItem, setMatchingItem] = useState<ShopeeItem | null>(null)
-  // ID 對應名稱
-  const [productIdMap, setProductIdMap] = useState<Map<string, string>>(new Map())
+  // 自設名稱（商品名稱 by SKU code, 規格名稱 by variation ID）
+  const [skuProductNameMap, setSkuProductNameMap] = useState<Map<string, string>>(new Map())
   const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
   // BC SKU 名稱
   const [bcSkuNameMap, setBcSkuNameMap] = useState<Map<string, string>>(new Map())
@@ -112,7 +112,8 @@ export default function ShopeeOrderDetailPage() {
       fetch('/api/admin/shopee/id-mappings').then(r => r.json()),
     ])
     setOrder(orderRes.order); setItems(orderRes.items || []); setSettlements(orderRes.settlements || [])
-    setProductIdMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
+    // 商品名稱 by SKU code（shopee_product_id 欄位現存放 SKU code）
+    setSkuProductNameMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
     setVariationIdMap(new Map((idRes.variations || []).map((v: IdMapping) => [v.shopee_variation_id!, v.display_name])))
     // 查 BC SKU 名稱
     const bcSkuIds = [...new Set((orderRes.items || []).map((i: ShopeeItem) => i.bc_sku_id).filter(Boolean))]
@@ -125,13 +126,13 @@ export default function ShopeeOrderDetailPage() {
   }
   useEffect(() => { load() }, [id])
 
-  // 儲存 ID 對應名稱
+  // 儲存自設名稱（product by SKU code, variation by variation ID）
   async function saveIdMapping(type: 'product' | 'variation', shopeeId: string, displayName: string) {
     await fetch('/api/admin/shopee/id-mappings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type, shopee_id: shopeeId, display_name: displayName }),
     })
-    if (type === 'product') setProductIdMap(prev => new Map(prev).set(shopeeId, displayName))
+    if (type === 'product') setSkuProductNameMap(prev => new Map(prev).set(shopeeId, displayName))
     else setVariationIdMap(prev => new Map(prev).set(shopeeId, displayName))
   }
 
@@ -366,15 +367,17 @@ export default function ShopeeOrderDetailPage() {
                     <div className="mt-1 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs text-gray-500">
                       <div className="flex items-center gap-1">商品ID：<span className="font-mono">{item.shopee_product_id || '-'}</span></div>
                       <div className="flex items-center gap-1">
-                        商品名稱：
-                        {item.shopee_product_id && <EditableIdName value={productIdMap.get(item.shopee_product_id) || ''} onSave={(name) => saveIdMapping('product', item.shopee_product_id!, name)} placeholder="設定" />}
-                        {!item.shopee_product_id && '-'}
+                        自訂名稱：
+                        {item.shopee_sku_code
+                          ? <EditableIdName value={skuProductNameMap.get(item.shopee_sku_code) || ''} onSave={(name) => saveIdMapping('product', item.shopee_sku_code!, name)} placeholder="設定" />
+                          : '-'}
                       </div>
                       <div className="flex items-center gap-1">規格ID：<span className="font-mono">{item.shopee_variation_id || '-'}</span></div>
                       <div className="flex items-center gap-1">
-                        規格名稱：
-                        {item.shopee_variation_id && <EditableIdName value={variationIdMap.get(item.shopee_variation_id) || ''} onSave={(name) => saveIdMapping('variation', item.shopee_variation_id!, name)} placeholder="設定" />}
-                        {!item.shopee_variation_id && '-'}
+                        自訂規格：
+                        {item.shopee_variation_id
+                          ? <EditableIdName value={variationIdMap.get(item.shopee_variation_id) || ''} onSave={(name) => saveIdMapping('variation', item.shopee_variation_id!, name)} placeholder="設定" />
+                          : '-'}
                       </div>
                     </div>
                     {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {bcSkuNameMap.get(item.bc_sku_id) || ''} · {item.bc_sku_id} · copies: {item.matched_copies}</div>}
@@ -486,7 +489,7 @@ export default function ShopeeOrderDetailPage() {
                         <div key={`${item.id}-${j}`} className="label"
                           style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', pageBreakAfter: 'always' }}>
                           <div style={{ fontSize: `${ls.line1}px`, fontWeight: 'bold', lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                            {productIdMap.get(item.shopee_product_id || '') || item.shopee_product_name}
+                            {skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name}
                           </div>
                           <div style={{ fontSize: `${ls.line2}px`, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                             {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}

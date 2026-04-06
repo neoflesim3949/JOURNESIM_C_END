@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       recipient_name: first['收件者姓名'] || null,
       recipient_phone: findCol(first, '收件者電話') || null,
       shipping_address: first['收件地址'] || null,
-      shopee_tracking_code: findCol(first, '包裹查詢碼', '蝦皮專線') || null,
+      shopee_tracking_code: findCol(first, '包裹查詢號碼', '蝦皮專線') || null,
       pickup_store_id: first['取件門市店號'] || null,
       city: first['城市'] || null,
       district: first['行政區'] || null,

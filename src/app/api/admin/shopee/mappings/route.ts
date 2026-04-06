@@ -39,6 +39,20 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true })
 }
 
+// PATCH — 只更新名稱欄位（不覆蓋對應關係）
+export async function PATCH(request: Request) {
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const body = await request.json()
+  const supabase = createAdminClient()
+
+  const update: Record<string, string | null> = { updated_at: new Date().toISOString() }
+  if (body.shopee_product_name !== undefined) update.shopee_product_name = body.shopee_product_name || null
+  if (body.shopee_variation_name !== undefined) update.shopee_variation_name = body.shopee_variation_name || null
+
+  await supabase.from('shopee_product_mappings').update(update).eq('shopee_sku_code', body.shopee_sku_code)
+  return NextResponse.json({ ok: true })
+}
+
 // DELETE — 刪除商品對應
 export async function DELETE(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
