@@ -57,6 +57,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         await supabase.from('shopee_order_items').update({
           bc_order_id: bcResult.orderId,
           bc_sub_order_id: bcSub?.subOrderId || null,
+          bc_channel_order_id: channelOrderId,
+          bc_channel_sub_order_id: subOrderList[i].channelSubOrderId,
           status: 'bc_ordered',
           cost_cny: costCny,
           cost_twd: costTwd,

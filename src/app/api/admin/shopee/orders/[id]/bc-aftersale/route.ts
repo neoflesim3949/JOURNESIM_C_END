@@ -17,9 +17,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   // 呼叫 F017 售後申請
   try {
+    const channelOrderId = item.bc_channel_order_id || item.bc_order_id
+    const channelSubOrderId = item.bc_channel_sub_order_id || item.bc_sub_order_id || undefined
     const result = await createAfterSale({
-      channelOrderId: item.bc_order_id,
-      channelSubOrderId: item.bc_sub_order_id || undefined,
+      channelOrderId,
+      channelSubOrderId,
       reason,
       iccid: (item.iccid as string[]) || [],
       refundType: '0', // 自動退款
@@ -30,6 +32,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await supabase.from('shopee_order_items').update({
       bc_order_id: null,
       bc_sub_order_id: null,
+      bc_channel_order_id: null,
+      bc_channel_sub_order_id: null,
       iccid: null,
       cost_cny: null,
       cost_twd: null,
