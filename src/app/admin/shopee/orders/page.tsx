@@ -17,7 +17,7 @@ interface ShopeeOrder {
   buyer_account: string | null; order_date: string | null
   buyer_total_payment: number | null; recipient_name: string | null
   product_total: number | null; created_at: string
-  shopee_account_id: string | null
+  shopee_account_id: string | null; shopee_tracking_code: string | null
   internal_status: string; shopee_order_items: { id: string; status: string }[]
   shopee_settlements: ShopeeSettlement[]
 }
@@ -303,7 +303,10 @@ export default function ShopeeOrdersPage() {
                     <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.order_date)}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.created_at)}</td>
                     <td className="px-4 py-2 text-xs">{o.shopee_account_id ? accountMap.get(o.shopee_account_id) || '-' : '-'}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{o.shopee_order_number}</td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      {o.shopee_order_number}
+                      {o.shopee_tracking_code && <div className="text-[10px] text-gray-400">({o.shopee_tracking_code})</div>}
+                    </td>
                     <td className="px-4 py-2 text-xs">{o.buyer_account || '-'}</td>
                     <td className="px-4 py-2 text-xs font-medium">NT$ {o.buyer_total_payment || '-'}</td>
                     <td className="px-4 py-2 text-xs">
