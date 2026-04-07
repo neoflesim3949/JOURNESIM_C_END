@@ -2,8 +2,32 @@
 
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Upload, Search, Package, ChevronRight, Settings } from 'lucide-react'
+import { Upload, Search, Package, ChevronRight, Settings, Printer, X } from 'lucide-react'
 import * as XLSX from 'xlsx'
+
+// ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
+function generateCode128SVG(text: string, height = 30, barWidth = 1.5): string {
+  const P = '212222,222122,222221,121223,121322,131222,122213,122312,132212,221213,221312,231212,112232,122132,122231,113222,123122,123221,223211,221132,221231,213212,223112,312131,311222,321122,321221,312212,322112,322211,212123,212321,232121,111323,131123,131321,112313,132113,132311,211313,231113,231311,112133,112331,132131,113123,113321,133121,313121,211331,231131,213113,213311,213131,311123,311321,331121,312113,312311,332111,314111,221411,431111,111224,111422,121124,121421,141122,141221,112214,112412,122114,122411,142112,142211,241211,221114,413111,241112,134111,111242,121142,121241,114212,124112,124211,411212,421112,421211,212141,214121,412121,111143,111341,131141,114113,114311,411113,411311,113141,114131,311141,411131,211412,211214,211232'.split(',')
+  const STOP = '2331112'
+  const START_B = 104
+  const vals = Array.from(text).map(c => c.charCodeAt(0) - 32)
+  let checksum = START_B
+  vals.forEach((v, i) => { checksum += v * (i + 1) })
+  checksum = checksum % 103
+  const codes = [P[START_B], ...vals.map(v => P[v]), P[checksum], STOP]
+  const quietZone = 10 * barWidth
+  let x = quietZone
+  const bars: string[] = []
+  for (const code of codes) {
+    for (let i = 0; i < code.length; i++) {
+      const w = Number(code[i]) * barWidth
+      if (i % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${w}" height="${height}"/>`)
+      x += w
+    }
+  }
+  const totalWidth = x + quietZone
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${height}" viewBox="0 0 ${totalWidth} ${height}" style="background:white">${bars.join('')}</svg>`
+}
 
 interface ShopeeSettlement {
   wallet_amount: number | null; original_price: number | null; seller_coupon: number | null
@@ -71,6 +95,11 @@ export default function ShopeeOrdersPage() {
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
+  // 勾選 & 批次列印
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [batchPrintModal, setBatchPrintModal] = useState<'detail' | 'product' | null>(null)
+  const [batchPrintData, setBatchPrintData] = useState<{ order: any; items: any[] }[]>([])
+  const [batchLoading, setBatchLoading] = useState(false)
 
   // 從 localStorage 載入設定 + 載入帳號
   useEffect(() => {
@@ -166,6 +195,25 @@ export default function ShopeeOrdersPage() {
     if (settlementFileRef.current) settlementFileRef.current.value = ''
   }
 
+  // 批次列印
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }
+  function toggleSelectAll() {
+    if (selectedIds.size === displayOrders.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(displayOrders.map(o => o.id)))
+  }
+  async function openBatchPrint(type: 'detail' | 'product') {
+    if (selectedIds.size === 0) { alert('請先勾選訂單'); return }
+    setBatchLoading(true); setBatchPrintModal(type)
+    const res = await fetch('/api/admin/shopee/orders/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [...selectedIds] }),
+    })
+    if (res.ok) setBatchPrintData(await res.json())
+    setBatchLoading(false)
+  }
+
   const totalPages = Math.ceil(total / 20)
 
   return (
@@ -189,6 +237,17 @@ export default function ShopeeOrdersPage() {
             <option value="">選擇帳號</option>
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
+          {selectedIds.size > 0 && (
+            <>
+              <span className="text-xs text-gray-500">已選 {selectedIds.size} 筆</span>
+              <button onClick={() => openBatchPrint('detail')} className="flex items-center gap-1 px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">
+                <Printer className="w-4 h-4" /> 批次商品明細
+              </button>
+              <button onClick={() => openBatchPrint('product')} className="flex items-center gap-1 px-3 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700">
+                <Printer className="w-4 h-4" /> 批次商品標籤
+              </button>
+            </>
+          )}
           <label className={`flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer ${importing ? 'opacity-50' : ''}`}>
             <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入訂單 Excel'}
             <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" disabled={importing} />
@@ -269,6 +328,10 @@ export default function ShopeeOrdersPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500">
               <tr>
+                <th className="px-3 py-3 w-10">
+                  <input type="checkbox" checked={displayOrders.length > 0 && selectedIds.size === displayOrders.length}
+                    onChange={toggleSelectAll} className="rounded border-gray-300" />
+                </th>
                 <th className="text-left px-4 py-3 font-medium cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('order_date')}>
                   訂單日期 {sortBy === 'order_date' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </th>
@@ -299,7 +362,10 @@ export default function ShopeeOrdersPage() {
                   return st
                 }
                 return (
-                  <tr key={o.id} className="hover:bg-gray-50">
+                  <tr key={o.id} className={`hover:bg-gray-50 ${selectedIds.has(o.id) ? 'bg-blue-50' : ''}`}>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} className="rounded border-gray-300" />
+                    </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.order_date)}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">{fmtDate(o.created_at)}</td>
                     <td className="px-4 py-2 text-xs">{o.shopee_account_id ? accountMap.get(o.shopee_account_id) || '-' : '-'}</td>
@@ -332,6 +398,101 @@ export default function ShopeeOrdersPage() {
               <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
               <span className="px-3 py-1 text-sm">{page} / {totalPages || 1}</span>
               <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 批次列印彈窗 */}
+      {batchPrintModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setBatchPrintModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="font-bold">{batchPrintModal === 'detail' ? `批次明細標籤（${batchPrintData.length} 筆）` : `批次商品標籤（${batchPrintData.length} 筆）`}</h2>
+              <div className="flex items-center gap-2">
+                <button onClick={() => {
+                  const el = document.getElementById('batch-print-area')
+                  if (!el) return
+                  const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
+                  if (!w) return
+                  if (batchPrintModal === 'product') {
+                    w.document.write(`<html><head><style>
+                      @page{size:30mm 15mm;margin:0}
+                      body{margin:0;padding:0;font-family:sans-serif}
+                      body>div{gap:0!important}
+                      .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1mm;page-break-after:always;border:none!important}
+                    </style></head><body>${el.innerHTML}</body></html>`)
+                  } else {
+                    w.document.write(`<html><head><style>
+                      @page{size:100mm 150mm;margin:0}
+                      body{margin:0;font-family:sans-serif}
+                      .detail-label{page-break-after:always}
+                    </style></head><body>${el.innerHTML}</body></html>`)
+                  }
+                  w.document.close(); w.print(); w.close()
+                }} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                  <Printer className="w-4 h-4" /> 列印
+                </button>
+                <button onClick={() => setBatchPrintModal(null)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5" id="batch-print-area">
+              {batchLoading ? <p className="text-gray-500 text-sm">載入中...</p> : batchPrintModal === 'detail' ? (
+                /* 批次明細標籤 */
+                batchPrintData.map((d, idx) => (
+                  <div key={idx} className="detail-label" style={{ width: '100mm', minHeight: '150mm', padding: '5mm', fontSize: '11px', fontFamily: 'sans-serif', border: '1px solid #ccc', margin: '0 auto', marginBottom: '5mm', pageBreakAfter: 'always' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                      蝦皮訂單：{d.order.shopee_order_number}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{d.order.order_date}</div>
+                    <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span><strong>收件人：</strong>{d.order.recipient_name}</span><span><strong>電話：</strong>{d.order.recipient_phone}</span></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span><strong>地址：</strong>{d.order.zip_code} {d.order.city}{d.order.district} {d.order.shipping_address}</span>
+                        <span>{d.order.shipping_method && <><strong>寄送：</strong>{d.order.shipping_method}</>}{d.order.pickup_store_id && <> · <strong>門市：</strong>{d.order.pickup_store_id}</>}</span>
+                      </div>
+                    </div>
+                    {d.order.shopee_tracking_code && (
+                      <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '1mm' }}>包裹：{d.order.shopee_tracking_code}</div>
+                        <div dangerouslySetInnerHTML={{ __html: generateCode128SVG(d.order.shopee_tracking_code, 25, 1.5) }} />
+                      </div>
+                    )}
+                    <div style={{ fontWeight: 'bold', marginBottom: '2mm' }}>商品明細：</div>
+                    {d.items.map((item: any, i: number) => (
+                      <div key={i} style={{ border: '1px solid #000', borderRadius: '2mm', padding: '2mm', marginBottom: '2mm' }}>
+                        <div><strong>{i + 1}. {item.shopee_product_name}</strong> × {item.quantity}</div>
+                        <div style={{ fontSize: '10px', color: '#666' }}>{item.shopee_variation_name}</div>
+                        {item.iccid?.map((ic: string, j: number) => <div key={j} style={{ fontSize: '9px', fontFamily: 'monospace' }}>ICCID: {ic}</div>)}
+                      </div>
+                    ))}
+                    {d.order.buyer_note && <div style={{ marginTop: '3mm', padding: '2mm', background: '#fff3cd', borderRadius: '2mm', fontSize: '10px' }}><strong>買家備註：</strong>{d.order.buyer_note}</div>}
+                    <div style={{ marginTop: '3mm', textAlign: 'right', fontWeight: 'bold' }}>金額：NT$ {d.order.buyer_total_payment}</div>
+                  </div>
+                ))
+              ) : (
+                /* 批次商品標籤 */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
+                  {batchPrintData.flatMap((d, idx) =>
+                    d.items.flatMap((item: any) =>
+                      Array.from({ length: item.quantity }, (_, j) => (
+                        <div key={`${idx}-${item.id}-${j}`} className="label"
+                          style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', pageBreakAfter: 'always' }}>
+                          <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                            {item.shopee_product_name}
+                          </div>
+                          <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                            {item.shopee_variation_name}
+                          </div>
+                          {expiryDate && (
+                            <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2, whiteSpace: 'nowrap' }}>使用期限：{expiryDate.replace(/-/g, '/')}</div>
+                          )}
+                        </div>
+                      ))
+                    )
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

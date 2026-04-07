@@ -170,6 +170,20 @@ export default function ShopeeOrderDetailPage() {
     }); load()
   }
 
+  async function cancelBcOrder(item: ShopeeItem) {
+    const reason = prompt('請輸入售後原因：')
+    if (reason === null) return
+    if (!reason.trim()) { alert('請填寫售後原因'); return }
+    const res = await fetch(`/api/admin/shopee/orders/${id}/bc-aftersale`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: item.id, reason: reason.trim() }),
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '售後申請失敗'); return }
+    alert(`售後申請成功，售後單號：${data.afterSaleId}`)
+    load()
+  }
+
   async function submitBcOrder() {
     if (!confirm('確定送出 BC 訂單？')) return
     const res = await fetch(`/api/admin/shopee/orders/${id}/bc-order`, { method: 'POST' })
@@ -278,14 +292,18 @@ export default function ShopeeOrderDetailPage() {
         const processingFee = Math.abs(s?.processing_fee ?? order.payment_processing_fee ?? 0)
         const walletAmount = s?.wallet_amount ?? null
         const platformFees = amsFee + txFee + otherFee + processingFee
-        // 毛利率：入帳金額 / 商品原價
-        const grossMargin = originalPrice > 0 && walletAmount !== null ? ((walletAmount / originalPrice) * 100) : null
         const platformRate = originalPrice > 0 ? ((platformFees / originalPrice) * 100) : 0
         const totalCost = items.reduce((sum, i) => sum + ((i.cost_twd ?? 0) * i.quantity), 0)
-        const netProfit = walletAmount !== null ? walletAmount - totalCost : null
-        const netRate = originalPrice > 0 && netProfit !== null ? ((netProfit / originalPrice) * 100) : null
-        // 金流異常：原價 - 優惠券 - 平台費用 應等於入帳金額
+        // 預計入帳 = 原價 - 優惠券 - 平台費用
         const expectedAmount = originalPrice - sellerCoupon - platformFees
+        // 實際或預計入帳金額
+        const displayAmount = walletAmount ?? (totalCost > 0 ? expectedAmount : null)
+        const isEstimated = walletAmount === null && displayAmount !== null
+        // 毛利率
+        const grossMargin = originalPrice > 0 && displayAmount !== null ? ((displayAmount / originalPrice) * 100) : null
+        const netProfit = displayAmount !== null ? displayAmount - totalCost : null
+        const netRate = originalPrice > 0 && netProfit !== null ? ((netProfit / originalPrice) * 100) : null
+        // 金流異常
         const hasDiscrepancy = walletAmount !== null && Math.abs(expectedAmount - walletAmount) > 1
 
         return (
@@ -330,11 +348,26 @@ export default function ShopeeOrderDetailPage() {
                 <div className="flex justify-between"><span className="text-gray-500">平台費用合計：</span><span className="text-red-500">-NT$ {platformFees.toFixed(0)}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">平台費用率：</span><span className="text-orange-500">{platformRate.toFixed(1)}%</span></div>
                 <div className="border-t border-gray-200 my-2" />
-                <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">毛利率：</span><span className={grossMargin !== null ? (grossMargin >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{grossMargin !== null ? `${grossMargin.toFixed(1)}%` : '-'}</span></div>
+                <div className="flex justify-between font-semibold">
+                  <span>{isEstimated ? '預計入帳金額：' : '錢包入帳金額：'}</span>
+                  <span className={displayAmount !== null ? (isEstimated ? 'text-blue-600' : 'text-green-600') : 'text-gray-400'}>
+                    {displayAmount !== null ? `NT$ ${Math.round(displayAmount)}` : '-'}{isEstimated && <span className="text-xs font-normal ml-1">(預計)</span>}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">{isEstimated ? '預計毛利率：' : '毛利率：'}</span>
+                  <span className={grossMargin !== null ? (grossMargin >= 0 ? (isEstimated ? 'text-blue-600' : 'text-green-600') : 'text-red-500') : 'text-gray-400'}>
+                    {grossMargin !== null ? `${grossMargin.toFixed(1)}%` : '-'}{isEstimated && grossMargin !== null && <span className="text-xs ml-1">(預計)</span>}
+                  </span>
+                </div>
                 <div className="border-t border-gray-200 my-2" />
                 <div className="flex justify-between"><span className="text-gray-500">商品成本：</span><span className={totalCost > 0 ? 'text-gray-700' : 'text-gray-400'}>{totalCost > 0 ? `NT$ ${totalCost}` : '-'}</span></div>
-                <div className="flex justify-between font-semibold"><span>淨利率：</span><span className={netRate !== null ? (netRate >= 0 ? 'text-green-600' : 'text-red-500') : 'text-gray-400'}>{netRate !== null ? `${netRate.toFixed(1)}%` : '-'}</span></div>
+                <div className="flex justify-between font-semibold">
+                  <span>{isEstimated ? '預計淨利率：' : '淨利率：'}</span>
+                  <span className={netRate !== null ? (netRate >= 0 ? (isEstimated ? 'text-blue-600' : 'text-green-600') : 'text-red-500') : 'text-gray-400'}>
+                    {netRate !== null ? `${netRate.toFixed(1)}%` : '-'}{isEstimated && netRate !== null && <span className="text-xs font-normal ml-1">(預計)</span>}
+                  </span>
+                </div>
                 {hasDiscrepancy && (
                   <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600">
                     ⚠ 金流異常：商品原價(NT${originalPrice}) - 優惠券(NT${sellerCoupon}) - 平台費用(NT${platformFees.toFixed(0)}) = NT${expectedAmount.toFixed(0)}，與入帳金額(NT${walletAmount}) 差額 NT${Math.abs(expectedAmount - (walletAmount ?? 0)).toFixed(0)}
@@ -381,7 +414,12 @@ export default function ShopeeOrderDetailPage() {
                       </div>
                     </div>
                     {item.bc_sku_id && <div className="mt-2 text-xs text-blue-600">已對應 BC SKU: {bcSkuNameMap.get(item.bc_sku_id) || ''} · {item.bc_sku_id} · copies: {item.matched_copies}</div>}
-                    {item.bc_order_id && <div className="text-xs text-green-600 mt-0.5">BC 訂單: {item.bc_order_id}{item.bc_sub_order_id && ` · 子訂單: ${item.bc_sub_order_id}`}</div>}
+                    {item.bc_order_id && (
+                      <div className="text-xs text-green-600 mt-0.5 flex items-center gap-2">
+                        <span>BC 訂單: {item.bc_order_id}{item.bc_sub_order_id && ` · 子訂單: ${item.bc_sub_order_id}`}</span>
+                        <button onClick={() => cancelBcOrder(item)} className="text-red-400 hover:text-red-600 text-[10px] border border-red-300 px-1.5 py-0.5 rounded hover:bg-red-50">取消BC訂單</button>
+                      </div>
+                    )}
                     {item.cost_twd != null && <div className="text-xs text-gray-500 mt-0.5">成本：¥{item.cost_cny ?? 0} · NT${item.cost_twd}</div>}
                     {item.iccid && item.iccid.length > 0 && item.status !== 'matched' && item.status !== 'iccid_filled' && (
                       <div className="mt-1 flex flex-wrap gap-1">

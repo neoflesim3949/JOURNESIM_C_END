@@ -40,6 +40,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.matched_copies !== undefined) updates.matched_copies = body.matched_copies
     if (body.bc_sku_id !== undefined) updates.bc_sku_id = body.bc_sku_id
     if (body.iccid !== undefined) updates.iccid = body.iccid
+    if (body.bc_order_id !== undefined) updates.bc_order_id = body.bc_order_id
+    if (body.bc_sub_order_id !== undefined) updates.bc_sub_order_id = body.bc_sub_order_id
+    if (body.cost_cny !== undefined) updates.cost_cny = body.cost_cny
+    if (body.cost_twd !== undefined) updates.cost_twd = body.cost_twd
     if (body.status !== undefined) updates.status = body.status
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
