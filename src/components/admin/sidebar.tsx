@@ -33,7 +33,13 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/plans/acceleration', label: '加速包套餐' },
     ],
   },
-  { href: '/admin/orders', label: '訂單管理', icon: ShoppingCart },
+  {
+    href: '/admin/orders', label: '訂單管理', icon: ShoppingCart,
+    children: [
+      { href: '/admin/orders/list', label: '訂單列表' },
+      { href: '/admin/orders/after-sales', label: '售後列表' },
+    ],
+  },
   { href: '/admin/cards', label: '卡片管理', icon: CreditCard },
   { 
     href: '/admin/members', label: '會員管理', icon: Users,
@@ -59,6 +65,7 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
+  { href: '/admin/bc-logs', label: 'BC Log', icon: RefreshCw },
   {
     href: '/admin/params', label: '參數管理', icon: Globe,
     children: [

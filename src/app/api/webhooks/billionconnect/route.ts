@@ -21,6 +21,12 @@ export async function POST(request: Request) {
   const { tradeType, tradeData } = payload
   const supabase = createAdminClient()
 
+  // 記錄 BC webhook log
+  await supabase.from('bc_api_logs').insert({
+    trade_type: tradeType, direction: 'incoming',
+    request_body: payload, response_body: null, status: 'success',
+  })
+
   // 冪等處理
   const webhookId = `${tradeType}_${tradeData.orderId || tradeData.channelOrderId || tradeData.iccid}_${Date.now()}`
   const { data: existing } = await supabase.from('webhook_logs').select('id').eq('webhook_id', webhookId).single()

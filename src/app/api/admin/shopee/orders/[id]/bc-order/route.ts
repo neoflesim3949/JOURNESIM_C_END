@@ -43,9 +43,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }))
 
     try {
-      console.log('[BC F007] channelOrderId:', channelOrderId, 'subOrderList:', JSON.stringify(subOrderList))
+      console.log('========== [BC F007 送出訂單] ==========')
+      console.log('[BC F007] 蝦皮訂單ID:', id)
+      console.log('[BC F007] channelOrderId:', channelOrderId)
+      console.log('[BC F007] subOrderList:', JSON.stringify(subOrderList, null, 2))
       const bcResult = await createRechargeOrder({ channelOrderId, subOrderList })
-      console.log('[BC F007] result:', JSON.stringify(bcResult))
+      console.log('[BC F007] 回傳結果:', JSON.stringify(bcResult, null, 2))
       for (let i = 0; i < itemsWithIccid.length; i++) {
         const bcSub = bcResult.subOrderList?.[i]
         const item = itemsWithIccid[i]
@@ -54,17 +57,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
         const costCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
         const costTwd = Math.ceil(costCny / cnyRate)
-        await supabase.from('shopee_order_items').update({
+        const saveData = {
           bc_order_id: bcResult.orderId,
           bc_sub_order_id: bcSub?.subOrderId || null,
           bc_channel_order_id: channelOrderId,
           bc_channel_sub_order_id: subOrderList[i].channelSubOrderId,
-          status: 'bc_ordered',
           cost_cny: costCny,
           cost_twd: costTwd,
+        }
+        console.log(`[BC F007] 儲存 item[${i}]:`, JSON.stringify(saveData))
+        await supabase.from('shopee_order_items').update({
+          ...saveData,
+          status: 'bc_ordered',
         }).eq('id', item.id)
         results.push({ item_id: itemsWithIccid[i].id, bc_order_id: bcResult.orderId })
       }
+      console.log('========== [BC F007 完成] ==========')
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'F007 失敗'
       console.error('[BC F007] error:', msg)

@@ -1,8 +1,22 @@
 import crypto from 'crypto'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const BC_URL = process.env.BILLIONCONNECT_URL!
 const APP_KEY = process.env.BILLIONCONNECT_APP_KEY!
 const APP_SECRET = process.env.BILLIONCONNECT_APP_SECRET!
+
+// 記錄 BC API log 到資料庫
+async function logBcApi(entry: {
+  trade_type: string; direction: string; request_body: object | null
+  response_body: object | null; status: string; error_message?: string; duration_ms?: number
+}) {
+  try {
+    const supabase = createAdminClient()
+    await supabase.from('bc_api_logs').insert(entry)
+  } catch (e) {
+    console.error('[BC LOG] 寫入失敗:', e)
+  }
+}
 
 // =====================================================
 // 簽名工具
@@ -13,10 +27,10 @@ function generateSign(body: object): string {
 }
 
 function getTradeTime(): string {
-  return new Date()
-    .toISOString()
-    .replace('T', ' ')
-    .substring(0, 19)
+  // UTC+8 時間格式 YYYY-MM-DD HH:mm:ss
+  const now = new Date()
+  const utc8 = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  return utc8.toISOString().replace('T', ' ').substring(0, 19)
 }
 
 // =====================================================
@@ -30,6 +44,7 @@ async function callBC<T>(tradeType: string, tradeData: object = {}): Promise<T> 
   }
 
   const sign = generateSign(body)
+  const startTime = Date.now()
 
   const res = await fetch(BC_URL, {
     method: 'POST',
@@ -43,15 +58,20 @@ async function callBC<T>(tradeType: string, tradeData: object = {}): Promise<T> 
   })
 
   if (!res.ok) {
+    const duration = Date.now() - startTime
+    logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: null, status: 'error', error_message: `HTTP ${res.status}`, duration_ms: duration })
     throw new Error(`BillionConnect HTTP error: ${res.status}`)
   }
 
   const data = await res.json()
+  const duration = Date.now() - startTime
 
   if (data.tradeCode !== '1000') {
+    logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: data, status: 'error', error_message: `[${data.tradeCode}] ${data.tradeMsg}`, duration_ms: duration })
     throw new Error(`BillionConnect API error [${data.tradeCode}]: ${data.tradeMsg}`)
   }
 
+  logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: data, status: 'success', duration_ms: duration })
   return data.tradeData as T
 }
 

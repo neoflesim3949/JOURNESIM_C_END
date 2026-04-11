@@ -22,7 +22,8 @@ export async function GET(request: Request) {
 
     if (isManual) {
       // 手動卡片：只查 expiry + service_status + 當日流量
-      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const utc8 = new Date(Date.now() + 8 * 60 * 60 * 1000)
+      const today = utc8.toISOString().slice(0, 10).replace(/-/g, '')
       const [expiry, serviceStatus, todayTraffic] = await Promise.all([
         getCardExpiry([iccid]).catch(() => []),
         getEsimServiceStatus(iccid).catch(() => null),
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
     }
 
     // 一般訂單卡片：查詢全部資訊
-    const now = new Date()
+    const now = new Date(Date.now() + 8 * 60 * 60 * 1000)
     const begin = new Date(now.getTime() - 7 * 86400000)
 
     const [expiry, serviceStatus, usage, traffic, verify, realName, rechargeProducts] = await Promise.all([

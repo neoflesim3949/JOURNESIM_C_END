@@ -9,12 +9,23 @@ export function formatPrice(amount: number): string {
   return `NT$ ${amount.toLocaleString()}`
 }
 
-// 6碼日期 YYMMDD
-function getDateCode(): string {
+// UTC+8 當前時間
+export function nowUTC8(): Date {
   const now = new Date()
-  const yy = String(now.getFullYear()).slice(2)
-  const mm = String(now.getMonth() + 1).padStart(2, '0')
-  const dd = String(now.getDate()).padStart(2, '0')
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000)
+}
+
+// UTC+8 ISO 字串（用於寫入 DB 的 updated_at 等）
+export function nowISO(): string {
+  return new Date().toISOString()
+}
+
+// 6碼日期 YYMMDD（UTC+8）
+function getDateCode(): string {
+  const now = nowUTC8()
+  const yy = String(now.getUTCFullYear()).slice(2)
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(now.getUTCDate()).padStart(2, '0')
   return `${yy}${mm}${dd}`
 }
 

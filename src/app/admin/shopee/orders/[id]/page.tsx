@@ -55,6 +55,7 @@ interface ShopeeOrder {
   shipping_method: string | null; fulfillment_method: string | null; payment_method: string | null
   buyer_note: string | null; seller_note: string | null; internal_status: string
   expiry_date: string | null
+  shopee_account_id: string | null
 }
 
 interface Settlement {
@@ -103,15 +104,19 @@ export default function ShopeeOrderDetailPage() {
   const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
   // BC SKU 名稱
   const [bcSkuNameMap, setBcSkuNameMap] = useState<Map<string, string>>(new Map())
+  // 蝦皮帳號
+  const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map())
   // 列印彈窗
   const [printModal, setPrintModal] = useState<'detail' | 'product' | null>(null)
 
   async function load() {
-    const [orderRes, idRes] = await Promise.all([
+    const [orderRes, idRes, accRes] = await Promise.all([
       fetch(`/api/admin/shopee/orders/${id}`).then(r => r.json()),
       fetch('/api/admin/shopee/id-mappings').then(r => r.json()),
+      fetch('/api/admin/shopee/accounts').then(r => r.json()),
     ])
     setOrder(orderRes.order); setItems(orderRes.items || []); setSettlements(orderRes.settlements || [])
+    setAccountMap(new Map((accRes || []).map((a: { id: string; name: string }) => [a.id, a.name])))
     // 商品名稱 by SKU code（shopee_product_id 欄位現存放 SKU code）
     setSkuProductNameMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
     setVariationIdMap(new Map((idRes.variations || []).map((v: IdMapping) => [v.shopee_variation_id!, v.display_name])))
@@ -171,16 +176,26 @@ export default function ShopeeOrderDetailPage() {
   }
 
   async function cancelBcOrder(item: ShopeeItem) {
-    const reason = prompt('請輸入售後原因：')
+    const reason = prompt('請輸入售後原因代碼：\n20 = 無理由退訂\n29 = eSIM未下載退訂')
     if (reason === null) return
-    if (!reason.trim()) { alert('請填寫售後原因'); return }
+    if (!reason.trim()) { alert('請填寫售後原因代碼'); return }
     const res = await fetch(`/api/admin/shopee/orders/${id}/bc-aftersale`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item_id: item.id, reason: reason.trim() }),
     })
     const data = await res.json()
-    if (!res.ok) { alert(data.error || '售後申請失敗'); return }
-    alert(`售後申請成功，售後單號：${data.afterSaleId}`)
+    if (!res.ok) {
+      // F017 失敗，提供強制取消選項
+      const forceCancel = confirm(`售後申請失敗：${data.error}\n\n是否強制取消系統記錄？（不影響 BC 端，需手動至 BC 後台處理）`)
+      if (!forceCancel) return
+      await fetch(`/api/admin/shopee/orders/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: item.id, bc_order_id: null, bc_sub_order_id: null, iccid: null, cost_cny: null, cost_twd: null, status: 'matched' }),
+      })
+      alert('已強制清除系統記錄')
+      load(); return
+    }
+    alert(data.warning || `售後申請成功，售後單號：${data.afterSaleId}`)
     load()
   }
 
@@ -363,6 +378,12 @@ export default function ShopeeOrderDetailPage() {
                 <div className="border-t border-gray-200 my-2" />
                 <div className="flex justify-between"><span className="text-gray-500">商品成本：</span><span className={totalCost > 0 ? 'text-gray-700' : 'text-gray-400'}>{totalCost > 0 ? `NT$ ${totalCost}` : '-'}</span></div>
                 <div className="flex justify-between font-semibold">
+                  <span>{isEstimated ? '預計淨利：' : '淨利：'}</span>
+                  <span className={netProfit !== null ? (netProfit >= 0 ? (isEstimated ? 'text-blue-600' : 'text-green-600') : 'text-red-500') : 'text-gray-400'}>
+                    {netProfit !== null ? `NT$ ${Math.round(netProfit)}` : '-'}{isEstimated && netProfit !== null && <span className="text-xs font-normal ml-1">(預計)</span>}
+                  </span>
+                </div>
+                <div className="flex justify-between font-semibold">
                   <span>{isEstimated ? '預計淨利率：' : '淨利率：'}</span>
                   <span className={netRate !== null ? (netRate >= 0 ? (isEstimated ? 'text-blue-600' : 'text-green-600') : 'text-red-500') : 'text-gray-400'}>
                     {netRate !== null ? `${netRate.toFixed(1)}%` : '-'}{isEstimated && netRate !== null && <span className="text-xs font-normal ml-1">(預計)</span>}
@@ -487,8 +508,9 @@ export default function ShopeeOrderDetailPage() {
               {printModal === 'detail' ? (
                 /* 明細標籤 100mm × 150mm */
                 <div style={{ width: '100mm', minHeight: '150mm', padding: '5mm', fontSize: '11px', fontFamily: 'sans-serif', border: '1px solid #ccc', margin: '0 auto' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
-                    蝦皮訂單：{order.shopee_order_number}
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span>蝦皮訂單：{order.shopee_order_number}</span>
+                    {order.shopee_account_id && <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666' }}>{accountMap.get(order.shopee_account_id) || '-'}</span>}
                   </div>
                   <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{order.order_date}</div>
                   <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>

@@ -100,6 +100,9 @@ export default function ShopeeOrdersPage() {
   const [batchPrintModal, setBatchPrintModal] = useState<'detail' | 'product' | null>(null)
   const [batchPrintData, setBatchPrintData] = useState<{ order: any; items: any[] }[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
+  // 自訂名稱（商品 by SKU code, 規格 by variation ID）
+  const [skuProductNameMap, setSkuProductNameMap] = useState<Map<string, string>>(new Map())
+  const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
 
   // 從 localStorage 載入設定 + 載入帳號
   useEffect(() => {
@@ -108,6 +111,11 @@ export default function ShopeeOrdersPage() {
     const savedExpiry = localStorage.getItem('shopee_expiry_date')
     if (savedExpiry) setExpiryDate(savedExpiry)
     fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
+    // 載入自訂名稱對應
+    fetch('/api/admin/shopee/id-mappings').then(r => r.json()).then(d => {
+      setSkuProductNameMap(new Map((d.products || []).map((p: { shopee_product_id: string; display_name: string }) => [p.shopee_product_id, p.display_name])))
+      setVariationIdMap(new Map((d.variations || []).map((v: { shopee_variation_id: string; display_name: string }) => [v.shopee_variation_id, v.display_name])))
+    })
   }, [])
 
   function saveExpiryDate(date: string) {
@@ -441,8 +449,9 @@ export default function ShopeeOrdersPage() {
                 /* 批次明細標籤 */
                 batchPrintData.map((d, idx) => (
                   <div key={idx} className="detail-label" style={{ width: '100mm', minHeight: '150mm', padding: '5mm', fontSize: '11px', fontFamily: 'sans-serif', border: '1px solid #ccc', margin: '0 auto', marginBottom: '5mm', pageBreakAfter: 'always' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
-                      蝦皮訂單：{d.order.shopee_order_number}
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span>蝦皮訂單：{d.order.shopee_order_number}</span>
+                      {d.order.shopee_account_id && <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666' }}>{accountMap.get(d.order.shopee_account_id) || '-'}</span>}
                     </div>
                     <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{d.order.order_date}</div>
                     <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
@@ -479,10 +488,10 @@ export default function ShopeeOrdersPage() {
                         <div key={`${idx}-${item.id}-${j}`} className="label"
                           style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', pageBreakAfter: 'always' }}>
                           <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                            {item.shopee_product_name}
+                            {skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name}
                           </div>
                           <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                            {item.shopee_variation_name}
+                            {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
                           </div>
                           {expiryDate && (
                             <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2, whiteSpace: 'nowrap' }}>使用期限：{expiryDate.replace(/-/g, '/')}</div>

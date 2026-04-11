@@ -19,14 +19,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const channelOrderId = item.bc_channel_order_id || item.bc_order_id
     const channelSubOrderId = item.bc_channel_sub_order_id || item.bc_sub_order_id || undefined
-    const result = await createAfterSale({
+    const iccid = (item.iccid as string[]) || []
+    const afterSaleData = {
       channelOrderId,
       channelSubOrderId,
       reason,
-      iccid: (item.iccid as string[]) || [],
-      refundType: '0', // 自動退款
-    })
-    console.log('[BC F017] afterSaleId:', result.afterSaleId)
+      iccid,
+      refundType: '0',
+      unSubscribeFlow: '1',
+      returnCardOrNot: '0',
+    }
+    console.log('========== [BC F017 售後申請] ==========')
+    console.log('[BC F017] 蝦皮訂單ID:', id)
+    console.log('[BC F017] item_id:', item_id)
+    console.log('[BC F017] DB欄位:', JSON.stringify({
+      bc_order_id: item.bc_order_id,
+      bc_sub_order_id: item.bc_sub_order_id,
+      bc_channel_order_id: item.bc_channel_order_id,
+      bc_channel_sub_order_id: item.bc_channel_sub_order_id,
+      iccid: item.iccid,
+      bc_sku_id: item.bc_sku_id,
+      matched_copies: item.matched_copies,
+    }))
+    console.log('[BC F017] 送出參數:', JSON.stringify(afterSaleData))
+    const result = await createAfterSale(afterSaleData)
+    console.log('[BC F017] 回傳結果:', JSON.stringify(result))
+    console.log('========== [BC F017 完成] ==========')
 
     // 清除系統內 BC 訂單記錄，回到 matched 狀態
     await supabase.from('shopee_order_items').update({
