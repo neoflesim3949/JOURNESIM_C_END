@@ -11,7 +11,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const supabase = createAdminClient()
 
   const { data: items } = await supabase.from('shopee_order_items')
-    .select('*').eq('shopee_order_id', id).in('status', ['matched', 'iccid_filled'])
+    .select('*').eq('shopee_order_id', id).in('status', ['matched', 'iccid_filled']).is('bc_order_id', null)
 
   if (!items || items.length === 0) return NextResponse.json({ error: '無可下單的商品' }, { status: 400 })
 
