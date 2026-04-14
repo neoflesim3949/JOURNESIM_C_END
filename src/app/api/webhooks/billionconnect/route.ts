@@ -14,6 +14,16 @@ export async function POST(request: Request) {
   const signValue = request.headers.get('x-sign-value') || ''
 
   if (!verifySign(rawBody, signValue)) {
+    // 記錄失敗的 webhook（方便排查）
+    try {
+      const supabaseLog = createAdminClient()
+      const parsed = JSON.parse(rawBody).tradeType || 'unknown'
+      await supabaseLog.from('bc_api_logs').insert({
+        trade_type: parsed, direction: 'incoming',
+        request_body: JSON.parse(rawBody), response_body: null,
+        status: 'error', error_message: 'Invalid signature',
+      })
+    } catch {}
     return NextResponse.json({ tradeCode: '9999', tradeMsg: 'Invalid signature' }, { status: 403 })
   }
 
