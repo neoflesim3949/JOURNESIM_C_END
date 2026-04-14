@@ -298,8 +298,9 @@ export default function ShopeeOrderDetailPage() {
       {/* 金流結算 & 利潤結算 */}
       {(() => {
         const s = settlements.length > 0 ? settlements[0] : null
-        // 用金流 Excel 的商品原價（original_price），沒有就用訂單的 product_total
-        const originalPrice = s?.original_price ?? order.product_total ?? 0
+        // 用金流 Excel 的商品原價，沒有金流時用商品明細活動價合計（因蝦皮商品總價已扣平台優惠券，但蝦皮會補貼回賣家）
+        const itemsTotal = items.reduce((sum, i) => sum + ((i.sale_price ?? i.original_price ?? 0) * i.quantity), 0)
+        const originalPrice = s?.original_price ?? (itemsTotal > 0 ? itemsTotal : order.product_total ?? 0)
         const sellerCoupon = Math.abs(s?.seller_coupon ?? order.seller_coupon ?? 0)
         const amsFee = Math.abs(s?.ams_fee ?? 0)
         const txFee = Math.abs(s?.transaction_fee ?? order.transaction_fee ?? 0)
@@ -606,19 +607,50 @@ function EditableIdName({ value, onSave, placeholder }: { value: string; onSave:
 }
 
 function IccidInput({ item, onSave }: { item: ShopeeItem; onSave: (id: string, iccids: string[]) => void }) {
-  const [iccids, setIccids] = useState<string[]>(() => {
-    const arr = [...(item.iccid || [])]; while (arr.length < item.quantity) arr.push(''); return arr
-  })
+  const [text, setText] = useState(() => (item.iccid || []).filter(Boolean).join('\n'))
+  const [startIccid, setStartIccid] = useState('')
+  const [endIccid, setEndIccid] = useState('')
+  const lines = [...new Set(text.split(/[\n,]/).map(s => s.trim()).filter(Boolean))]
+
+  function generateRange() {
+    if (!startIccid.trim() || !endIccid.trim()) return
+    const startMatch = startIccid.trim().match(/^(.*?)(\d+)$/)
+    const endMatch = endIccid.trim().match(/^(.*?)(\d+)$/)
+    if (!startMatch || !endMatch) return
+    const prefix = startMatch[1]
+    const startNum = parseInt(startMatch[2])
+    const endNum = parseInt(endMatch[2])
+    if (endNum < startNum) return
+    const padLen = startMatch[2].length
+    const generated: string[] = []
+    for (let i = startNum; i <= endNum; i++) {
+      generated.push(prefix + String(i).padStart(padLen, '0'))
+    }
+    setText(generated.join('\n'))
+    setStartIccid(''); setEndIccid('')
+  }
+
   return (
     <div className="mt-3 pt-3 border-t border-gray-100">
-      <div className="text-xs font-medium text-gray-500 mb-1">ICCID 回填（{iccids.filter(Boolean).length}/{item.quantity}）</div>
-      <div className="flex flex-wrap gap-2">
-        {iccids.map((v, i) => (
-          <input key={i} value={v} onChange={(e) => { const a = [...iccids]; a[i] = e.target.value; setIccids(a) }}
-            placeholder={`ICCID ${i + 1}`}
-            className={`px-2 py-1 border rounded text-xs font-mono flex-1 min-w-[200px] ${v ? 'border-green-300 bg-green-50' : 'border-gray-200'}`} />
-        ))}
-        <button onClick={() => onSave(item.id, iccids)}
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-medium text-gray-500">ICCID 回填（{lines.length}/{item.quantity}）</div>
+        <div className="flex items-center gap-1">
+          <input value={startIccid} onChange={e => setStartIccid(e.target.value)}
+            placeholder="起始號段" className="px-2 py-0.5 border border-gray-300 rounded text-xs font-mono w-36" />
+          <span className="text-xs text-gray-400">~</span>
+          <input value={endIccid} onChange={e => setEndIccid(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && generateRange()}
+            placeholder="結束號段" className="px-2 py-0.5 border border-gray-300 rounded text-xs font-mono w-36" />
+          <button onClick={generateRange} className="px-2 py-0.5 bg-gray-100 text-xs rounded hover:bg-gray-200">產生號段</button>
+        </div>
+      </div>
+      <textarea value={text} onChange={e => setText(e.target.value)}
+        onBlur={() => { const deduped = [...new Set(text.split(/[\n,]/).map(s => s.trim()).filter(Boolean))]; setText(deduped.join('\n')) }}
+        rows={Math.min(Math.max(item.quantity, 3), 8)}
+        placeholder="每行一個 ICCID" className={`w-full px-2 py-1 border rounded text-xs font-mono ${lines.length >= item.quantity ? 'border-green-300 bg-green-50' : 'border-gray-200'}`} />
+      <div className="flex items-center justify-between mt-1">
+        <span className="text-[10px] text-gray-400">{lines.length !== item.quantity && lines.length > 0 ? `需要 ${item.quantity} 個，目前 ${lines.length} 個` : ''}</span>
+        <button onClick={() => onSave(item.id, lines.length > 0 ? lines : [])}
           className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 flex items-center gap-1">
           <Save className="w-3 h-3" /> 儲存
         </button>
@@ -636,9 +668,11 @@ function BcMatchModal({ item, onMatch, onClose }: {
   const [countries, setCountries] = useState<{ mcc: string; name: string }[]>([])
   const [daysOpts, setDaysOpts] = useState<string[]>([])
   const [capacityOpts, setCapacityOpts] = useState<string[]>([])
+  const [speedOpts, setSpeedOpts] = useState<string[]>([])
   const [selCountries, setSelCountries] = useState<string[]>([])
   const [selDays, setSelDays] = useState('')
   const [selCapacity, setSelCapacity] = useState('')
+  const [selSpeed, setSelSpeed] = useState('')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<BcResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -665,6 +699,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
       setCountries(d.countries || [])
       setDaysOpts(d.days || [])
       setCapacityOpts(d.capacities || [])
+      setSpeedOpts(d.speeds || [])
     })
   }, [])
 
@@ -674,6 +709,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
     if (selCountries.length > 0) params.set('countries', selCountries.join(','))
     if (selDays) params.set('days', selDays)
     if (selCapacity) params.set('capacity', selCapacity)
+    if (selSpeed) params.set('speed', selSpeed)
     if (search) params.set('search', search)
     const res = await fetch(`/api/admin/shopee/bc-search?${params}`)
     if (res.ok) setResults(await res.json())
@@ -702,7 +738,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
 
         {/* 篩選列 */}
         <div className="p-5 border-b border-gray-100 space-y-3">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             {/* 國家多選 */}
             <div ref={countryRef} className="relative">
               <button type="button" onClick={() => setCountryOpen(v => !v)}
@@ -755,6 +791,13 @@ function BcMatchModal({ item, onMatch, onClose }: {
               className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
               <option value="">選擇流量</option>
               {capacityOpts.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+
+            {/* 限速 */}
+            <select value={selSpeed} onChange={e => setSelSpeed(e.target.value)}
+              className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">選擇限速</option>
+              {speedOpts.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 

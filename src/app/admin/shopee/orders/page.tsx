@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { Fragment, useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Upload, Search, Package, ChevronRight, Settings, Printer, X } from 'lucide-react'
+import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
@@ -40,9 +40,11 @@ interface ShopeeOrder {
   return_status: string | null
   buyer_account: string | null; order_date: string | null
   buyer_total_payment: number | null; recipient_name: string | null
-  product_total: number | null; created_at: string
+  product_total: number | null; seller_coupon: number | null
+  transaction_fee: number | null; other_service_fee: number | null
+  payment_processing_fee: number | null; created_at: string
   shopee_account_id: string | null; shopee_tracking_code: string | null
-  internal_status: string; shopee_order_items: { id: string; status: string }[]
+  internal_status: string; shopee_order_items: { id: string; status: string; cost_twd: number | null; quantity: number; sale_price: number | null; original_price: number | null }[]
   shopee_settlements: ShopeeSettlement[]
 }
 
@@ -58,6 +60,25 @@ function getFinanceStatus(order: ShopeeOrder): { label: string; color: string } 
   const expected = originalPrice - sellerCoupon - platformFees
   if (Math.abs(expected - walletAmount) > 1) return { label: '金流異常', color: 'bg-red-100 text-red-700' }
   return { label: '已匯入', color: 'bg-green-100 text-green-700' }
+}
+
+function getNetProfitRate(order: ShopeeOrder): { rate: number | null; estimated: boolean } {
+  const s = order.shopee_settlements?.[0]
+  const itemsTotal = (order.shopee_order_items || []).reduce((sum, i) => sum + ((i.sale_price ?? i.original_price ?? 0) * i.quantity), 0)
+  const originalPrice = s?.original_price ?? (itemsTotal > 0 ? itemsTotal : order.product_total ?? 0)
+  if (originalPrice <= 0) return { rate: null, estimated: false }
+  const sellerCoupon = Math.abs(s?.seller_coupon ?? order.seller_coupon ?? 0)
+  const amsFee = Math.abs(s?.ams_fee ?? 0)
+  const txFee = Math.abs(s?.transaction_fee ?? order.transaction_fee ?? 0)
+  const otherFee = Math.abs(s?.other_service_fee ?? order.other_service_fee ?? 0)
+  const processingFee = Math.abs(s?.processing_fee ?? order.payment_processing_fee ?? 0)
+  const platformFees = amsFee + txFee + otherFee + processingFee
+  const walletAmount = s?.wallet_amount ?? null
+  const totalCost = (order.shopee_order_items || []).reduce((sum, i) => sum + ((i.cost_twd ?? 0) * i.quantity), 0)
+  if (totalCost <= 0) return { rate: null, estimated: false }
+  const displayAmount = walletAmount ?? (originalPrice - sellerCoupon - platformFees)
+  const netProfit = displayAmount - totalCost
+  return { rate: (netProfit / originalPrice) * 100, estimated: walletAmount === null }
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -92,7 +113,7 @@ export default function ShopeeOrdersPage() {
   const [expiryDate, setExpiryDate] = useState('')
   const [labelSettings, setLabelSettings] = useState({ line1: 12, line2: 12, line3: 10 })
   // 帳號
-  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
+  const [accounts, setAccounts] = useState<{ id: string; name: string; excel_password: string | null }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
   // 勾選 & 批次列印
@@ -103,6 +124,10 @@ export default function ShopeeOrdersPage() {
   // 自訂名稱（商品 by SKU code, 規格 by variation ID）
   const [skuProductNameMap, setSkuProductNameMap] = useState<Map<string, string>>(new Map())
   const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
+  // 批量編輯
+  const [batchEditModal, setBatchEditModal] = useState(false)
+  const [batchEditData, setBatchEditData] = useState<{ order: any; items: any[] }[]>([])
+  const [batchEditLoading, setBatchEditLoading] = useState(false)
 
   // 從 localStorage 載入設定 + 載入帳號
   useEffect(() => {
@@ -158,46 +183,64 @@ export default function ShopeeOrdersPage() {
 
   useEffect(() => { load() }, [page, sortBy, sortDir])
 
+  // 解析 Excel（server 端解密密碼保護）
+  async function parseExcel(file: File, manualPassword?: string): Promise<Record<string, string>[]> {
+    const acctPw = accounts.find(a => a.id === selectedAccount)?.excel_password
+    const password = manualPassword || acctPw || ''
+    const form = new FormData()
+    form.append('file', file)
+    if (password) form.append('password', password)
+    const res = await fetch('/api/admin/shopee/parse-excel', { method: 'POST', body: form })
+    const data = await res.json()
+    if (!res.ok) {
+      if (data.error === 'encrypted' || data.error === 'wrong_password') {
+        const pw = prompt(data.error === 'wrong_password' ? '密碼錯誤，請重新輸入：' : '此 Excel 檔案有密碼保護，請輸入密碼：')
+        if (!pw) throw new Error('取消')
+        return parseExcel(file, pw)
+      }
+      throw new Error(data.error || '解析失敗')
+    }
+    return data.rows
+  }
+
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setImporting(true); setImportResult(null)
-
-    const buffer = await file.arrayBuffer()
-    const wb = XLSX.read(buffer, { type: 'array' })
-    const ws = wb.Sheets[wb.SheetNames[0]]
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' })
-
-    const res = await fetch('/api/admin/shopee/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows, account_id: selectedAccount || undefined }),
-    })
-    const data = await res.json()
-    setImportResult(`匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆、商品 ${data.items} 項`)
+    try {
+      const rows = await parseExcel(file)
+      const res = await fetch('/api/admin/shopee/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, account_id: selectedAccount || undefined }),
+      })
+      const data = await res.json()
+      setImportResult(`匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆、商品 ${data.items} 項`)
+      load()
+    } catch (err) {
+      if ((err as Error).message !== '取消') setImportResult(`匯入失敗：${(err as Error).message}`)
+    }
     setImporting(false)
     if (fileRef.current) fileRef.current.value = ''
-    load()
   }
 
   async function handleSettlementImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     setImportingSettlement(true); setImportResult(null)
-
-    const buffer = await file.arrayBuffer()
-    const wb = XLSX.read(buffer, { type: 'array' })
-    const ws = wb.Sheets[wb.SheetNames[0]]
-    const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' })
-
-    const res = await fetch('/api/admin/shopee/import-settlement', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows, account_id: selectedAccount || undefined }),
-    })
-    const data = await res.json()
-    if (res.ok) {
-      setImportResult(`金流匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆`)
-    } else {
-      setImportResult(`金流匯入失敗：${data.error}`)
+    try {
+      const rows = await parseExcel(file)
+      const res = await fetch('/api/admin/shopee/import-settlement', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, account_id: selectedAccount || undefined }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setImportResult(`金流匯入完成：新增 ${data.created} 筆、更新 ${data.updated} 筆`)
+      } else {
+        setImportResult(`金流匯入失敗：${data.error}`)
+      }
+    } catch (err) {
+      if ((err as Error).message !== '取消') setImportResult(`匯入失敗：${(err as Error).message}`)
     }
     setImportingSettlement(false)
     if (settlementFileRef.current) settlementFileRef.current.value = ''
@@ -220,6 +263,17 @@ export default function ShopeeOrdersPage() {
     })
     if (res.ok) setBatchPrintData(await res.json())
     setBatchLoading(false)
+  }
+
+  async function openBatchEdit() {
+    if (selectedIds.size === 0) { alert('請先勾選訂單'); return }
+    setBatchEditLoading(true); setBatchEditModal(true)
+    const res = await fetch('/api/admin/shopee/orders/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [...selectedIds] }),
+    })
+    if (res.ok) setBatchEditData(await res.json())
+    setBatchEditLoading(false)
   }
 
   const totalPages = Math.ceil(total / 20)
@@ -253,6 +307,9 @@ export default function ShopeeOrdersPage() {
               </button>
               <button onClick={() => openBatchPrint('product')} className="flex items-center gap-1 px-3 py-2 bg-orange-600 text-white text-sm font-medium rounded-lg hover:bg-orange-700">
                 <Printer className="w-4 h-4" /> 批次商品標籤
+              </button>
+              <button onClick={openBatchEdit} className="flex items-center gap-1 px-3 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700">
+                <Edit3 className="w-4 h-4" /> 批量編輯
               </button>
             </>
           )}
@@ -350,6 +407,7 @@ export default function ShopeeOrdersPage() {
                 <th className="text-left px-4 py-3 font-medium">蝦皮訂單號</th>
                 <th className="text-left px-4 py-3 font-medium">買家</th>
                 <th className="text-left px-4 py-3 font-medium">金額</th>
+                <th className="text-left px-4 py-3 font-medium">淨利率</th>
                 <th className="text-left px-4 py-3 font-medium">商品數</th>
                 <th className="text-left px-4 py-3 font-medium">蝦皮狀態</th>
                 <th className="text-left px-4 py-3 font-medium">退貨/退款</th>
@@ -383,6 +441,15 @@ export default function ShopeeOrdersPage() {
                     </td>
                     <td className="px-4 py-2 text-xs">{o.buyer_account || '-'}</td>
                     <td className="px-4 py-2 text-xs font-medium">NT$ {o.buyer_total_payment || '-'}</td>
+                    <td className="px-4 py-2 text-xs">
+                      {(() => {
+                        const nr = getNetProfitRate(o)
+                        if (nr.rate === null) return <span className="text-gray-400">-</span>
+                        return <span className={nr.rate >= 0 ? (nr.estimated ? 'text-blue-600' : 'text-green-600') : 'text-red-500'}>
+                          {nr.rate.toFixed(1)}%{nr.estimated && <span className="text-[10px] ml-0.5">(預)</span>}
+                        </span>
+                      })()}
+                    </td>
                     <td className="px-4 py-2 text-xs">
                       {o.shopee_order_items?.length || 0}
                       {pendingItems > 0 && <span className="ml-1 text-orange-500">({pendingItems} 待對應)</span>}
@@ -507,6 +574,25 @@ export default function ShopeeOrdersPage() {
         </div>
       )}
 
+      {/* 批量編輯彈窗 */}
+      {batchEditModal && (
+        <BatchEditModal
+          data={batchEditData}
+          loading={batchEditLoading}
+          skuProductNameMap={skuProductNameMap}
+          variationIdMap={variationIdMap}
+          orderIds={[...selectedIds]}
+          onClose={() => setBatchEditModal(false)}
+          onSaved={() => {
+            // 重新載入自訂名稱
+            fetch('/api/admin/shopee/id-mappings').then(r => r.json()).then(d => {
+              setSkuProductNameMap(new Map((d.products || []).map((p: { shopee_product_id: string; display_name: string }) => [p.shopee_product_id, p.display_name])))
+              setVariationIdMap(new Map((d.variations || []).map((v: { shopee_variation_id: string; display_name: string }) => [v.shopee_variation_id, v.display_name])))
+            })
+          }}
+        />
+      )}
+
       {/* 標籤字體設定彈窗 */}
       {showLabelSettings && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLabelSettings(false)}>
@@ -535,6 +621,401 @@ export default function ShopeeOrdersPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── 批量編輯彈窗 ──────────────────────────
+interface SkuGroup {
+  shopee_sku_code: string
+  shopee_product_name: string
+  shopee_variation_name: string
+  shopee_product_id: string
+  shopee_variation_id: string
+  customProductName: string
+  customVariationName: string
+  bc_sku_id: string | null
+  bcSkuName: string | null
+  matched_copies: string | null
+  count: number
+}
+
+function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orderIds, onClose, onSaved }: {
+  data: { order: any; items: any[] }[]
+  loading: boolean
+  skuProductNameMap: Map<string, string>
+  variationIdMap: Map<string, string>
+  orderIds: string[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const skuMap = new Map<string, SkuGroup>()
+  for (const d of data) {
+    for (const item of d.items) {
+      const sku = item.shopee_sku_code || ''
+      if (!sku) continue
+      if (skuMap.has(sku)) { skuMap.get(sku)!.count++; continue }
+      skuMap.set(sku, {
+        shopee_sku_code: sku,
+        shopee_product_name: item.shopee_product_name || '',
+        shopee_variation_name: item.shopee_variation_name || '',
+        shopee_product_id: item.shopee_product_id || '',
+        shopee_variation_id: item.shopee_variation_id || '',
+        customProductName: skuProductNameMap.get(sku) || '',
+        customVariationName: variationIdMap.get(item.shopee_variation_id || '') || '',
+        bc_sku_id: item.bc_sku_id,
+        bcSkuName: null,
+        matched_copies: item.matched_copies,
+        count: 1,
+      })
+    }
+  }
+
+  const [groups, setGroups] = useState<SkuGroup[]>(() => [...skuMap.values()])
+  const [saving, setSaving] = useState(false)
+  const [matchingIdx, setMatchingIdx] = useState<number | null>(null)
+  // BC 搜尋（完整篩選）
+  const [bcSearch, setBcSearch] = useState('')
+  const [bcResults, setBcResults] = useState<{ sku_id: string; name: string; capacity: string; speed: string; countries: string[]; country_total: number; copies_options: { copies: string; days: number; costCny: number }[] }[]>([])
+  const [bcSearching, setBcSearching] = useState(false)
+  const [bcCountries, setBcCountries] = useState<{ mcc: string; name: string }[]>([])
+  const [bcDaysOpts, setBcDaysOpts] = useState<string[]>([])
+  const [bcCapacityOpts, setBcCapacityOpts] = useState<string[]>([])
+  const [bcSpeedOpts, setBcSpeedOpts] = useState<string[]>([])
+  const [selCountries, setSelCountries] = useState<string[]>([])
+  const [selDays, setSelDays] = useState('')
+  const [selCapacity, setSelCapacity] = useState('')
+  const [selSpeed, setSelSpeed] = useState('')
+  const [countryOpen, setCountryOpen] = useState(false)
+  const [countryQ, setCountryQ] = useState('')
+  const countryRef = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [sortPrice, setSortPrice] = useState<'asc' | 'desc' | null>(null)
+
+  // 載入 BC SKU 名稱 + BC 篩選選項
+  useEffect(() => {
+    const bcIds = [...new Set(groups.map(g => g.bc_sku_id).filter(Boolean))] as string[]
+    if (bcIds.length > 0) {
+      fetch(`/api/admin/shopee/bc-search?action=names&sku_ids=${bcIds.join(',')}`).then(r => r.json()).then((list: { sku_id: string; name: string }[]) => {
+        const nameMap = new Map(list.map(b => [b.sku_id, b.name]))
+        setGroups(prev => prev.map(g => g.bc_sku_id ? { ...g, bcSkuName: nameMap.get(g.bc_sku_id) || null } : g))
+      })
+    }
+    fetch('/api/admin/shopee/bc-search?action=options').then(r => r.json()).then(d => {
+      setBcCountries(d.countries || [])
+      setBcDaysOpts(d.days || [])
+      setBcCapacityOpts(d.capacities || [])
+      setBcSpeedOpts(d.speeds || [])
+    })
+  }, [])
+
+  // 點擊外部關閉國家下拉
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (countryRef.current && !countryRef.current.contains(e.target as Node)) setCountryOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  function toggleCountry(mcc: string) {
+    setSelCountries(prev => prev.includes(mcc) ? prev.filter(m => m !== mcc) : [...prev, mcc])
+  }
+  const filteredCountries = countryQ
+    ? bcCountries.filter(c => c.name.toLowerCase().includes(countryQ.toLowerCase()) || c.mcc.includes(countryQ))
+    : bcCountries
+
+  function updateGroup(idx: number, field: 'customProductName' | 'customVariationName', value: string) {
+    setGroups(prev => { const n = [...prev]; n[idx] = { ...n[idx], [field]: value }; return n })
+  }
+
+  async function searchBc() {
+    setBcSearching(true)
+    const params = new URLSearchParams({ action: 'search' })
+    if (selCountries.length > 0) params.set('countries', selCountries.join(','))
+    if (selDays) params.set('days', selDays)
+    if (selCapacity) params.set('capacity', selCapacity)
+    if (selSpeed) params.set('speed', selSpeed)
+    if (bcSearch) params.set('search', bcSearch)
+    const res = await fetch(`/api/admin/shopee/bc-search?${params}`)
+    if (res.ok) setBcResults(await res.json())
+    setBcSearching(false)
+  }
+
+  async function matchBc(skuId: string, copies: string) {
+    if (matchingIdx === null) return
+    const g = groups[matchingIdx]
+    // 批次對應 API
+    await fetch('/api/admin/shopee/orders/batch-match', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_ids: orderIds,
+        shopee_sku_code: g.shopee_sku_code,
+        bc_sku_id: skuId,
+        copies,
+        shopee_product_id: g.shopee_product_id,
+        shopee_variation_id: g.shopee_variation_id,
+        shopee_product_name: g.shopee_product_name,
+        shopee_variation_name: g.shopee_variation_name,
+      }),
+    })
+    // 取得 BC 商品名稱
+    const matched = bcResults.find(r => r.sku_id === skuId)
+    // 更新本地狀態
+    setGroups(prev => {
+      const n = [...prev]
+      n[matchingIdx] = { ...n[matchingIdx], bc_sku_id: skuId, bcSkuName: matched?.name || null, matched_copies: copies }
+      return n
+    })
+    setMatchingIdx(null)
+    setBcResults([])
+    setBcSearch('')
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    for (const g of groups) {
+      if (g.customProductName) {
+        await fetch('/api/admin/shopee/id-mappings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'product', shopee_id: g.shopee_sku_code, display_name: g.customProductName }),
+        })
+      }
+      if (g.customVariationName && g.shopee_variation_id) {
+        await fetch('/api/admin/shopee/id-mappings', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'variation', shopee_id: g.shopee_variation_id, display_name: g.customVariationName }),
+        })
+      }
+    }
+    setSaving(false)
+    onSaved()
+    alert('儲存完成')
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+          <h2 className="font-bold">批量編輯商品（{groups.length} 種商品）</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={handleSave} disabled={saving}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? '儲存中...' : '全部儲存'}
+            </button>
+            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? <p className="text-sm text-gray-500">載入中...</p> : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">蝦皮商品</th>
+                  <th className="text-left px-3 py-2 font-medium">商品編碼</th>
+                  <th className="text-left px-3 py-2 font-medium">自訂名稱</th>
+                  <th className="text-left px-3 py-2 font-medium">自訂規格</th>
+                  <th className="text-left px-3 py-2 font-medium">BC 對應</th>
+                  <th className="text-left px-3 py-2 font-medium w-12">數量</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {groups.map((g, idx) => (
+                  <tr key={g.shopee_sku_code} className="hover:bg-gray-50">
+                    <td className="px-3 py-2">
+                      <div className="text-xs font-medium max-w-[200px] truncate" title={g.shopee_product_name}>{g.shopee_product_name}</div>
+                      <div className="text-[10px] text-gray-400 max-w-[200px] truncate" title={g.shopee_variation_name}>{g.shopee_variation_name}</div>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[10px] text-gray-500 max-w-[120px] truncate">{g.shopee_sku_code}</td>
+                    <td className="px-3 py-2">
+                      <input value={g.customProductName} onChange={e => updateGroup(idx, 'customProductName', e.target.value)}
+                        placeholder="自訂名稱" className="w-full px-2 py-1 border border-gray-200 rounded text-xs" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input value={g.customVariationName} onChange={e => updateGroup(idx, 'customVariationName', e.target.value)}
+                        placeholder="自訂規格" className="w-full px-2 py-1 border border-gray-200 rounded text-xs" />
+                    </td>
+                    <td className="px-3 py-2">
+                      {g.bc_sku_id ? (
+                        <div>
+                          <div className="text-[10px] text-green-600 font-medium">{g.bcSkuName || '-'}</div>
+                          <div className="text-[10px] text-gray-400 font-mono">{g.bc_sku_id}</div>
+                          <div className="text-[10px] text-gray-400">copies: {g.matched_copies}</div>
+                          <button onClick={() => setMatchingIdx(idx)} className="text-[10px] text-blue-500 hover:underline">重新對應</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setMatchingIdx(idx)} className="px-2 py-0.5 bg-blue-600 text-white text-[10px] rounded hover:bg-blue-700">對應</button>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-center">{g.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* BC 對應子彈窗（完整篩選） */}
+        {matchingIdx !== null && (
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-[60]" onClick={() => setMatchingIdx(null)}>
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+                <div>
+                  <h2 className="font-bold text-lg">對應 BC 商品</h2>
+                  <p className="text-xs text-gray-500 mt-1">{groups[matchingIdx].shopee_product_name} · {groups[matchingIdx].shopee_variation_name}</p>
+                </div>
+                <button onClick={() => setMatchingIdx(null)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-5 border-b border-gray-100 space-y-3">
+                <div className="grid grid-cols-4 gap-3">
+                  <div ref={countryRef} className="relative">
+                    <button type="button" onClick={() => setCountryOpen(v => !v)}
+                      className="w-full text-left px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+                      {selCountries.length > 0 ? (
+                        <span className="flex items-center gap-1 flex-wrap">
+                          {selCountries.slice(0, 3).map(mcc => {
+                            const c = bcCountries.find(o => o.mcc === mcc)
+                            return <span key={mcc} className="inline-flex items-center gap-0.5 bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-xs">
+                              {c?.name || mcc} <span className="cursor-pointer" onClick={(e) => { e.stopPropagation(); toggleCountry(mcc) }}>×</span>
+                            </span>
+                          })}
+                          {selCountries.length > 3 && <span className="text-xs text-gray-400">+{selCountries.length - 3}</span>}
+                        </span>
+                      ) : <span className="text-gray-400">搜索國家或地區</span>}
+                    </button>
+                    {countryOpen && (
+                      <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
+                        <div className="p-2 border-b border-gray-100">
+                          <input value={countryQ} onChange={e => setCountryQ(e.target.value)} placeholder="搜索國家..."
+                            className="w-full px-2 py-1.5 bg-gray-50 rounded text-sm" autoFocus />
+                        </div>
+                        {selCountries.length > 0 && (
+                          <div className="px-3 py-1.5 flex items-center justify-between border-b border-gray-100">
+                            <span className="text-xs text-gray-500">已選 {selCountries.length} 個</span>
+                            <button onClick={() => setSelCountries([])} className="text-xs text-blue-600 hover:underline">清除全部</button>
+                          </div>
+                        )}
+                        <div className="max-h-48 overflow-y-auto">
+                          {filteredCountries.map(c => (
+                            <label key={c.mcc} className={`flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm ${selCountries.includes(c.mcc) ? 'bg-blue-50' : ''}`}>
+                              <input type="checkbox" checked={selCountries.includes(c.mcc)} onChange={() => toggleCountry(c.mcc)} className="accent-blue-600" />
+                              {c.name}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <select value={selDays} onChange={e => setSelDays(e.target.value)} className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+                    <option value="">全部天數</option>
+                    {bcDaysOpts.map(d => <option key={d} value={d}>{d} 天</option>)}
+                  </select>
+                  <select value={selCapacity} onChange={e => setSelCapacity(e.target.value)} className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+                    <option value="">選擇流量</option>
+                    {bcCapacityOpts.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <select value={selSpeed} onChange={e => setSelSpeed(e.target.value)} className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+                    <option value="">選擇限速</option>
+                    {bcSpeedOpts.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input value={bcSearch} onChange={e => setBcSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && searchBc()}
+                    placeholder="搜索套餐名稱或 SKU ID" className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  <span className="text-xs text-gray-400 whitespace-nowrap">符合：{bcResults.length} 個</span>
+                  <button onClick={searchBc} disabled={bcSearching}
+                    className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                    {bcSearching ? '搜尋中...' : '查 詢'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                {bcResults.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-12">輸入篩選條件後點擊查詢</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead className="text-gray-500 bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="text-left px-4 py-2.5 font-medium">套餐名稱</th>
+                        <th className="text-left px-4 py-2.5 font-medium w-16">流量</th>
+                        <th className="text-left px-4 py-2.5 font-medium w-16">限速</th>
+                        <th className="text-left px-4 py-2.5 font-medium w-36">適用國家</th>
+                        <th className="text-right px-4 py-2.5 font-medium w-20">天數</th>
+                        <th className="text-right px-4 py-2.5 font-medium w-24 cursor-pointer select-none hover:text-blue-600" onClick={() => setSortPrice(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}>
+                          結算價 {sortPrice === 'asc' ? '↑' : sortPrice === 'desc' ? '↓' : ''}
+                        </th>
+                        <th className="text-center px-4 py-2.5 font-medium w-14">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {(() => {
+                        let sorted = bcResults
+                        if (sortPrice && selDays) {
+                          const target = parseInt(selDays)
+                          sorted = [...bcResults].sort((a, b) => {
+                            const aP = a.copies_options.find(o => o.days === target)?.costCny ?? Infinity
+                            const bP = b.copies_options.find(o => o.days === target)?.costCny ?? Infinity
+                            return sortPrice === 'asc' ? aP - bP : bP - aP
+                          })
+                        }
+                        return sorted
+                      })().map((bc, i) => {
+                        const isExp = expanded.has(bc.sku_id)
+                        const toggleExp = () => setExpanded(prev => { const n = new Set(prev); n.has(bc.sku_id) ? n.delete(bc.sku_id) : n.add(bc.sku_id); return n })
+                        const matchedOpt = selDays ? bc.copies_options.find(o => o.days === parseInt(selDays)) : null
+                        return (
+                          <Fragment key={`${bc.sku_id}-${i}`}>
+                            <tr className={`hover:bg-blue-50/50 cursor-pointer ${isExp ? 'bg-blue-50/30' : ''}`} onClick={toggleExp}>
+                              <td className="px-4 py-2.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-gray-400 flex-shrink-0 w-3">{isExp ? '▾' : '▸'}</span>
+                                  <div>
+                                    <div className={`font-medium text-sm ${isExp ? 'text-blue-700' : 'truncate max-w-[350px]'}`}>{bc.name}</div>
+                                    <div className="text-gray-400 font-mono text-[10px]">{bc.sku_id}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5">{bc.capacity}</td>
+                              <td className="px-4 py-2.5">{bc.speed}</td>
+                              <td className="px-4 py-2.5">
+                                <div className="flex flex-wrap gap-0.5">
+                                  {bc.countries.map((c, j) => <span key={j} className="px-1 bg-gray-100 rounded text-[10px]">{c}</span>)}
+                                  {bc.country_total > 5 && <span className="text-[10px] text-gray-400">+{bc.country_total - 5}</span>}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-medium">{matchedOpt ? `${matchedOpt.days} 天` : `${bc.copies_options.length} 規格`}</td>
+                              <td className="px-4 py-2.5 text-right font-medium text-blue-600">{matchedOpt ? `¥${matchedOpt.costCny.toFixed(2)}` : (isExp ? '' : '展開查看')}</td>
+                              <td className="px-4 py-2.5 text-center">
+                                {matchedOpt ? (
+                                  <button onClick={(e) => { e.stopPropagation(); matchBc(bc.sku_id, matchedOpt.copies) }}
+                                    className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">選取</button>
+                                ) : '📋'}
+                              </td>
+                            </tr>
+                            {isExp && bc.copies_options.map((opt, oi) => (
+                              <tr key={`${bc.sku_id}-opt-${oi}`} className={`${oi % 2 === 0 ? 'bg-white' : 'bg-blue-50/20'} hover:bg-blue-50/50`}>
+                                <td colSpan={4}></td>
+                                <td className="px-4 py-2 text-right font-medium">{opt.days} 天</td>
+                                <td className="px-4 py-2 text-right font-medium text-blue-600">¥{opt.costCny.toFixed(2)}</td>
+                                <td className="px-4 py-2 text-center">
+                                  <button onClick={(e) => { e.stopPropagation(); matchBc(bc.sku_id, opt.copies) }}
+                                    className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">選取</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

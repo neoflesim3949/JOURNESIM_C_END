@@ -21,6 +21,20 @@ export async function POST(request: Request) {
   return NextResponse.json(data)
 }
 
+// PATCH — 更新帳號
+export async function PATCH(request: Request) {
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { id, ...updates } = await request.json()
+  if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
+  const supabase = createAdminClient()
+  const allowed: Record<string, unknown> = {}
+  if (updates.name !== undefined) allowed.name = updates.name
+  if (updates.description !== undefined) allowed.description = updates.description || null
+  if (updates.excel_password !== undefined) allowed.excel_password = updates.excel_password || null
+  await supabase.from('shopee_accounts').update(allowed).eq('id', id)
+  return NextResponse.json({ ok: true })
+}
+
 // DELETE — 刪除帳號
 export async function DELETE(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

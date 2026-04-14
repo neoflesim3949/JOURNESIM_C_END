@@ -215,8 +215,14 @@ export default function PackageDetailPage() {
       </div>
 
       {/* Batch bar */}
+      <div className="mt-4 flex items-center gap-3">
+        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+          <input type="checkbox" checked={plans.length > 0 && selectedPlanIds.size === plans.length} onChange={() => { if (selectedPlanIds.size === plans.length) setSelectedPlanIds(new Set()); else setSelectedPlanIds(new Set(plans.map(p => p.id))) }} className="accent-blue-600" /> 全選（{plans.length}）
+        </label>
+      </div>
+
       {(selectedPlanIds.size > 0 || hasChanges) && (
-        <div className="mt-4 flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+        <div className="mt-2 flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-xl">
           {selectedPlanIds.size > 0 && (
             <>
               <span className="text-sm font-medium text-blue-700">已選 {selectedPlanIds.size} 個</span>

@@ -25,12 +25,12 @@ export async function GET(request: Request) {
 
     // 從 bc_products 取天數和流量選項
     const { data: products } = await supabase.from('bc_products')
-      .select('days, high_flow_size, capacity, plan_type, prices')
+      .select('days, high_flow_size, capacity, plan_type, prices, limit_flow_speed')
 
     const daysSet = new Set<number>()
     const capMap = new Map<string, boolean>()
+    const speedSet = new Set<string>()
     for (const p of products || []) {
-      // 天數 = unitDays × copies
       const unitDays = Number(p.days) || 1
       const prices = p.prices as { copies: string }[] | null
       if (prices) {
@@ -40,12 +40,15 @@ export async function GET(request: Request) {
       }
       const raw = p.high_flow_size || p.capacity
       if (raw) capMap.set(formatCapacity(raw, p.plan_type === '1'), true)
+      const spd = formatSpeed(p.limit_flow_speed)
+      if (spd && spd !== '-') speedSet.add(spd)
     }
 
     return NextResponse.json({
       countries: (countries || []).map(c => ({ mcc: c.mcc, name: c.name_zh || c.name })),
       days: Array.from(daysSet).sort((a, b) => a - b).map(String),
       capacities: Array.from(capMap.keys()).sort(),
+      speeds: Array.from(speedSet).sort(),
     })
   }
 
@@ -53,10 +56,11 @@ export async function GET(request: Request) {
   const countries = searchParams.get('countries') || ''
   const selectedDays = searchParams.get('days') || ''
   const capacity = searchParams.get('capacity') || ''
+  const speed = searchParams.get('speed') || ''
   const search = searchParams.get('search') || ''
 
   // 至少要有一個篩選條件
-  if (!countries && !selectedDays && !capacity && !search) {
+  if (!countries && !selectedDays && !capacity && !speed && !search) {
     return NextResponse.json([])
   }
 
@@ -107,6 +111,11 @@ export async function GET(request: Request) {
   // 流量篩選
   if (capacity) {
     filtered = filtered.filter(p => formatCapacity(p.high_flow_size || p.capacity, p.plan_type === '1') === capacity)
+  }
+
+  // 限速篩選
+  if (speed) {
+    filtered = filtered.filter(p => formatSpeed(p.limit_flow_speed) === speed)
   }
 
   // 天數篩選（天數 = unitDays × copies，任一 copies 匹配就保留）
