@@ -28,6 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       refundType: '0',
       unSubscribeFlow: '1',
       returnCardOrNot: '0',
+      receivingState: '1',
     }
     console.log('========== [BC F017 售後申請] ==========')
     console.log('[BC F017] 蝦皮訂單ID:', id)
