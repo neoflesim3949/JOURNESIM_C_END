@@ -107,7 +107,7 @@ export default function ShopeeOrderDetailPage() {
   // 蝦皮帳號
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map())
   // 列印彈窗
-  const [printModal, setPrintModal] = useState<'detail' | 'product' | null>(null)
+  const [printModal, setPrintModal] = useState<'detail' | 'product' | 'receipt' | null>(null)
 
   async function load() {
     const [orderRes, idRes, accRes] = await Promise.all([
@@ -240,6 +240,9 @@ export default function ShopeeOrderDetailPage() {
           </button>
           <button onClick={() => setPrintModal('product')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
             <Printer className="w-4 h-4" /> 商品標籤
+          </button>
+          <button onClick={() => setPrintModal('receipt')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+            <Printer className="w-4 h-4" /> 收據
           </button>
           {canSubmitBc && (
             <button onClick={submitBcOrder} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
@@ -475,7 +478,7 @@ export default function ShopeeOrderDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPrintModal(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : '商品標籤預覽'}</h2>
+              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : '收據預覽'}</h2>
               <div className="flex items-center gap-2">
                 <button onClick={() => {
                   const el = document.getElementById('print-area')
@@ -483,15 +486,20 @@ export default function ShopeeOrderDetailPage() {
                   const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
                   if (!w) return
                   if (printModal === 'product') {
-                    // 商品標籤：頁面尺寸 30mm×15mm，每標籤一頁
                     w.document.write(`<html><head><style>
                       @page{size:30mm 15mm;margin:0}
                       body{margin:0;padding:0;font-family:sans-serif}
                       body>div{gap:0!important}
                       .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1mm;page-break-after:always;border:none!important}
                     </style></head><body>${el.innerHTML}</body></html>`)
+                  } else if (printModal === 'receipt') {
+                    w.document.write(`<html><head><style>
+                      @page{size:A5 landscape;margin:5mm}
+                      body{margin:0;font-family:'Microsoft JhengHei','PingFang TC',sans-serif}
+                      table{border-collapse:collapse;width:100%}
+                      td,th{border:1px solid #000;padding:3px 6px;font-size:11px}
+                    </style></head><body>${el.innerHTML}</body></html>`)
                   } else {
-                    // 明細標籤：頁面尺寸 100mm×150mm
                     w.document.write(`<html><head><style>
                       @page{size:100mm 150mm;margin:0}
                       body{margin:0;font-family:sans-serif}
@@ -538,7 +546,7 @@ export default function ShopeeOrderDetailPage() {
                   {order.buyer_note && <div style={{ marginTop: '3mm', padding: '2mm', background: '#fff3cd', borderRadius: '2mm', fontSize: '10px' }}><strong>買家備註：</strong>{order.buyer_note}</div>}
                   <div style={{ marginTop: '3mm', textAlign: 'right', fontWeight: 'bold' }}>金額：NT$ {order.buyer_total_payment}</div>
                 </div>
-              ) : (
+              ) : printModal === 'product' ? (
                 /* 商品標籤 30mm × 15mm — 每標籤獨立一頁，頁面尺寸即標籤尺寸 */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
                   {(() => {
@@ -563,6 +571,9 @@ export default function ShopeeOrderDetailPage() {
                     )
                   })()}
                 </div>
+              ) : (
+                /* 收據 A5 橫式 */
+                <ReceiptTemplate order={order} items={items} skuProductNameMap={skuProductNameMap} variationIdMap={variationIdMap} />
               )}
             </div>
           </div>
@@ -583,6 +594,112 @@ export default function ShopeeOrderDetailPage() {
 }
 
 // 行內可編輯的 ID 對應名稱
+// ── 收據模板（A5 橫式）──────────────────────────
+function numberToChinese(n: number): string {
+  const digits = ['零', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖']
+  const units = ['', '拾', '佰', '仟']
+  const bigUnits = ['', '萬', '億']
+  if (n === 0) return '零'
+  const str = Math.floor(n).toString()
+  let result = ''
+  const len = str.length
+  for (let i = 0; i < len; i++) {
+    const d = parseInt(str[i])
+    const pos = len - 1 - i
+    const unitIdx = pos % 4
+    const bigIdx = Math.floor(pos / 4)
+    if (d !== 0) {
+      result += digits[d] + units[unitIdx]
+      if (unitIdx === 0 && bigIdx > 0) result += bigUnits[bigIdx]
+    } else {
+      if (!result.endsWith('零') && i < len - 1) result += '零'
+    }
+  }
+  result = result.replace(/零+$/, '')
+  return result + '元整'
+}
+
+function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap }: {
+  order: ShopeeOrder; items: ShopeeItem[]
+  skuProductNameMap: Map<string, string>; variationIdMap: Map<string, string>
+}) {
+  const date = order.order_date ? new Date(order.order_date) : new Date()
+  const dateStr = `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`
+  const total = items.reduce((sum, i) => sum + ((i.sale_price ?? i.original_price ?? 0) * i.quantity), 0)
+  // 最多 6 行商品
+  const rows: { name: string; qty: number; price: number; amount: number }[] = items.map(item => ({
+    name: (skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name || '') +
+      (variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name ? ' ' + (variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name || '') : ''),
+    qty: item.quantity,
+    price: item.sale_price ?? item.original_price ?? 0,
+    amount: (item.sale_price ?? item.original_price ?? 0) * item.quantity,
+  }))
+  while (rows.length < 6) rows.push({ name: '', qty: 0, price: 0, amount: 0 })
+
+  const cellStyle = { border: '1px solid #000', padding: '4px 8px', fontSize: '11px' }
+  const headerStyle = { ...cellStyle, fontWeight: 'bold' as const, textAlign: 'center' as const, backgroundColor: '#f5f5f5' }
+
+  return (
+    <div style={{ width: '210mm', minHeight: '148mm', padding: '8mm 10mm', fontFamily: "'Microsoft JhengHei','PingFang TC',sans-serif", fontSize: '12px', border: '1px solid #ccc', margin: '0 auto', boxSizing: 'border-box' }}>
+      <h1 style={{ textAlign: 'center', fontSize: '20px', fontWeight: 'bold', margin: '0 0 2mm 0', letterSpacing: '8px' }}>國際電話卡收據</h1>
+      <div style={{ textAlign: 'center', fontSize: '11px', marginBottom: '4mm' }}>{dateStr}</div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '1mm' }}>
+        <span>買　受　人：{order.buyer_account || order.recipient_name || ''}</span>
+        <span>NO.{order.shopee_order_number}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '1mm' }}>
+        <span>統 一 編 號：</span>
+        <span>收執聯</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3mm' }}>
+        <span>地　　　址：</span>
+        <span>第1頁/共1頁</span>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm' }}>
+        <thead>
+          <tr>
+            <th style={{ ...headerStyle, width: '45%' }}>摘要</th>
+            <th style={{ ...headerStyle, width: '10%' }}>數量</th>
+            <th style={{ ...headerStyle, width: '15%' }}>單價</th>
+            <th style={{ ...headerStyle, width: '15%' }}>金額</th>
+            <th style={{ ...headerStyle, width: '15%' }}>備註</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              <td style={cellStyle}>{r.name || '\u00A0'}</td>
+              <td style={{ ...cellStyle, textAlign: 'center' }}>{r.qty > 0 ? r.qty : ''}</td>
+              <td style={{ ...cellStyle, textAlign: 'right' }}>{r.price > 0 ? `$${r.price}` : ''}</td>
+              <td style={{ ...cellStyle, textAlign: 'right' }}>{r.amount > 0 ? `$${r.amount}` : ''}</td>
+              <td style={{ ...cellStyle, textAlign: 'center' }}>{i === 2 ? '營業人蓋用統一發票專用章' : ''}</td>
+            </tr>
+          ))}
+          <tr>
+            <td colSpan={2} style={{ ...cellStyle, textAlign: 'center', fontWeight: 'bold' }}>總　計</td>
+            <td style={cellStyle}></td>
+            <td style={{ ...cellStyle, textAlign: 'right', fontWeight: 'bold' }}>${total}</td>
+            <td style={cellStyle}></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={{ display: 'flex', fontSize: '11px', marginBottom: '3mm' }}>
+        <span style={{ width: '100px' }}>總計新台幣</span>
+        <span>（中文大寫）</span>
+        <span style={{ marginLeft: '8px', fontWeight: 'bold' }}>{numberToChinese(total)}</span>
+      </div>
+
+      <div style={{ fontSize: '9px', color: '#666', lineHeight: 1.6 }}>
+        本收據依據財政部 88 年 9 月 14 日台財稅第 881943611 號函核准使用，由銷售人自行印製，不另開立統一發票。<br />
+        因國際電話卡適用零稅率，本收據不得作為申報扣抵銷項稅額之憑證。
+      </div>
+    </div>
+  )
+}
+
 function EditableIdName({ value, onSave, placeholder }: { value: string; onSave: (name: string) => void; placeholder: string }) {
   const [editing, setEditing] = useState(false)
   const [input, setInput] = useState(value)
