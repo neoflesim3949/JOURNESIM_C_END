@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 import { QRCodeCanvas } from 'qrcode.react'
 
@@ -19,6 +19,8 @@ export default function EsimInstallPage({ params }: { params: Promise<{ iccid: s
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState<string | null>(null)
+  const [qrImgUrl, setQrImgUrl] = useState<string | null>(null)
+  const qrContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetch(`/api/esim/install/${iccid}`)
@@ -30,6 +32,15 @@ export default function EsimInstallPage({ params }: { params: Promise<{ iccid: s
       .catch(() => setError('載入失敗'))
       .finally(() => setLoading(false))
   }, [iccid])
+
+  // 把 QRCodeCanvas 畫到 canvas 後轉成圖片 dataURL，讓手機長按可下載
+  useEffect(() => {
+    if (!data?.lpa_code || data.qr_code_url) return
+    const canvas = qrContainerRef.current?.querySelector('canvas')
+    if (canvas) {
+      try { setQrImgUrl(canvas.toDataURL('image/png')) } catch { }
+    }
+  }, [data])
 
   // 從 LPA:1$SM-DP$ACTIVATION 格式解析 SM-DP 和 ActivationCode
   const parsed = (() => {
@@ -85,18 +96,31 @@ export default function EsimInstallPage({ params }: { params: Promise<{ iccid: s
         <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-4 shadow-sm">
           {data.qr_code_url ? (
             <div className="flex justify-center">
-              <img src={data.qr_code_url} alt="eSIM QR Code" className="w-64 h-64 object-contain" />
+              <img src={data.qr_code_url} alt="eSIM QR Code" className="w-64 h-64 object-contain"
+                style={{ touchAction: 'manipulation' }} />
             </div>
           ) : data.lpa_code ? (
-            <div className="flex justify-center">
-              <QRCodeCanvas value={data.lpa_code} size={256} level="M" marginSize={0} />
-            </div>
+            <>
+              {/* 實際顯示：圖片（手機長按可下載） */}
+              {qrImgUrl ? (
+                <div className="flex justify-center">
+                  <img src={qrImgUrl} alt={`eSIM-${data.iccid}`} className="w-64 h-64 object-contain"
+                    style={{ touchAction: 'manipulation' }} />
+                </div>
+              ) : (
+                <div className="w-64 h-64 mx-auto flex items-center justify-center text-gray-400 text-sm">產生 QR 中⋯</div>
+              )}
+              {/* 離屏 canvas：用來產生 dataURL */}
+              <div ref={qrContainerRef} style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+                <QRCodeCanvas value={data.lpa_code} size={512} level="M" marginSize={0} />
+              </div>
+            </>
           ) : (
             <div className="w-64 h-64 mx-auto bg-gray-100 rounded flex items-center justify-center text-gray-400 text-sm">
               無 QR Code
             </div>
           )}
-          <div className="mt-4 text-center text-xs text-gray-500">eSIM QR Code</div>
+          <div className="mt-4 text-center text-xs text-gray-500">eSIM QR Code <span className="text-gray-400">·</span> 長按可下載安裝</div>
         </div>
 
         {/* ICCID */}
