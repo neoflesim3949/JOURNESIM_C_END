@@ -2,7 +2,8 @@
 
 import { Fragment, useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
-import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3, Plus } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
@@ -109,6 +110,12 @@ export default function ShopeeOrdersPage() {
   const [importResult, setImportResult] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const settlementFileRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
+  const [showManualOrder, setShowManualOrder] = useState(false)
+  const [manualOrderNumber, setManualOrderNumber] = useState('')
+  const [manualBuyer, setManualBuyer] = useState('')
+  const [manualAccountId, setManualAccountId] = useState('')
+  const [creating, setCreating] = useState(false)
   const [showLabelSettings, setShowLabelSettings] = useState(false)
   const [expiryDate, setExpiryDate] = useState('')
   const [labelSettings, setLabelSettings] = useState({ line1: 12, line2: 12, line3: 10 })
@@ -201,6 +208,24 @@ export default function ShopeeOrdersPage() {
       throw new Error(data.error || '解析失敗')
     }
     return data.rows
+  }
+
+  async function createManualOrder() {
+    if (!manualOrderNumber.trim()) { alert('請輸入訂單編號'); return }
+    setCreating(true)
+    try {
+      const res = await fetch('/api/admin/shopee/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shopee_order_number: manualOrderNumber.trim(),
+          buyer_account: manualBuyer.trim() || null,
+          shopee_account_id: manualAccountId || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) { alert(data.error || '建立失敗'); return }
+      router.push(`/admin/shopee/orders/${data.order.id}`)
+    } finally { setCreating(false) }
   }
 
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -313,6 +338,10 @@ export default function ShopeeOrdersPage() {
               </button>
             </>
           )}
+          <button onClick={() => setShowManualOrder(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">
+            <Plus className="w-4 h-4" /> 手動新增訂單
+          </button>
           <label className={`flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer ${importing ? 'opacity-50' : ''}`}>
             <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入訂單 Excel'}
             <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleImport} className="hidden" disabled={importing} />
@@ -421,7 +450,12 @@ export default function ShopeeOrdersPage() {
                 const s = STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' }
                 const fs = getFinanceStatus(o)
                 const pendingItems = o.shopee_order_items?.filter(i => i.status === 'pending').length || 0
-                const fmtDate = (d: string | null) => d ? d.slice(0, 10) : '-'
+                const fmtDate = (d: string | null) => {
+                  if (!d) return '-'
+                  const dt = new Date(d)
+                  if (isNaN(dt.getTime())) return d.slice(0, 10)
+                  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt)
+                }
                 const simplifyStatus = (st: string | null) => {
                   if (!st) return '-'
                   if (st.includes('已完成')) return '已完成'
@@ -520,7 +554,7 @@ export default function ShopeeOrdersPage() {
                       <span>蝦皮訂單：{d.order.shopee_order_number}</span>
                       {d.order.shopee_account_id && <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666' }}>{accountMap.get(d.order.shopee_account_id) || '-'}</span>}
                     </div>
-                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{d.order.order_date}</div>
+                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{d.order.order_date ? new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d.order.order_date)) : '-'}</div>
                     <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}><span><strong>收件人：</strong>{d.order.recipient_name}</span><span><strong>電話：</strong>{d.order.recipient_phone}</span></div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -594,11 +628,56 @@ export default function ShopeeOrdersPage() {
       )}
 
       {/* 標籤字體設定彈窗 */}
+      {showManualOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !creating && setShowManualOrder(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="font-bold text-lg">手動新增蝦皮訂單</h2>
+              <button onClick={() => !creating && setShowManualOrder(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="text-xs text-gray-500">蝦皮訂單編號 <span className="text-red-500">*</span></label>
+                <input value={manualOrderNumber} onChange={e => setManualOrderNumber(e.target.value)}
+                  placeholder="例：26041866A1PX49"
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded text-sm font-mono" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">蝦皮帳號</label>
+                <select value={manualAccountId} onChange={e => setManualAccountId(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded text-sm">
+                  <option value="">-</option>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500">買家帳號</label>
+                <input value={manualBuyer} onChange={e => setManualBuyer(e.target.value)}
+                  placeholder="蝦皮買家 ID"
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded text-sm" />
+              </div>
+              <div className="text-xs text-gray-500 pt-2">
+                建立後會進入訂單詳情頁面，可在那裡新增商品明細、收件資訊等。
+              </div>
+            </div>
+            <div className="p-5 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setShowManualOrder(false)} disabled={creating}
+                className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
+              <button onClick={createManualOrder} disabled={creating}
+                className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50">
+                {creating ? '建立中⋯' : '建立並進入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showLabelSettings && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLabelSettings(false)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-            <h2 className="font-bold mb-4">商品標籤字體設定</h2>
+            <h2 className="font-bold mb-4">標籤 / 收據設定</h2>
             <div className="space-y-3">
+              <p className="text-xs text-gray-500 font-medium">商品標籤字體</p>
               {([['line1', '第一行（商品名稱）'], ['line2', '第二行（規格名稱）'], ['line3', '第三行（使用期限）']] as const).map(([key, label]) => (
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-sm">{label}</span>
@@ -608,6 +687,33 @@ export default function ShopeeOrdersPage() {
                   </div>
                 </div>
               ))}
+              <div className="border-t border-gray-200 pt-3 mt-3">
+                <p className="text-xs text-gray-500 font-medium mb-2">收據印章圖片</p>
+                {typeof window !== 'undefined' && localStorage.getItem('receipt_stamp_url') ? (
+                  <div className="flex items-center gap-3">
+                    <img src={localStorage.getItem('receipt_stamp_url')!} alt="印章" style={{ maxHeight: '60px' }} />
+                    <button onClick={() => { localStorage.removeItem('receipt_stamp_url'); setShowLabelSettings(false); setTimeout(() => setShowLabelSettings(true), 0) }}
+                      className="text-xs text-red-500 hover:underline">移除</button>
+                  </div>
+                ) : (
+                  <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                    <Upload className="w-4 h-4 text-gray-400" />
+                    <span className="text-xs text-gray-500">上傳印章圖片</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const form = new FormData()
+                      form.append('file', file)
+                      const res = await fetch('/api/admin/media', { method: 'POST', body: form })
+                      if (res.ok) {
+                        const { url } = await res.json()
+                        localStorage.setItem('receipt_stamp_url', url)
+                        setShowLabelSettings(false); setTimeout(() => setShowLabelSettings(true), 0)
+                      }
+                    }} />
+                  </label>
+                )}
+              </div>
             </div>
             <div className="mt-4 p-3 bg-gray-50 rounded-lg text-center" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', border: '1px solid #ccc' }}>
               <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2 }}>商品名稱預覽</div>

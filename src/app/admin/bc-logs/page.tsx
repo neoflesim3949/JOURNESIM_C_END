@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronRight, PlayCircle } from 'lucide-react'
 
 interface BcLog {
   id: string
@@ -52,6 +52,16 @@ export default function BcLogsPage() {
 
   function toggleExpand(id: string) {
     setExpandedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }
+
+  async function replayLog(logId: string) {
+    if (!confirm('重新解析這筆 webhook？將依目前邏輯更新相關資料。')) return
+    const res = await fetch(`/api/admin/bc-logs/${logId}/replay`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '重放失敗'); return }
+    const s = data.summary
+    alert(`重放完成\n類型：${s.tradeType}\n匹配：${s.matched} 筆\n更新：${s.updated} 筆${s.note ? `\n備註：${s.note}` : ''}`)
+    load()
   }
 
   const totalPages = Math.ceil(total / 50)
@@ -128,6 +138,14 @@ export default function BcLogsPage() {
                 </div>
                 {expanded && (
                   <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
+                    {log.direction === 'incoming' && (
+                      <div className="mb-3 flex justify-end">
+                        <button onClick={() => replayLog(log.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white text-xs rounded hover:bg-amber-700">
+                          <PlayCircle className="w-3.5 h-3.5" /> 重新解析
+                        </button>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <h4 className="text-xs font-semibold text-gray-500 mb-1">Request</h4>

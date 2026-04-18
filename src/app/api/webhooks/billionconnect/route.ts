@@ -51,6 +51,111 @@ export async function POST(request: Request) {
       // channelSubOrderId = 我們的 SKU 單號（E1, E2...）
       const { orderId, channelOrderId, subOrderList } = tradeData
 
+      // ===== 蝦皮訂單（manual eSIM）=====
+      // 先用 channelOrderId 查；查不到再用 bc_order_id 或個別 channelSubOrderId 查
+      {
+        let shopeeItems: { id: string; shopee_order_id: string; bc_channel_sub_order_id: string | null }[] | null = null
+        if (channelOrderId) {
+          const { data } = await supabase.from('shopee_order_items')
+            .select('id, shopee_order_id, bc_channel_sub_order_id')
+            .eq('bc_channel_order_id', channelOrderId)
+          shopeeItems = data
+        }
+        if ((!shopeeItems || shopeeItems.length === 0) && orderId) {
+          const { data } = await supabase.from('shopee_order_items')
+            .select('id, shopee_order_id, bc_channel_sub_order_id')
+            .eq('bc_order_id', orderId)
+          shopeeItems = data
+        }
+        if ((!shopeeItems || shopeeItems.length === 0) && subOrderList?.length) {
+          const channelSubIds = subOrderList.map((s: { channelSubOrderId: string }) => s.channelSubOrderId).filter(Boolean)
+          if (channelSubIds.length > 0) {
+            const { data } = await supabase.from('shopee_order_items')
+              .select('id, shopee_order_id, bc_channel_sub_order_id')
+              .in('bc_channel_sub_order_id', channelSubIds)
+            shopeeItems = data
+          }
+        }
+
+        if (shopeeItems && shopeeItems.length > 0) {
+          console.log('[N009] 蝦皮訂單匹配到', shopeeItems.length, '個品項')
+          const subs = subOrderList || []
+          const unmatchedSubs: typeof subs = []
+          const usedIds = new Set<string>()
+          for (const sub of subs) {
+            const { channelSubOrderId, iccid, qrCodeUrl, qrCodeContent } = sub
+            const target = shopeeItems.find(it => it.bc_channel_sub_order_id === channelSubOrderId && !usedIds.has(it.id))
+            if (!target) {
+              unmatchedSubs.push(sub)
+              continue
+            }
+            usedIds.add(target.id)
+            await supabase.from('shopee_order_items').update({
+              iccid: iccid ? (Array.isArray(iccid) ? iccid : [iccid]) : null,
+              qr_code_url: qrCodeUrl || null,
+              lpa_code: qrCodeContent || null,
+              bc_sub_order_id: sub.subOrderId || null,
+              bc_order_id: orderId,
+              status: 'bc_ordered',
+            }).eq('id', target.id)
+          }
+
+          // 未匹配的 sub（qty>1 未先拆單）→ 克隆第一筆建新 row
+          if (unmatchedSubs.length > 0) {
+            const { data: template } = await supabase.from('shopee_order_items')
+              .select('*').eq('id', shopeeItems[0].id).single()
+            if (template) {
+              for (const sub of unmatchedSubs) {
+                const iccids = sub.iccid ? (Array.isArray(sub.iccid) ? sub.iccid : [sub.iccid]) : null
+                await supabase.from('shopee_order_items').insert({
+                  shopee_order_id: template.shopee_order_id,
+                  shopee_product_name: template.shopee_product_name,
+                  shopee_product_id: template.shopee_product_id,
+                  shopee_variation_name: template.shopee_variation_name,
+                  shopee_variation_id: template.shopee_variation_id,
+                  shopee_sku_code: template.shopee_sku_code,
+                  original_price: template.original_price,
+                  sale_price: template.sale_price,
+                  quantity: 1,
+                  matched_package_id: template.matched_package_id,
+                  matched_plan_id: template.matched_plan_id,
+                  matched_copies: template.matched_copies,
+                  bc_sku_id: template.bc_sku_id,
+                  cost_cny: template.cost_cny,
+                  cost_twd: template.cost_twd,
+                  is_manual: template.is_manual,
+                  delivery_type: 'esim',
+                  iccid: iccids,
+                  qr_code_url: sub.qrCodeUrl || null,
+                  lpa_code: sub.qrCodeContent || null,
+                  bc_sub_order_id: sub.subOrderId || null,
+                  bc_order_id: orderId,
+                  bc_channel_order_id: channelOrderId || template.bc_channel_order_id,
+                  bc_channel_sub_order_id: sub.channelSubOrderId || null,
+                  status: 'bc_ordered',
+                })
+              }
+              if ((template.quantity || 1) > 1) {
+                await supabase.from('shopee_order_items').update({ quantity: 1 }).eq('id', template.id)
+              }
+            }
+          }
+
+          // 檢查蝦皮訂單是否全部完成
+          const shopeeOrderId = shopeeItems[0].shopee_order_id
+          const { data: allItems } = await supabase.from('shopee_order_items')
+            .select('iccid, bc_order_id, delivery_type, qr_code_url').eq('shopee_order_id', shopeeOrderId)
+          const allDone = (allItems || []).every(i =>
+            i.bc_order_id && (i.delivery_type === 'esim' ? !!i.qr_code_url : (i.iccid && (i.iccid as string[]).length > 0))
+          )
+          await supabase.from('shopee_orders').update({
+            internal_status: allDone ? 'completed' : 'processing',
+            updated_at: new Date().toISOString(),
+          }).eq('id', shopeeOrderId)
+          break
+        }
+      }
+
       // 找到子訂單
       const { data: subOrder } = await supabase.from('sub_orders')
         .select('id, order_id').eq('sub_order_number', channelOrderId).single()

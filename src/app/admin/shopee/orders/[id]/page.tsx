@@ -1,9 +1,9 @@
 'use client'
 
 import { Fragment, useEffect, useState, useRef } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Printer, Send, X, Undo2 } from 'lucide-react'
+import { ArrowLeft, Save, Printer, Send, X, Undo2, Split, Plus, Trash2 } from 'lucide-react'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
 function generateCode128SVG(text: string, height = 30, barWidth = 1.5): string {
@@ -38,6 +38,10 @@ interface ShopeeItem {
   bc_sku_id: string | null; iccid: string[] | null; bc_order_id: string | null; bc_sub_order_id: string | null
   cost_cny: number | null; cost_twd: number | null
   status: string
+  is_manual?: boolean
+  delivery_type?: 'sim' | 'esim'
+  qr_code_url?: string | null
+  lpa_code?: string | null
 }
 
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
@@ -56,6 +60,7 @@ interface ShopeeOrder {
   buyer_note: string | null; seller_note: string | null; internal_status: string
   expiry_date: string | null
   shopee_account_id: string | null
+  is_manual?: boolean
 }
 
 interface Settlement {
@@ -84,6 +89,28 @@ interface BcResult {
   countries: string[]; country_total: number
 }
 
+// 台灣時區格式化 (Asia/Taipei)
+function formatTW(value: string | null | undefined, withTime = true): string {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return value
+  const fmt = new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    ...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}),
+  })
+  return fmt.format(d)
+}
+
+// 用於 datetime-local input 的 TW 時間字串
+function toTWDatetimeLocal(value: string | null | undefined): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return ''
+  const tw = new Date(d.getTime() + 8 * 60 * 60 * 1000)
+  return tw.toISOString().slice(0, 16)
+}
+
 const ITEM_STATUS: Record<string, { label: string; color: string }> = {
   pending: { label: '待對應', color: 'bg-orange-100 text-orange-700' },
   matched: { label: '已對應', color: 'bg-blue-100 text-blue-700' },
@@ -94,6 +121,7 @@ const ITEM_STATUS: Record<string, { label: string; color: string }> = {
 
 export default function ShopeeOrderDetailPage() {
   const { id } = useParams() as { id: string }
+  const router = useRouter()
   const [order, setOrder] = useState<ShopeeOrder | null>(null)
   const [items, setItems] = useState<ShopeeItem[]>([])
   const [settlements, setSettlements] = useState<Settlement[]>([])
@@ -108,6 +136,17 @@ export default function ShopeeOrderDetailPage() {
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map())
   // 列印彈窗
   const [printModal, setPrintModal] = useState<'detail' | 'product' | 'receipt' | null>(null)
+  // 收據資訊
+  const [receiptBuyer, setReceiptBuyer] = useState('')
+  const [receiptTaxId, setReceiptTaxId] = useState('')
+  const [receiptAddress, setReceiptAddress] = useState('')
+  // 手動加入品項
+  const [addingItem, setAddingItem] = useState(false)
+  const [manualName, setManualName] = useState('')
+  const [manualVariation, setManualVariation] = useState('')
+  const [manualQty, setManualQty] = useState('1')
+  const [manualPrice, setManualPrice] = useState('0')
+  const [manualDeliveryType, setManualDeliveryType] = useState<'sim' | 'esim'>('sim')
 
   async function load() {
     const [orderRes, idRes, accRes] = await Promise.all([
@@ -127,9 +166,41 @@ export default function ShopeeOrderDetailPage() {
       const bcRes = await fetch(`/api/admin/shopee/bc-search?${params}`).then(r => r.json())
       setBcSkuNameMap(new Map((bcRes || []).map((b: { sku_id: string; name: string }) => [b.sku_id, b.name])))
     }
+    // 自動解析買家備註中的收據資訊
+    const note = orderRes.order?.buyer_note || ''
+    const companyMatch = note.match(/公司抬頭[：:]\s*(.+?)(?:\s|統編|$)/)
+    const taxMatch = note.match(/統編[：:]\s*(\d+)/)
+    if (companyMatch) setReceiptBuyer(companyMatch[1].trim())
+    if (taxMatch) setReceiptTaxId(taxMatch[1].trim())
     setLoading(false)
   }
   useEffect(() => { load() }, [id])
+
+  // 更新訂單層級欄位（為手動訂單提供直接編輯）
+  async function saveOrderField(field: string, value: string | number | null) {
+    await fetch(`/api/admin/shopee/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    })
+    load()
+  }
+
+  async function saveSettlementField(field: string, value: number | string | null) {
+    await fetch(`/api/admin/shopee/orders/${id}/settlement`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    })
+    load()
+  }
+
+  async function deleteOrder() {
+    if (!confirm('確定刪除此訂單？\n\n所有商品明細將一併刪除，此操作無法還原。')) return
+    const res = await fetch(`/api/admin/shopee/orders/${id}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '刪除失敗'); return }
+    alert('已刪除')
+    router.push('/admin/shopee/orders')
+  }
 
   // 儲存自設名稱（product by SKU code, variation by variation ID）
   async function saveIdMapping(type: 'product' | 'variation', shopeeId: string, displayName: string) {
@@ -199,6 +270,33 @@ export default function ShopeeOrderDetailPage() {
     load()
   }
 
+  async function splitItem(itemId: string, quantity: number) {
+    if (!confirm(`確定將此品項拆成 ${quantity} 個獨立品項？\n\n每個子品項數量為 1，可個別設定 BC SKU 與 ICCID。`)) return
+    const res = await fetch(`/api/admin/shopee/orders/${id}/items/${itemId}/split`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '拆單失敗'); return }
+    load()
+  }
+
+  async function deleteItem(itemId: string) {
+    if (!confirm('確定刪除此品項？')) return
+    const res = await fetch(`/api/admin/shopee/orders/${id}/items/${itemId}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '刪除失敗'); return }
+    load()
+  }
+
+  async function addManualItem(payload: { name: string; variation?: string; quantity: number; price: number; delivery_type?: 'sim' | 'esim' }) {
+    const res = await fetch(`/api/admin/shopee/orders/${id}/items`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '新增失敗'); return false }
+    load()
+    return true
+  }
+
   async function submitBcOrder() {
     if (!confirm('確定送出 BC 訂單？')) return
     const res = await fetch(`/api/admin/shopee/orders/${id}/bc-order`, { method: 'POST' })
@@ -231,8 +329,11 @@ export default function ShopeeOrderDetailPage() {
 
       <div className="mt-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">蝦皮訂單 {order.shopee_order_number}</h1>
-          <p className="text-sm text-gray-500">{order.order_date} · {order.buyer_account}</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            蝦皮訂單 {order.shopee_order_number}
+            {order.is_manual && <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">手動</span>}
+          </h1>
+          <p className="text-sm text-gray-500">{formatTW(order.order_date)} · {order.buyer_account || '-'}</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setPrintModal('detail')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
@@ -249,53 +350,133 @@ export default function ShopeeOrderDetailPage() {
               <Send className="w-4 h-4" /> 送出 BC 訂單
             </button>
           )}
+          {order.is_manual && (
+            <button onClick={deleteOrder} className="flex items-center gap-2 px-3 py-2 border border-red-300 text-red-600 text-sm rounded-lg hover:bg-red-50">
+              <Trash2 className="w-4 h-4" /> 刪除訂單
+            </button>
+          )}
         </div>
       </div>
 
       {/* 基本訂單資訊 */}
       <div className="mt-4 bg-white p-5 rounded-xl border border-gray-200">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">基本訂單資訊</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <div><span className="text-gray-500">訂單編號：</span><span className="font-mono">{order.shopee_order_number}</span></div>
-          <div><span className="text-gray-500">訂單狀態：</span>{order.order_status || '-'}</div>
-          <div><span className="text-gray-500">退貨/退款：</span>{order.return_status || '-'}</div>
-          <div><span className="text-gray-500">買家帳號：</span>{order.buyer_account || '-'}</div>
-          <div><span className="text-gray-500">訂單日期：</span>{order.order_date || '-'}</div>
-        </div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">基本訂單資訊{order.is_manual && <span className="ml-2 text-xs text-purple-600 font-normal">（可編輯，離開欄位自動儲存）</span>}</h3>
+        {order.is_manual ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <OrderField label="訂單編號" value={order.shopee_order_number} readOnly mono />
+            <OrderField label="訂單狀態" value={order.order_status || ''} onSave={v => saveOrderField('order_status', v)} />
+            <OrderField label="退貨/退款" value={order.return_status || ''} onSave={v => saveOrderField('return_status', v)} />
+            <OrderField label="買家帳號" value={order.buyer_account || ''} onSave={v => saveOrderField('buyer_account', v)} />
+            <div>
+              <span className="text-gray-500 text-xs">訂單日期：</span>
+              <input type="datetime-local" defaultValue={toTWDatetimeLocal(order.order_date)}
+                onBlur={e => {
+                  if (!e.target.value) { saveOrderField('order_date', null); return }
+                  // 使用者輸入為台灣時區，轉回 UTC
+                  const d = new Date(e.target.value + ':00+08:00')
+                  saveOrderField('order_date', d.toISOString())
+                }}
+                className="mt-1 w-full px-2 py-1 border border-gray-200 rounded text-xs" />
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><span className="text-gray-500">訂單編號：</span><span className="font-mono">{order.shopee_order_number}</span></div>
+            <div><span className="text-gray-500">訂單狀態：</span>{order.order_status || '-'}</div>
+            <div><span className="text-gray-500">退貨/退款：</span>{order.return_status || '-'}</div>
+            <div><span className="text-gray-500">買家帳號：</span>{order.buyer_account || '-'}</div>
+            <div><span className="text-gray-500">訂單日期：</span>{formatTW(order.order_date)}</div>
+          </div>
+        )}
       </div>
 
       {/* 收件資訊 */}
       <div className="mt-4 bg-white p-5 rounded-xl border border-gray-200">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">收件資訊</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <div><span className="text-gray-500">收件人：</span>{order.recipient_name || '-'}</div>
-          <div><span className="text-gray-500">電話：</span>{order.recipient_phone || '-'}</div>
-          <div className="col-span-2"><span className="text-gray-500">地址：</span>{order.zip_code} {order.city}{order.district} {order.shipping_address || '-'}</div>
-          <div className="col-span-2"><span className="text-gray-500">包裹查詢號碼：</span><span className="font-mono text-xs font-medium">{order.shopee_tracking_code || '-'}</span></div>
-          <div><span className="text-gray-500">取件門市：</span>{order.pickup_store_id || '-'}</div>
-          <div><span className="text-gray-500">寄送方式：</span>{order.shipping_method || '-'}</div>
-          <div><span className="text-gray-500">出貨方式：</span>{order.fulfillment_method || '-'}</div>
-          <div><span className="text-gray-500">付款方式：</span>{order.payment_method || '-'}</div>
-          {order.buyer_note && <div className="col-span-2"><span className="text-gray-500">買家備註：</span><span className="text-orange-600 font-medium">{order.buyer_note}</span></div>}
-          {order.seller_note && <div className="col-span-2"><span className="text-gray-500">備註：</span>{order.seller_note}</div>}
+        {order.is_manual ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <OrderField label="收件人" value={order.recipient_name || ''} onSave={v => saveOrderField('recipient_name', v)} />
+            <OrderField label="電話" value={order.recipient_phone || ''} onSave={v => saveOrderField('recipient_phone', v)} />
+            <OrderField label="郵遞區號" value={order.zip_code || ''} onSave={v => saveOrderField('zip_code', v)} />
+            <OrderField label="城市" value={order.city || ''} onSave={v => saveOrderField('city', v)} />
+            <OrderField label="區域" value={order.district || ''} onSave={v => saveOrderField('district', v)} />
+            <OrderField label="地址" value={order.shipping_address || ''} onSave={v => saveOrderField('shipping_address', v)} className="col-span-3" />
+            <OrderField label="包裹查詢號碼" value={order.shopee_tracking_code || ''} onSave={v => saveOrderField('shopee_tracking_code', v)} mono className="col-span-2" />
+            <OrderField label="取件門市" value={order.pickup_store_id || ''} onSave={v => saveOrderField('pickup_store_id', v)} />
+            <OrderField label="寄送方式" value={order.shipping_method || ''} onSave={v => saveOrderField('shipping_method', v)} />
+            <OrderField label="出貨方式" value={order.fulfillment_method || ''} onSave={v => saveOrderField('fulfillment_method', v)} />
+            <OrderField label="付款方式" value={order.payment_method || ''} onSave={v => saveOrderField('payment_method', v)} />
+            <OrderField label="買家備註" value={order.buyer_note || ''} onSave={v => saveOrderField('buyer_note', v)} className="col-span-2" />
+            <OrderField label="賣家備註" value={order.seller_note || ''} onSave={v => saveOrderField('seller_note', v)} className="col-span-2" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><span className="text-gray-500">收件人：</span>{order.recipient_name || '-'}</div>
+            <div><span className="text-gray-500">電話：</span>{order.recipient_phone || '-'}</div>
+            <div className="col-span-2"><span className="text-gray-500">地址：</span>{order.zip_code} {order.city}{order.district} {order.shipping_address || '-'}</div>
+            <div className="col-span-2"><span className="text-gray-500">包裹查詢號碼：</span><span className="font-mono text-xs font-medium">{order.shopee_tracking_code || '-'}</span></div>
+            <div><span className="text-gray-500">取件門市：</span>{order.pickup_store_id || '-'}</div>
+            <div><span className="text-gray-500">寄送方式：</span>{order.shipping_method || '-'}</div>
+            <div><span className="text-gray-500">出貨方式：</span>{order.fulfillment_method || '-'}</div>
+            <div><span className="text-gray-500">付款方式：</span>{order.payment_method || '-'}</div>
+            {order.buyer_note && <div className="col-span-2"><span className="text-gray-500">買家備註：</span><span className="text-orange-600 font-medium">{order.buyer_note}</span></div>}
+            {order.seller_note && <div className="col-span-2"><span className="text-gray-500">備註：</span>{order.seller_note}</div>}
+          </div>
+        )}
+      </div>
+
+      {/* 收據資訊 */}
+      <div className="mt-4 bg-white p-5 rounded-xl border border-gray-200">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">收據資訊</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500 flex-shrink-0">買受人：</span>
+            <input value={receiptBuyer} onChange={e => setReceiptBuyer(e.target.value)} placeholder="公司或個人名稱"
+              className="flex-1 px-2 py-1 border border-gray-200 rounded text-sm" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500 flex-shrink-0">統一編號：</span>
+            <input value={receiptTaxId} onChange={e => setReceiptTaxId(e.target.value)} placeholder="統一編號"
+              className="flex-1 px-2 py-1 border border-gray-200 rounded text-sm font-mono" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500 flex-shrink-0">地址：</span>
+            <input value={receiptAddress} onChange={e => setReceiptAddress(e.target.value)} placeholder="公司地址"
+              className="flex-1 px-2 py-1 border border-gray-200 rounded text-sm" />
+          </div>
         </div>
       </div>
 
       {/* 金流資訊 */}
       <div className="mt-4 bg-white p-5 rounded-xl border border-gray-200">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">金流資訊</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-          <div><span className="text-gray-500">商品總價：</span>NT$ {order.product_total ?? '-'}</div>
-          <div><span className="text-gray-500">買家運費：</span>NT$ {order.buyer_shipping_fee ?? '-'}</div>
-          <div><span className="text-gray-500">蝦皮補運費：</span>NT$ {order.shopee_shipping_subsidy ?? '-'}</div>
-          <div><span className="text-gray-500">退貨運費：</span>NT$ {order.return_shipping_fee ?? '-'}</div>
-          <div><span className="font-medium">買家總付：</span><span className="font-semibold">NT$ {order.buyer_total_payment ?? '-'}</span></div>
-          <div><span className="text-gray-500">賣家優惠券：</span>NT$ {order.seller_coupon ?? '-'}</div>
-          <div><span className="text-gray-500">成交手續費：</span>NT$ {order.transaction_fee ?? '-'}</div>
-          <div><span className="text-gray-500">其他服務費：</span>NT$ {order.other_service_fee ?? '-'}</div>
-          <div><span className="text-gray-500">金流處理費：</span>NT$ {order.payment_processing_fee ?? '-'}</div>
-          <div><span className="text-gray-500">處理費率：</span>{order.payment_processing_rate || '-'}</div>
-        </div>
+        {order.is_manual ? (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+            <OrderField label="商品總價" value={String(order.product_total ?? '')} onSave={v => saveOrderField('product_total', v === '' ? null : Number(v))} />
+            <OrderField label="買家運費" value={String(order.buyer_shipping_fee ?? '')} onSave={v => saveOrderField('buyer_shipping_fee', v === '' ? null : Number(v))} />
+            <OrderField label="蝦皮補運費" value={String(order.shopee_shipping_subsidy ?? '')} onSave={v => saveOrderField('shopee_shipping_subsidy', v === '' ? null : Number(v))} />
+            <OrderField label="退貨運費" value={String(order.return_shipping_fee ?? '')} onSave={v => saveOrderField('return_shipping_fee', v === '' ? null : Number(v))} />
+            <OrderField label="買家總付" value={String(order.buyer_total_payment ?? '')} onSave={v => saveOrderField('buyer_total_payment', v === '' ? null : Number(v))} />
+            <OrderField label="賣家優惠券" value={String(order.seller_coupon ?? '')} onSave={v => saveOrderField('seller_coupon', v === '' ? null : Number(v))} />
+            <OrderField label="成交手續費" value={String(order.transaction_fee ?? '')} onSave={v => saveOrderField('transaction_fee', v === '' ? null : Number(v))} />
+            <OrderField label="其他服務費" value={String(order.other_service_fee ?? '')} onSave={v => saveOrderField('other_service_fee', v === '' ? null : Number(v))} />
+            <OrderField label="金流處理費" value={String(order.payment_processing_fee ?? '')} onSave={v => saveOrderField('payment_processing_fee', v === '' ? null : Number(v))} />
+            <OrderField label="處理費率" value={order.payment_processing_rate || ''} onSave={v => saveOrderField('payment_processing_rate', v)} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+            <div><span className="text-gray-500">商品總價：</span>NT$ {order.product_total ?? '-'}</div>
+            <div><span className="text-gray-500">買家運費：</span>NT$ {order.buyer_shipping_fee ?? '-'}</div>
+            <div><span className="text-gray-500">蝦皮補運費：</span>NT$ {order.shopee_shipping_subsidy ?? '-'}</div>
+            <div><span className="text-gray-500">退貨運費：</span>NT$ {order.return_shipping_fee ?? '-'}</div>
+            <div><span className="font-medium">買家總付：</span><span className="font-semibold">NT$ {order.buyer_total_payment ?? '-'}</span></div>
+            <div><span className="text-gray-500">賣家優惠券：</span>NT$ {order.seller_coupon ?? '-'}</div>
+            <div><span className="text-gray-500">成交手續費：</span>NT$ {order.transaction_fee ?? '-'}</div>
+            <div><span className="text-gray-500">其他服務費：</span>NT$ {order.other_service_fee ?? '-'}</div>
+            <div><span className="text-gray-500">金流處理費：</span>NT$ {order.payment_processing_fee ?? '-'}</div>
+            <div><span className="text-gray-500">處理費率：</span>{order.payment_processing_rate || '-'}</div>
+          </div>
+        )}
       </div>
 
       {/* 金流結算 & 利潤結算 */}
@@ -348,7 +529,19 @@ export default function ShopeeOrderDetailPage() {
                 <div className="flex justify-between"><span className="text-gray-500">金流與系統處理費：</span><span>NT$ {s?.processing_fee ?? order.payment_processing_fee ?? '-'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">損失賠償：</span><span>NT$ {s?.damage_compensation ?? '-'}</span></div>
                 <div className="border-t border-gray-200 my-2" />
-                <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
+                {order.is_manual ? (
+                  <div className="flex items-center justify-between font-semibold">
+                    <span>錢包入帳金額：</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm text-gray-400">NT$</span>
+                      <input type="number" defaultValue={walletAmount ?? ''}
+                        onBlur={e => saveSettlementField('wallet_amount', e.target.value === '' ? null : Number(e.target.value))}
+                        className="w-28 px-2 py-1 border border-gray-200 rounded text-right text-green-700" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex justify-between font-semibold"><span>錢包入帳金額：</span><span className={walletAmount !== null ? 'text-green-600' : 'text-gray-400'}>NT$ {walletAmount ?? '-'}</span></div>
+                )}
               </div>
             </div>
 
@@ -454,6 +647,24 @@ export default function ShopeeOrderDetailPage() {
                   </div>
                   <div className="flex items-center gap-2 ml-3 flex-shrink-0">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${st.color}`}>{st.label}</span>
+                    {item.is_manual && <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">手動</span>}
+                    {!item.bc_order_id ? (
+                      <select value={item.delivery_type || 'sim'}
+                        onChange={async e => {
+                          await fetch(`/api/admin/shopee/orders/${id}`, {
+                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ item_id: item.id, delivery_type: e.target.value }),
+                          }); load()
+                        }}
+                        className="px-2 py-0.5 text-xs rounded border border-gray-300 bg-white">
+                        <option value="sim">SIM</option>
+                        <option value="esim">eSIM</option>
+                      </select>
+                    ) : (
+                      <span className={`px-2 py-0.5 text-xs rounded-full ${item.delivery_type === 'esim' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {item.delivery_type === 'esim' ? 'eSIM' : 'SIM'}
+                      </span>
+                    )}
                     {!item.bc_order_id && (
                       <button onClick={() => setMatchingItem(item)}
                         className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">
@@ -464,12 +675,82 @@ export default function ShopeeOrderDetailPage() {
                       <button onClick={() => unmatchItem(item.id)} title="取消對應"
                         className="p-1 text-gray-400 hover:text-red-500"><Undo2 className="w-4 h-4" /></button>
                     )}
+                    {!item.bc_order_id && item.quantity > 1 && (
+                      <button onClick={() => splitItem(item.id, item.quantity)} title={`拆成 ${item.quantity} 個`}
+                        className="p-1 text-gray-400 hover:text-blue-600"><Split className="w-4 h-4" /></button>
+                    )}
+                    {!item.bc_order_id && (
+                      <button onClick={() => deleteItem(item.id)} title="刪除品項"
+                        className="p-1 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                    )}
                   </div>
                 </div>
-                {(item.status === 'matched' || item.status === 'iccid_filled') && <IccidInput item={item} onSave={saveIccid} />}
+                {(item.status === 'matched' || item.status === 'iccid_filled') && item.delivery_type !== 'esim' && <IccidInput item={item} onSave={saveIccid} />}
+                {item.delivery_type === 'esim' && item.bc_order_id && (
+                  <div className="mt-3 pt-3 border-t border-gray-100 text-xs">
+                    {item.qr_code_url || item.lpa_code ? (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-indigo-700 font-medium">eSIM 已就緒</span>
+                          {item.iccid && item.iccid[0] && (
+                            <a href={`/eSIM/Install/${item.iccid[0]}`} target="_blank" rel="noreferrer"
+                              className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[11px] hover:bg-indigo-700">
+                              📱 用戶安裝頁
+                            </a>
+                          )}
+                        </div>
+                        {item.qr_code_url && <div>QR Code：<a href={item.qr_code_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{item.qr_code_url}</a></div>}
+                        {item.lpa_code && <div>LPA：<span className="font-mono break-all">{item.lpa_code}</span></div>}
+                        {item.iccid && item.iccid.length > 0 && <div>ICCID：{item.iccid.map((ic, j) => <span key={j} className="font-mono bg-gray-100 px-1.5 py-0.5 rounded ml-1">{ic}</span>)}</div>}
+                      </div>
+                    ) : (
+                      <div className="text-gray-500">等待 N009 eSIM 通知中⋯</div>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
+          {addingItem ? (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
+              <div className="text-sm font-medium text-purple-700 mb-2">新增手動品項</div>
+              <div className="flex items-center gap-4 mb-3 text-sm">
+                <span className="text-gray-600">類型：</span>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input type="radio" checked={manualDeliveryType === 'sim'} onChange={() => setManualDeliveryType('sim')} />
+                  <span>SIM（實體卡，需 ICCID）</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input type="radio" checked={manualDeliveryType === 'esim'} onChange={() => setManualDeliveryType('esim')} />
+                  <span>eSIM（不需 ICCID，透過 N009 通知）</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                <input value={manualName} onChange={e => setManualName(e.target.value)} placeholder="商品名稱（會顯示於收據）"
+                  className="md:col-span-6 px-3 py-1.5 border border-gray-200 rounded text-sm" />
+                <input value={manualVariation} onChange={e => setManualVariation(e.target.value)} placeholder="選項名 / 規格（會顯示於收據）"
+                  className="md:col-span-6 px-3 py-1.5 border border-gray-200 rounded text-sm" />
+                <input value={manualQty} onChange={e => setManualQty(e.target.value)} placeholder="數量" type="number" min="1"
+                  className="md:col-span-2 px-3 py-1.5 border border-gray-200 rounded text-sm" />
+                <input value={manualPrice} onChange={e => setManualPrice(e.target.value)} placeholder="單價" type="number" min="0"
+                  className="md:col-span-2 px-3 py-1.5 border border-gray-200 rounded text-sm" />
+                <div className="md:col-span-8 flex gap-2 justify-end">
+                  <button onClick={async () => {
+                    const ok = await addManualItem({ name: manualName, variation: manualVariation, quantity: Number(manualQty) || 1, price: Number(manualPrice) || 0, delivery_type: manualDeliveryType })
+                    if (ok) { setAddingItem(false); setManualName(''); setManualVariation(''); setManualQty('1'); setManualPrice('0'); setManualDeliveryType('sim') }
+                  }} className="px-4 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">加入</button>
+                  <button onClick={() => { setAddingItem(false); setManualName(''); setManualVariation(''); setManualQty('1'); setManualPrice('0'); setManualDeliveryType('sim') }}
+                    className="px-4 py-1.5 bg-gray-100 text-gray-600 text-sm rounded hover:bg-gray-200">取消</button>
+                </div>
+              </div>
+              <div className="text-xs text-gray-500 mt-2">商品名稱與選項名會直接作為收據上的「自訂名稱」與「自訂規格」。加入後需點「對應」選擇 BC SKU，才能送 BC 訂單。</div>
+            </div>
+          ) : (
+            <button onClick={() => setAddingItem(true)}
+              className="w-full py-2 border-2 border-dashed border-gray-300 rounded-xl text-sm text-gray-500 hover:border-purple-400 hover:text-purple-600 flex items-center justify-center gap-1">
+              <Plus className="w-4 h-4" /> 新增手動品項
+            </button>
+          )}
         </div>
       </div>
 
@@ -494,11 +775,21 @@ export default function ShopeeOrderDetailPage() {
                     </style></head><body>${el.innerHTML}</body></html>`)
                   } else if (printModal === 'receipt') {
                     w.document.write(`<html><head><style>
-                      @page{size:A5 landscape;margin:5mm}
-                      body{margin:0;font-family:'Microsoft JhengHei','PingFang TC',sans-serif}
-                      table{border-collapse:collapse;width:100%}
-                      td,th{border:1px solid #000;padding:3px 6px;font-size:11px}
+                      @page{size:100mm 150mm;margin:0}
+                      body{margin:0;font-family:'Microsoft JhengHei',sans-serif}
+                      img{display:block;margin:0 auto;-webkit-print-color-adjust:exact;print-color-adjust:exact}
                     </style></head><body>${el.innerHTML}</body></html>`)
+                    w.document.close()
+                    // 等圖片載入後再列印
+                    const imgs = w.document.images
+                    if (imgs.length > 0) {
+                      let loaded = 0
+                      for (let i = 0; i < imgs.length; i++) {
+                        if (imgs[i].complete) { loaded++ } else { imgs[i].onload = imgs[i].onerror = () => { loaded++; if (loaded >= imgs.length) w.print() } }
+                      }
+                      if (loaded >= imgs.length) w.print()
+                    } else { w.print() }
+                    return
                   } else {
                     w.document.write(`<html><head><style>
                       @page{size:100mm 150mm;margin:0}
@@ -521,7 +812,7 @@ export default function ShopeeOrderDetailPage() {
                     <span>蝦皮訂單：{order.shopee_order_number}</span>
                     {order.shopee_account_id && <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#666' }}>{accountMap.get(order.shopee_account_id) || '-'}</span>}
                   </div>
-                  <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{order.order_date}</div>
+                  <div style={{ fontSize: '10px', color: '#666', marginBottom: '3mm' }}>日期：{formatTW(order.order_date)}</div>
                   <div style={{ borderBottom: '1px solid #000', paddingBottom: '3mm', marginBottom: '3mm' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}><span><strong>收件人：</strong>{order.recipient_name}</span><span><strong>電話：</strong>{order.recipient_phone}</span></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -551,7 +842,7 @@ export default function ShopeeOrderDetailPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
                   {(() => {
                     let ls = { line1: 12, line2: 12, line3: 10 }
-                    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) ls = JSON.parse(saved) } catch {}
+                    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) ls = JSON.parse(saved) } catch { }
                     const expiry = localStorage.getItem('shopee_expiry_date') || ''
                     return items.flatMap(item =>
                       Array.from({ length: item.quantity }, (_, j) => (
@@ -573,7 +864,8 @@ export default function ShopeeOrderDetailPage() {
                 </div>
               ) : (
                 /* 收據 A5 橫式 */
-                <ReceiptTemplate order={order} items={items} skuProductNameMap={skuProductNameMap} variationIdMap={variationIdMap} />
+                <ReceiptTemplate order={order} items={items} skuProductNameMap={skuProductNameMap} variationIdMap={variationIdMap}
+                  buyerName={receiptBuyer} taxId={receiptTaxId} address={receiptAddress} />
               )}
             </div>
           </div>
@@ -619,83 +911,175 @@ function numberToChinese(n: number): string {
   return result + '元整'
 }
 
-function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap }: {
+function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap, buyerName, taxId, address }: {
   order: ShopeeOrder; items: ShopeeItem[]
   skuProductNameMap: Map<string, string>; variationIdMap: Map<string, string>
+  buyerName: string; taxId: string; address: string
 }) {
   const date = order.order_date ? new Date(order.order_date) : new Date()
-  const dateStr = `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日`
+  // 用台灣時區取得年月日
+  const twParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date)
+  const twYear = Number(twParts.find(p => p.type === 'year')?.value || date.getFullYear())
+  const twMonth = twParts.find(p => p.type === 'month')?.value || String(date.getMonth() + 1).padStart(2, '0')
+  const twDay = twParts.find(p => p.type === 'day')?.value || String(date.getDate()).padStart(2, '0')
+  const rocYear = twYear - 1911
+  const dateStr = `中華民國 ${rocYear} 年 ${twMonth} 月 ${twDay} 日`
   const total = items.reduce((sum, i) => sum + ((i.sale_price ?? i.original_price ?? 0) * i.quantity), 0)
-  // 最多 6 行商品
-  const rows: { name: string; qty: number; price: number; amount: number }[] = items.map(item => ({
-    name: (skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name || '') +
-      (variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name ? ' ' + (variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name || '') : ''),
-    qty: item.quantity,
-    price: item.sale_price ?? item.original_price ?? 0,
-    amount: (item.sale_price ?? item.original_price ?? 0) * item.quantity,
-  }))
-  while (rows.length < 6) rows.push({ name: '', qty: 0, price: 0, amount: 0 })
+  const stampUrl = typeof window !== 'undefined' ? localStorage.getItem('receipt_stamp_url') || '' : ''
+  const s = { fontFamily: "'Microsoft JhengHei',sans-serif" }
 
-  const cellStyle = { border: '1px solid #000', padding: '4px 8px', fontSize: '11px' }
-  const headerStyle = { ...cellStyle, fontWeight: 'bold' as const, textAlign: 'center' as const, backgroundColor: '#f5f5f5' }
+  const compact = items.length > 2
+  const z = {
+    line: { borderBottom: '1px solid #000', marginBottom: compact ? '1.5mm' : '2mm', paddingBottom: compact ? '1.5mm' : '2mm' },
+    pad: compact ? '3mm 4mm' : '5mm',
+    title: compact ? '16px' : '20px',
+    titleSp: compact ? '4px' : '6px',
+    titleMb: compact ? '0.5mm' : '1mm',
+    base: compact ? '10px' : '12px',
+    mb1: compact ? '0.5mm' : '1mm',
+    mb2: compact ? '1mm' : '2mm',
+    dateMb: compact ? '2mm' : '3mm',
+    tblFs: compact ? '9px' : '10px',
+    cellPad: compact ? '0.8mm 1.5mm' : '1.5mm 2mm',
+    totalFs: compact ? '12px' : '14px',
+    chineseFs: compact ? '11px' : '14px',
+    totalMt: compact ? '1mm' : '2mm',
+    legalFs: compact ? '9px' : '12px',
+    legalLh: compact ? 1.4 : 1.6,
+    stampLabelMb: compact ? '1.5mm' : '3mm',
+    stampMt: compact ? '1.5mm' : '3mm',
+    stampW: compact ? '42mm' : '46mm',
+    stampPadTop: compact ? '0.8mm 2mm' : '1.5mm 2mm',
+    stampMidPad: compact ? '0.5mm 2mm' : '1mm 2mm',
+    stampFs: compact ? '10px' : '12px',
+    stampSideFs: compact ? '9px' : '11px',
+    stampTitleFs: compact ? '10px' : '11px',
+    stampSubFs: compact ? '8px' : '9px',
+    stampNumFs: compact ? '15px' : '17px',
+    stampImg: compact ? '80px' : '100px',
+  }
 
   return (
-    <div style={{ width: '210mm', minHeight: '148mm', padding: '8mm 10mm', fontFamily: "'Microsoft JhengHei','PingFang TC',sans-serif", fontSize: '12px', border: '1px solid #ccc', margin: '0 auto', boxSizing: 'border-box' }}>
-      <h1 style={{ textAlign: 'center', fontSize: '20px', fontWeight: 'bold', margin: '0 0 2mm 0', letterSpacing: '8px' }}>國際電話卡收據</h1>
-      <div style={{ textAlign: 'center', fontSize: '11px', marginBottom: '4mm' }}>{dateStr}</div>
+    <div style={{ ...s, width: '100mm', minHeight: '150mm', padding: z.pad, fontSize: z.base, border: '1px solid #ccc', margin: '0 auto' }}>
+      <div style={{ fontSize: z.title, fontWeight: 'bold', textAlign: 'center', marginBottom: z.titleMb, letterSpacing: z.titleSp }}>
+        國際電話卡收據
+      </div>
+      <div style={{ fontSize: z.base, textAlign: 'center', color: '#000', marginBottom: z.dateMb }}>{dateStr}</div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '1mm' }}>
-        <span>買　受　人：{order.buyer_account || order.recipient_name || ''}</span>
-        <span>NO.{order.shopee_order_number}</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '1mm' }}>
-        <span>統 一 編 號：</span>
-        <span>收執聯</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3mm' }}>
-        <span>地　　　址：</span>
-        <span>第1頁/共1頁</span>
+      <div style={{ fontSize: z.base, marginBottom: z.mb1 }}>買　受　人：{buyerName || ''}</div>
+      <div style={{ fontSize: z.base, marginBottom: z.mb1 }}>統 一 編 號：{taxId || ''}</div>
+      <div style={{ ...z.line, display: 'flex', justifyContent: 'space-between', fontSize: z.base }}>
+        <span>地　　　址：{address || ''}</span>
+        <span style={{ fontFamily: 'monospace', fontSize: z.base }}>{order.shopee_order_number}</span>
       </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm' }}>
+      <div style={{ fontSize: z.base, marginBottom: z.mb2 }}>商品明細：</div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: z.mb2, fontSize: z.tblFs }}>
         <thead>
           <tr>
-            <th style={{ ...headerStyle, width: '45%' }}>摘要</th>
-            <th style={{ ...headerStyle, width: '10%' }}>數量</th>
-            <th style={{ ...headerStyle, width: '15%' }}>單價</th>
-            <th style={{ ...headerStyle, width: '15%' }}>金額</th>
-            <th style={{ ...headerStyle, width: '15%' }}>備註</th>
+            <th style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'center', fontSize: z.tblFs }}>商品名稱</th>
+            <th style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'center', fontSize: z.tblFs, width: compact ? '14mm' : '15mm' }}>單價</th>
+            <th style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'center', fontSize: z.tblFs, width: compact ? '10mm' : '12mm' }}>數量</th>
+            <th style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'center', fontSize: z.tblFs, width: compact ? '17mm' : '18mm' }}>金額</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>
-              <td style={cellStyle}>{r.name || '\u00A0'}</td>
-              <td style={{ ...cellStyle, textAlign: 'center' }}>{r.qty > 0 ? r.qty : ''}</td>
-              <td style={{ ...cellStyle, textAlign: 'right' }}>{r.price > 0 ? `$${r.price}` : ''}</td>
-              <td style={{ ...cellStyle, textAlign: 'right' }}>{r.amount > 0 ? `$${r.amount}` : ''}</td>
-              <td style={{ ...cellStyle, textAlign: 'center' }}>{i === 2 ? '營業人蓋用統一發票專用章' : ''}</td>
-            </tr>
-          ))}
-          <tr>
-            <td colSpan={2} style={{ ...cellStyle, textAlign: 'center', fontWeight: 'bold' }}>總　計</td>
-            <td style={cellStyle}></td>
-            <td style={{ ...cellStyle, textAlign: 'right', fontWeight: 'bold' }}>${total}</td>
-            <td style={cellStyle}></td>
-          </tr>
+          {items.map((item, i) => {
+            const name = skuProductNameMap.get(item.shopee_sku_code || '') || (item.is_manual ? (item.shopee_product_name || '') : '')
+            const spec = variationIdMap.get(item.shopee_variation_id || '') || (item.is_manual ? (item.shopee_variation_name || '') : '')
+            const price = item.sale_price ?? item.original_price ?? 0
+            const amount = price * item.quantity
+            return (
+              <tr key={i}>
+                <td style={{ border: '1px solid #000', padding: z.cellPad, fontSize: z.tblFs }}>
+                  <div style={{ fontSize: z.tblFs }}>{name}</div>
+                  <div style={{ fontSize: z.tblFs, color: '#000' }}>{spec}</div>
+                </td>
+                <td style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'right', fontSize: z.tblFs }}>${price}</td>
+                <td style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'center', fontSize: z.tblFs }}>{item.quantity}</td>
+                <td style={{ border: '1px solid #000', padding: z.cellPad, textAlign: 'right', fontSize: z.tblFs }}>${amount.toLocaleString()}</td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
 
-      <div style={{ display: 'flex', fontSize: '11px', marginBottom: '3mm' }}>
-        <span style={{ width: '100px' }}>總計新台幣</span>
-        <span>（中文大寫）</span>
-        <span style={{ marginLeft: '8px', fontWeight: 'bold' }}>{numberToChinese(total)}</span>
+      {/* 總金額 */}
+      <div style={{ marginTop: z.totalMt, textAlign: 'right', fontSize: z.totalFs }}>
+        總金額：NT$ {total.toLocaleString()}
+      </div>
+      <div style={{ ...z.line, fontSize: z.chineseFs, textAlign: 'right' }}>
+        總計{numberToChinese(total)}
       </div>
 
-      <div style={{ fontSize: '9px', color: '#666', lineHeight: 1.6 }}>
-        本收據依據財政部 88 年 9 月 14 日台財稅第 881943611 號函核准使用，由銷售人自行印製，不另開立統一發票。<br />
+      {/* 法規文字 */}
+      <div style={{ ...z.line, fontSize: z.legalFs, color: '#000', lineHeight: z.legalLh }}>
+        本收據依據財政部88年9月14日台財稅第881943611號函核准使用，由銷售人自行印製，不另開立統一發票。<br />
         因國際電話卡適用零稅率，本收據不得作為申報扣抵銷項稅額之憑證。
       </div>
+
+      {/* 印章 */}
+      <div style={{ textAlign: 'center', marginTop: z.stampMt }}>
+        <div style={{ fontSize: z.base, color: '#000', marginBottom: z.stampLabelMb }}>營業人蓋用統一發票專用章</div>
+        {stampUrl ? (
+          <img src={stampUrl} alt="印章" style={{ maxHeight: z.stampImg, display: 'block', margin: '0 auto' }} />
+        ) : (
+          <table style={{ display: 'inline-table', borderCollapse: 'collapse', border: '2px solid #000', color: '#000', fontFamily: "'Microsoft JhengHei',sans-serif", width: z.stampW }}>
+            <tbody>
+              <tr>
+                <td colSpan={3} style={{ borderBottom: '1.5px solid #000', padding: z.stampPadTop, textAlign: 'center', fontSize: z.stampFs, letterSpacing: '0.5px' }}>
+                  飛訊移動科技有限公司
+                </td>
+              </tr>
+              <tr>
+                <td rowSpan={4} style={{ padding: z.stampMidPad, textAlign: 'center', fontSize: z.stampSideFs, lineHeight: '1.3', borderRight: '1.5px solid #000', width: compact ? '5mm' : '6mm' }}>
+                  桃<br />園<br />市
+                </td>
+                <td style={{ padding: `${compact ? '0.5mm' : '1mm'} 2mm 0`, textAlign: 'center', fontSize: z.stampTitleFs, letterSpacing: '1px', whiteSpace: 'nowrap' }}>統一發票專用章</td>
+                <td rowSpan={4} style={{ padding: z.stampMidPad, textAlign: 'center', fontSize: z.stampSideFs, lineHeight: '1.3', borderLeft: '1.5px solid #000', width: compact ? '5mm' : '6mm' }}>
+                  蘆<br />竹<br />區
+                </td>
+              </tr>
+              <tr>
+                <td style={{ padding: '0 2mm', textAlign: 'center', fontSize: z.stampSubFs, letterSpacing: '0.5px' }}>(電子收據專用)</td>
+              </tr>
+              <tr>
+                <td style={{ padding: '0 2mm', textAlign: 'center', fontSize: z.stampTitleFs, letterSpacing: '1px' }}>統一編號</td>
+              </tr>
+              <tr>
+                <td style={{ padding: z.stampMidPad, textAlign: 'center', fontSize: z.stampNumFs, fontWeight: 'bold', letterSpacing: '0.5px' }}>60636261</td>
+              </tr>
+              <tr>
+                <td colSpan={3} style={{ borderTop: '1.5px solid #000', padding: z.stampPadTop, textAlign: 'center', fontSize: z.stampFs, letterSpacing: '0.5px' }}>
+                  南崁路265號6樓之6
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function OrderField({ label, value, onSave, readOnly, mono, className }: {
+  label: string
+  value: string
+  onSave?: (v: string) => void
+  readOnly?: boolean
+  mono?: boolean
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <span className="text-gray-500 text-xs">{label}：</span>
+      <input
+        defaultValue={value}
+        readOnly={readOnly}
+        onBlur={e => !readOnly && onSave && e.target.value !== value && onSave(e.target.value)}
+        className={`mt-1 w-full px-2 py-1 border border-gray-200 rounded text-xs ${mono ? 'font-mono' : ''} ${readOnly ? 'bg-gray-50 text-gray-600' : ''}`}
+      />
     </div>
   )
 }
@@ -1028,3 +1412,4 @@ function BcMatchModal({ item, onMatch, onClose }: {
     </div>
   )
 }
+
