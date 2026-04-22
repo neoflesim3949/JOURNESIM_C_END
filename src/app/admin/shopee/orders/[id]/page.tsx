@@ -135,7 +135,7 @@ export default function ShopeeOrderDetailPage() {
   // 蝦皮帳號
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map())
   // 列印彈窗
-  const [printModal, setPrintModal] = useState<'detail' | 'product' | 'receipt' | null>(null)
+  const [printModal, setPrintModal] = useState<'detail' | 'product' | 'receipt' | 'receipt_a5' | null>(null)
   // 收據資訊
   const [receiptBuyer, setReceiptBuyer] = useState('')
   const [receiptTaxId, setReceiptTaxId] = useState('')
@@ -343,7 +343,10 @@ export default function ShopeeOrderDetailPage() {
             <Printer className="w-4 h-4" /> 商品標籤
           </button>
           <button onClick={() => setPrintModal('receipt')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
-            <Printer className="w-4 h-4" /> 收據
+            <Printer className="w-4 h-4" /> 收據 10×15
+          </button>
+          <button onClick={() => setPrintModal('receipt_a5')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+            <Printer className="w-4 h-4" /> 收據 A5
           </button>
           {canSubmitBc && (
             <button onClick={submitBcOrder} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
@@ -759,13 +762,13 @@ export default function ShopeeOrderDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPrintModal(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : '收據預覽'}</h2>
+              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : printModal === 'receipt_a5' ? '收據預覽（A5）' : '收據預覽（10×15）'}</h2>
               <div className="flex items-center gap-2">
                 <button onClick={() => {
                   const el = document.getElementById('print-area')
-                  if (!el) return
+                  if (!el) { alert('找不到列印內容'); return }
                   const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
-                  if (!w) return
+                  if (!w) { alert('彈出視窗被瀏覽器封鎖，請允許此網站開啟彈出視窗後再試'); return }
                   if (printModal === 'product') {
                     w.document.write(`<html><head><style>
                       @page{size:30mm 15mm;margin:0}
@@ -773,22 +776,24 @@ export default function ShopeeOrderDetailPage() {
                       body>div{gap:0!important}
                       .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1mm;page-break-after:always;border:none!important}
                     </style></head><body>${el.innerHTML}</body></html>`)
-                  } else if (printModal === 'receipt') {
-                    w.document.write(`<html><head><style>
-                      @page{size:100mm 150mm;margin:0}
-                      body{margin:0;font-family:'Microsoft JhengHei',sans-serif}
-                      img{display:block;margin:0 auto;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+                  } else if (printModal === 'receipt' || printModal === 'receipt_a5') {
+                    const pageSize = printModal === 'receipt_a5' ? 'A5' : '100mm 150mm'
+                    w.document.write(`<html><head><title>收據</title><style>
+                      @page{size:${pageSize};margin:0}
+                      *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important}
+                      html,body{margin:0;padding:0;font-family:'Microsoft JhengHei','PingFang TC','Noto Sans TC',sans-serif}
+                      img{display:block;margin:0 auto}
+                      .receipt-root{border:none!important}
+                      table,tr,td,th,div{page-break-inside:avoid}
                     </style></head><body>${el.innerHTML}</body></html>`)
                     w.document.close()
-                    // 等圖片載入後再列印
-                    const imgs = w.document.images
-                    if (imgs.length > 0) {
-                      let loaded = 0
-                      for (let i = 0; i < imgs.length; i++) {
-                        if (imgs[i].complete) { loaded++ } else { imgs[i].onload = imgs[i].onerror = () => { loaded++; if (loaded >= imgs.length) w.print() } }
-                      }
-                      if (loaded >= imgs.length) w.print()
-                    } else { w.print() }
+                    // 等 document 完全載入再列印（雷射印表機對時機敏感）
+                    const doPrint = () => { try { w.focus(); w.print(); setTimeout(() => w.close(), 500) } catch {} }
+                    if (w.document.readyState === 'complete') {
+                      setTimeout(doPrint, 150)
+                    } else {
+                      w.addEventListener('load', () => setTimeout(doPrint, 150))
+                    }
                     return
                   } else {
                     w.document.write(`<html><head><style>
@@ -863,9 +868,10 @@ export default function ShopeeOrderDetailPage() {
                   })()}
                 </div>
               ) : (
-                /* 收據 A5 橫式 */
+                /* 收據 */
                 <ReceiptTemplate order={order} items={items} skuProductNameMap={skuProductNameMap} variationIdMap={variationIdMap}
-                  buyerName={receiptBuyer} taxId={receiptTaxId} address={receiptAddress} />
+                  buyerName={receiptBuyer} taxId={receiptTaxId} address={receiptAddress}
+                  size={printModal === 'receipt_a5' ? 'a5' : 'small'} />
               )}
             </div>
           </div>
@@ -911,10 +917,11 @@ function numberToChinese(n: number): string {
   return result + '元整'
 }
 
-function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap, buyerName, taxId, address }: {
+function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap, buyerName, taxId, address, size = 'small' }: {
   order: ShopeeOrder; items: ShopeeItem[]
   skuProductNameMap: Map<string, string>; variationIdMap: Map<string, string>
   buyerName: string; taxId: string; address: string
+  size?: 'small' | 'a5'
 }) {
   const date = order.order_date ? new Date(order.order_date) : new Date()
   // 用台灣時區取得年月日
@@ -928,14 +935,45 @@ function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap, buye
   const stampUrl = typeof window !== 'undefined' ? localStorage.getItem('receipt_stamp_url') || '' : ''
   const s = { fontFamily: "'Microsoft JhengHei',sans-serif" }
 
-  const compact = items.length > 2
-  const z = {
+  const isA5 = size === 'a5'
+  const compact = !isA5 && items.length > 2
+  const z = isA5 ? {
+    line: { borderBottom: '1px solid #000', marginBottom: '4mm', paddingBottom: '4mm' },
+    pad: '14mm 14mm',
+    title: '36px',
+    titleSp: '12px',
+    titleMb: '3mm',
+    base: '16px',
+    dateFs: '16px',
+    mb1: '2mm',
+    mb2: '4mm',
+    dateMb: '6mm',
+    tblFs: '15px',
+    cellPad: '3mm 4mm',
+    totalFs: '22px',
+    chineseFs: '20px',
+    totalMt: '4mm',
+    legalFs: '14px',
+    legalLh: 1.8,
+    stampLabelMb: '5mm',
+    stampMt: '6mm',
+    stampW: '60mm',
+    stampPadTop: '2.5mm 3mm',
+    stampMidPad: '2mm 3mm',
+    stampFs: '16px',
+    stampSideFs: '15px',
+    stampTitleFs: '15px',
+    stampSubFs: '13px',
+    stampNumFs: '26px',
+    stampImg: '160px',
+  } : {
     line: { borderBottom: '1px solid #000', marginBottom: compact ? '1.5mm' : '2mm', paddingBottom: compact ? '1.5mm' : '2mm' },
     pad: compact ? '3mm 4mm' : '5mm',
     title: compact ? '16px' : '20px',
     titleSp: compact ? '4px' : '6px',
     titleMb: compact ? '0.5mm' : '1mm',
     base: compact ? '10px' : '12px',
+    dateFs: compact ? '10px' : '12px',
     mb1: compact ? '0.5mm' : '1mm',
     mb2: compact ? '1mm' : '2mm',
     dateMb: compact ? '2mm' : '3mm',
@@ -960,11 +998,11 @@ function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap, buye
   }
 
   return (
-    <div style={{ ...s, width: '100mm', minHeight: '150mm', padding: z.pad, fontSize: z.base, border: '1px solid #ccc', margin: '0 auto' }}>
+    <div className="receipt-root" style={{ ...s, width: isA5 ? '148mm' : '100mm', minHeight: isA5 ? '210mm' : '150mm', padding: z.pad, fontSize: z.base, border: '1px solid #ccc', margin: '0 auto' }}>
       <div style={{ fontSize: z.title, fontWeight: 'bold', textAlign: 'center', marginBottom: z.titleMb, letterSpacing: z.titleSp }}>
         國際電話卡收據
       </div>
-      <div style={{ fontSize: z.base, textAlign: 'center', color: '#000', marginBottom: z.dateMb }}>{dateStr}</div>
+      <div style={{ fontSize: z.dateFs, textAlign: 'center', color: '#000', marginBottom: z.dateMb }}>{dateStr}</div>
 
       <div style={{ fontSize: z.base, marginBottom: z.mb1 }}>買　受　人：{buyerName || ''}</div>
       <div style={{ fontSize: z.base, marginBottom: z.mb1 }}>統 一 編 號：{taxId || ''}</div>

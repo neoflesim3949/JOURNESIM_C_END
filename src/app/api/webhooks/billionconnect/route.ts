@@ -253,19 +253,41 @@ export async function POST(request: Request) {
     }
 
     case 'N002': {
-      // 流量開始
-      const { iccid } = tradeData
-      if (iccid) {
+      // 數據啟用通知：tradeData 為陣列，內含 iccid, startTime, endTime, apn, countryRegion, subOrderId, ...
+      const items = Array.isArray(tradeData) ? tradeData : (tradeData?.iccid ? [tradeData] : [])
+      const now = new Date().toISOString()
+      for (const it of items) {
+        const iccid: string | undefined = it?.iccid
+        if (!iccid) continue
+        // esim_profiles
         await supabase.from('esim_profiles').update({ status: 'active' }).eq('iccid', iccid)
+        // manual_iccids：寫入啟用/到期時間（N002 同時提供 start 與 end）
+        await supabase.from('manual_iccids').update({
+          activation_start_time: it.startTime || null,
+          activation_end_time: it.endTime || null,
+          activation_apn: it.apn || null,
+          activation_country_region: it.countryRegion || null,
+          activation_sub_order_id: it.subOrderId || null,
+          activation_updated_at: now,
+        }).eq('iccid', iccid)
       }
       break
     }
 
     case 'N003': {
-      // 流量結束
-      const { iccid } = tradeData
-      if (iccid) {
+      // 數據到期通知：tradeData 為陣列，內含 iccid, endTime, subOrderId, channelSubOrderId
+      const items = Array.isArray(tradeData) ? tradeData : (tradeData?.iccid ? [tradeData] : [])
+      const now = new Date().toISOString()
+      for (const it of items) {
+        const iccid: string | undefined = it?.iccid
+        if (!iccid) continue
+        // esim_profiles
         await supabase.from('esim_profiles').update({ status: 'expired' }).eq('iccid', iccid)
+        // manual_iccids：只覆蓋 endTime（N003 回傳為實際結束時間）
+        const update: Record<string, unknown> = { activation_updated_at: now }
+        if (it.endTime) update.activation_end_time = it.endTime
+        if (it.subOrderId) update.activation_sub_order_id = it.subOrderId
+        await supabase.from('manual_iccids').update(update).eq('iccid', iccid)
       }
       break
     }

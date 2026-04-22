@@ -36,9 +36,11 @@ export async function POST() {
     return NextResponse.json({ synced })
   } catch (err) {
     console.error('Country sync failed:', err)
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Sync failed' },
-      { status: 500 }
-    )
+    let msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('<!DOCTYPE') || msg.includes('<html')) {
+      const codeMatch = msg.match(/Error code (\d+)/i) || msg.match(/\b(502|503|504|500)\b/)
+      msg = codeMatch ? `上游服務暫時無回應（${codeMatch[1]}），請稍後再試` : '上游服務暫時無回應，請稍後再試'
+    }
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

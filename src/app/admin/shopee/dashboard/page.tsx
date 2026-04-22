@@ -42,11 +42,17 @@ function StatCards({ title, subtitle, cards }: { title: string; subtitle?: strin
 export default function ShopeeDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const today = new Date().toISOString().slice(0, 10)
-  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+  // 預設當月月初到月底（台灣時區）
+  const fmtTW = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+  const now = new Date()
+  const twParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
+  const twYear = Number(twParts.find(p => p.type === 'year')?.value || now.getFullYear())
+  const twMonth = Number(twParts.find(p => p.type === 'month')?.value || now.getMonth() + 1) - 1
+  const firstDay = fmtTW(new Date(twYear, twMonth, 1, 12)) // 用中午避免被時區推移
+  const lastDay = fmtTW(new Date(twYear, twMonth + 1, 0, 12))
   const [from, setFrom] = useState(firstDay)
-  const [to, setTo] = useState(today)
-  const [dateField, setDateField] = useState('wallet_date')
+  const [to, setTo] = useState(lastDay)
+  const [dateField, setDateField] = useState('order_date')
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
 

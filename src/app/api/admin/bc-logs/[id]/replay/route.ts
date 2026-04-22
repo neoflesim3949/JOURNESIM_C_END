@@ -139,8 +139,40 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     } else {
       summary.note = '找不到對應的蝦皮訂單明細'
     }
+  } else if (tradeType === 'N002' || tradeType === 'N003') {
+    // N002/N003 — 寫入 manual_iccids 的啟用/到期時間
+    const rawData = tradeData as unknown
+    const items = Array.isArray(rawData)
+      ? rawData
+      : (rawData && typeof rawData === 'object' && 'iccid' in (rawData as object) ? [rawData] : [])
+    const now = new Date().toISOString()
+    for (const it of items as { iccid?: string; startTime?: string; endTime?: string; apn?: string; countryRegion?: string; subOrderId?: string }[]) {
+      const iccid = it?.iccid
+      if (!iccid) continue
+      summary.matched++
+      if (tradeType === 'N002') {
+        await supabase.from('esim_profiles').update({ status: 'active' }).eq('iccid', iccid)
+        const { error } = await supabase.from('manual_iccids').update({
+          activation_start_time: it.startTime || null,
+          activation_end_time: it.endTime || null,
+          activation_apn: it.apn || null,
+          activation_country_region: it.countryRegion || null,
+          activation_sub_order_id: it.subOrderId || null,
+          activation_updated_at: now,
+        }).eq('iccid', iccid)
+        if (!error) summary.updated++
+      } else {
+        await supabase.from('esim_profiles').update({ status: 'expired' }).eq('iccid', iccid)
+        const update: Record<string, unknown> = { activation_updated_at: now }
+        if (it.endTime) update.activation_end_time = it.endTime
+        if (it.subOrderId) update.activation_sub_order_id = it.subOrderId
+        const { error } = await supabase.from('manual_iccids').update(update).eq('iccid', iccid)
+        if (!error) summary.updated++
+      }
+    }
+    if (summary.matched === 0) summary.note = 'payload 無 iccid 可處理'
   } else {
-    return NextResponse.json({ error: `暫不支援重放 ${tradeType}（目前僅支援 N009）` }, { status: 400 })
+    return NextResponse.json({ error: `暫不支援重放 ${tradeType}（目前支援 N002 / N003 / N009）` }, { status: 400 })
   }
 
   return NextResponse.json({ ok: true, summary })
