@@ -29,8 +29,19 @@ export async function GET(request: Request) {
   let settlements = allSettlements || []
   let settledOrderIds = [...new Set(settlements.map(s => s.shopee_order_id).filter(Boolean))]
 
+  // 過濾掉「不成立」訂單
+  if (settledOrderIds.length > 0) {
+    let invalidQuery = supabase.from('shopee_orders').select('id').in('id', settledOrderIds).eq('order_status', '不成立')
+    const { data: invalidOrders } = await invalidQuery
+    const invalidIds = new Set((invalidOrders || []).map(o => o.id))
+    if (invalidIds.size > 0) {
+      settlements = settlements.filter(s => !s.shopee_order_id || !invalidIds.has(s.shopee_order_id))
+      settledOrderIds = settledOrderIds.filter(id => !invalidIds.has(id))
+    }
+  }
+
   if (dateField === 'order_date' && (from || to)) {
-    let orderQuery = supabase.from('shopee_orders').select('id, order_date')
+    let orderQuery = supabase.from('shopee_orders').select('id, order_date').neq('order_status', '不成立')
     if (from) orderQuery = orderQuery.gte('order_date', from)
     if (to) orderQuery = orderQuery.lte('order_date', to + 'T23:59:59')
     const { data: filteredOrders } = await orderQuery
@@ -59,9 +70,10 @@ export async function GET(request: Request) {
   const settledPlatformRate = settledRevenue > 0 ? (settledPlatformFees / settledRevenue) * 100 : 0
   const settledProfitRate = settledRevenue > 0 ? (settledProfit / settledRevenue) * 100 : 0
 
-  // ─── 無金流的訂單 ───
+  // ─── 無金流的訂單（排除不成立）───
   let unsettledQuery = supabase.from('shopee_orders')
     .select('id, product_total, seller_coupon, transaction_fee, other_service_fee, payment_processing_fee, shopee_order_items(cost_twd, quantity)')
+    .neq('order_status', '不成立')
 
   if (accountId) unsettledQuery = unsettledQuery.eq('shopee_account_id', accountId)
   if (dateField === 'order_date') {

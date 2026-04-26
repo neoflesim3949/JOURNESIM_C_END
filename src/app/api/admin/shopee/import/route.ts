@@ -39,9 +39,11 @@ export async function POST(request: Request) {
     const first = orderRows[0]
 
     // Upsert 訂單
+    const shopeeStatus = first['訂單狀態'] || null
     const orderData = {
       shopee_order_number: orderNum,
-      order_status: first['訂單狀態'] || null,
+      order_status: shopeeStatus,
+      ...(shopeeStatus === '不成立' ? { internal_status: '不成立' } : {}),
       return_status: first['退貨 / 退款狀態'] || first['退貨/退款狀態'] || null,
       buyer_account: first['買家帳號'] || null,
       order_date: first['訂單成立日期'] || null,
