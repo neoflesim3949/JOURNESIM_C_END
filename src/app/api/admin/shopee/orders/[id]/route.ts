@@ -19,8 +19,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (order.order_status === '不成立') {
     expectedStatus = '不成立'
   } else {
-    const allDone = (items || []).length > 0 && (items || []).every(i => i.bc_order_id && i.iccid && (i.iccid as string[]).length > 0)
-    expectedStatus = allDone ? 'completed' : (items || []).some(i => i.bc_order_id) ? 'processing' : 'pending'
+    // 判斷單一品項是否已就緒：
+    // - eSIM：有 LPA、QR 或 ICCID 任一
+    // - SIM：有 ICCID
+    const isItemReady = (i: { delivery_type?: string | null; iccid?: string[] | null; lpa_code?: string | null; qr_code_url?: string | null }) => {
+      const hasIccid = !!(i.iccid && (i.iccid as string[]).length > 0)
+      if (i.delivery_type === 'esim') {
+        return hasIccid || !!i.lpa_code || !!i.qr_code_url
+      }
+      return hasIccid
+    }
+    const itemsArr = items || []
+    const allDone = itemsArr.length > 0 && itemsArr.every(isItemReady)
+    const someProcessing = itemsArr.some(i => i.bc_order_id || isItemReady(i))
+    expectedStatus = allDone ? 'completed' : someProcessing ? 'processing' : 'pending'
   }
   if (order.internal_status !== expectedStatus) {
     await supabase.from('shopee_orders').update({ internal_status: expectedStatus, updated_at: new Date().toISOString() }).eq('id', id)
