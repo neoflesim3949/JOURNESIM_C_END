@@ -50,13 +50,17 @@ export async function GET(request: Request) {
     settledOrderIds = [...new Set(settlements.map(s => s.shopee_order_id).filter(Boolean))]
   }
 
-  // 有金流的成本
+  // 有金流的成本與卡片數
   let settledCost = 0
+  let settledCardCount = 0
   if (settledOrderIds.length > 0) {
     const { data: items } = await supabase.from('shopee_order_items')
       .select('shopee_order_id, cost_twd, quantity')
       .in('shopee_order_id', settledOrderIds)
-    if (items) settledCost = items.reduce((sum, i) => sum + ((i.cost_twd ?? 0) * (i.quantity ?? 1)), 0)
+    if (items) {
+      settledCost = items.reduce((sum, i) => sum + ((i.cost_twd ?? 0) * (i.quantity ?? 1)), 0)
+      settledCardCount = items.reduce((sum, i) => sum + (i.quantity ?? 0), 0)
+    }
   }
 
   let settledRevenue = 0, settledPlatformFees = 0, settledWallet = 0
@@ -91,11 +95,15 @@ export async function GET(request: Request) {
   const unsettledOrders = (allOrders || []).filter(o => !allSettledIds.has(o.id))
 
   let unsettledRevenue = 0, unsettledPlatformFees = 0, unsettledCost = 0
+  let unsettledCardCount = 0
   for (const o of unsettledOrders) {
     unsettledRevenue += o.product_total ?? 0
     unsettledPlatformFees += Math.abs(o.transaction_fee ?? 0) + Math.abs(o.other_service_fee ?? 0) + Math.abs(o.payment_processing_fee ?? 0)
     const items = o.shopee_order_items as { cost_twd: number | null; quantity: number }[] | null
-    if (items) unsettledCost += items.reduce((sum: number, i: { cost_twd: number | null; quantity: number }) => sum + ((i.cost_twd ?? 0) * (i.quantity ?? 1)), 0)
+    if (items) {
+      unsettledCost += items.reduce((sum: number, i: { cost_twd: number | null; quantity: number }) => sum + ((i.cost_twd ?? 0) * (i.quantity ?? 1)), 0)
+      unsettledCardCount += items.reduce((sum: number, i: { cost_twd: number | null; quantity: number }) => sum + (i.quantity ?? 0), 0)
+    }
   }
   const unsettledEstProfit = unsettledRevenue - unsettledPlatformFees - unsettledCost
   const unsettledPlatformRate = unsettledRevenue > 0 ? (unsettledPlatformFees / unsettledRevenue) * 100 : 0
@@ -104,6 +112,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     settled: {
       order_count: settlements.length,
+      card_count: settledCardCount,
       total_revenue: Math.round(settledRevenue),
       platform_fees: Math.round(settledPlatformFees),
       platform_rate: Math.round(settledPlatformRate * 10) / 10,
@@ -114,6 +123,7 @@ export async function GET(request: Request) {
     },
     unsettled: {
       order_count: unsettledOrders.length,
+      card_count: unsettledCardCount,
       total_revenue: Math.round(unsettledRevenue),
       platform_fees: Math.round(unsettledPlatformFees),
       platform_rate: Math.round(unsettledPlatformRate * 10) / 10,

@@ -47,10 +47,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.iccid !== undefined) updates.iccid = body.iccid
     if (body.bc_order_id !== undefined) updates.bc_order_id = body.bc_order_id
     if (body.bc_sub_order_id !== undefined) updates.bc_sub_order_id = body.bc_sub_order_id
-    if (body.cost_cny !== undefined) updates.cost_cny = body.cost_cny
+    if (body.cost_cny !== undefined) {
+      updates.cost_cny = body.cost_cny
+      // 若只給 cost_cny 沒給 cost_twd，依匯率自動換算
+      if (body.cost_twd === undefined) {
+        const cnyVal = body.cost_cny == null ? null : Number(body.cost_cny)
+        if (cnyVal === null || isNaN(cnyVal)) {
+          updates.cost_twd = null
+        } else {
+          const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
+          const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
+          updates.cost_twd = Math.ceil(cnyVal / cnyRate)
+        }
+      }
+    }
     if (body.cost_twd !== undefined) updates.cost_twd = body.cost_twd
     if (body.status !== undefined) updates.status = body.status
     if (body.delivery_type !== undefined) updates.delivery_type = body.delivery_type
+    if (body.lpa_code !== undefined) updates.lpa_code = body.lpa_code
+    if (body.qr_code_url !== undefined) updates.qr_code_url = body.qr_code_url
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
     // 如果有對應 + shopee_sku_code，自動記錄到 mappings

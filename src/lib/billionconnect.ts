@@ -140,8 +140,9 @@ export async function cancelOrder(orderId: string) {
 // =====================================================
 // F011 — 查詢訂單資訊
 // =====================================================
-export async function getOrderInfo(channelOrderId: string) {
-  return callBC<BCOrderInfo>('F011', { channelOrderId })
+export async function getOrderInfo(params: string | { channelOrderId?: string; orderId?: string }) {
+  const data = typeof params === 'string' ? { channelOrderId: params } : params
+  return callBC<BCOrderInfo>('F011', data)
 }
 
 // =====================================================

@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Printer, Send, X, Undo2, Split, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Save, Printer, Send, X, Undo2, Split, Plus, Trash2, Download } from 'lucide-react'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
 function generateCode128SVG(text: string, height = 30, barWidth = 1.5): string {
@@ -267,6 +267,19 @@ export default function ShopeeOrderDetailPage() {
       load(); return
     }
     alert(data.warning || `售後申請成功，售後單號：${data.afterSaleId}`)
+    load()
+  }
+
+  async function syncFromBc(itemId: string) {
+    const orderId = prompt('請輸入 BC orderId（BC 後台的訂單編號，如 2776523850809139）：\n\n留空會嘗試使用此品項既有的 BC orderId')
+    if (orderId === null) return
+    const res = await fetch(`/api/admin/shopee/orders/${id}/items/${itemId}/sync-bc`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: orderId.trim() }),
+    })
+    const data = await res.json()
+    if (!res.ok) { alert(data.error || '撈取失敗'); return }
+    alert(`已撈回\nBC 訂單：${data.orderId}\n子單：${data.subOrderId}\nICCID：${(data.iccid || []).join(', ') || '(無)'}\n\n${data.note || ''}`)
     load()
   }
 
@@ -641,7 +654,21 @@ export default function ShopeeOrderDetailPage() {
                         <button onClick={() => cancelBcOrder(item)} className="text-red-400 hover:text-red-600 text-[10px] border border-red-300 px-1.5 py-0.5 rounded hover:bg-red-50">取消BC訂單</button>
                       </div>
                     )}
-                    {item.cost_twd != null && <div className="text-xs text-gray-500 mt-0.5">成本：¥{item.cost_cny ?? 0} · NT${item.cost_twd}</div>}
+                    <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5">
+                      <span>成本：</span>
+                      <span className="text-gray-400">¥</span>
+                      <input type="number" step="0.01" defaultValue={item.cost_cny ?? ''} placeholder="-"
+                        onBlur={async e => {
+                          const v = e.target.value === '' ? null : Number(e.target.value)
+                          if (v === item.cost_cny) return
+                          await fetch(`/api/admin/shopee/orders/${id}`, {
+                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ item_id: item.id, cost_cny: v }),
+                          }); load()
+                        }}
+                        className="w-20 px-1.5 py-0.5 border border-gray-200 rounded text-xs" />
+                      {item.cost_twd != null && <span className="text-gray-400">（NT$ {item.cost_twd}）</span>}
+                    </div>
                     {item.iccid && item.iccid.length > 0 && item.status !== 'matched' && item.status !== 'iccid_filled' && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {item.iccid.map((ic, j) => <span key={j} className="text-xs font-mono bg-gray-100 px-1.5 py-0.5 rounded">ICCID: {ic}</span>)}
@@ -686,30 +713,15 @@ export default function ShopeeOrderDetailPage() {
                       <button onClick={() => deleteItem(item.id)} title="刪除品項"
                         className="p-1 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                     )}
+                    {item.bc_sku_id && (
+                      <button onClick={() => syncFromBc(item.id)} title="從 BC 撈回訂單資料 (F011)"
+                        className="p-1 text-gray-400 hover:text-teal-600"><Download className="w-4 h-4" /></button>
+                    )}
                   </div>
                 </div>
                 {(item.status === 'matched' || item.status === 'iccid_filled') && item.delivery_type !== 'esim' && <IccidInput item={item} onSave={saveIccid} />}
-                {item.delivery_type === 'esim' && item.bc_order_id && (
-                  <div className="mt-3 pt-3 border-t border-gray-100 text-xs">
-                    {item.qr_code_url || item.lpa_code ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-indigo-700 font-medium">eSIM 已就緒</span>
-                          {item.iccid && item.iccid[0] && (
-                            <a href={`/eSIM/Install/${item.iccid[0]}`} target="_blank" rel="noreferrer"
-                              className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[11px] hover:bg-indigo-700">
-                              📱 用戶安裝頁
-                            </a>
-                          )}
-                        </div>
-                        {item.qr_code_url && <div>QR Code：<a href={item.qr_code_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{item.qr_code_url}</a></div>}
-                        {item.lpa_code && <div>LPA：<span className="font-mono break-all">{item.lpa_code}</span></div>}
-                        {item.iccid && item.iccid.length > 0 && <div>ICCID：{item.iccid.map((ic, j) => <span key={j} className="font-mono bg-gray-100 px-1.5 py-0.5 rounded ml-1">{ic}</span>)}</div>}
-                      </div>
-                    ) : (
-                      <div className="text-gray-500">等待 N009 eSIM 通知中⋯</div>
-                    )}
-                  </div>
+                {item.delivery_type === 'esim' && item.bc_sku_id && (
+                  <EsimManualEdit item={item} orderId={id} onSaved={load} />
                 )}
               </div>
             )
@@ -1118,6 +1130,127 @@ function OrderField({ label, value, onSave, readOnly, mono, className }: {
         onBlur={e => !readOnly && onSave && e.target.value !== value && onSave(e.target.value)}
         className={`mt-1 w-full px-2 py-1 border border-gray-200 rounded text-xs ${mono ? 'font-mono' : ''} ${readOnly ? 'bg-gray-50 text-gray-600' : ''}`}
       />
+    </div>
+  )
+}
+
+function EsimManualEdit({ item, orderId, onSaved }: { item: ShopeeItem; orderId: string; onSaved: () => void }) {
+  const qty = item.quantity || 1
+  const [editing, setEditing] = useState(false)
+  const buildEntries = () => Array.from({ length: qty }, (_, i) => i === 0
+    ? { lpa: item.lpa_code || '', iccid: (item.iccid && item.iccid[0]) || '', qr: item.qr_code_url || '' }
+    : { lpa: '', iccid: '', qr: '' }
+  )
+  const [entries, setEntries] = useState(buildEntries)
+  const [busy, setBusy] = useState(false)
+
+  // 進入編輯時依當下 qty 重新初始化
+  function startEditing() {
+    setEntries(buildEntries())
+    setEditing(true)
+  }
+
+  const hasData = item.qr_code_url || item.lpa_code
+  const isMulti = qty > 1
+
+  function updateEntry(idx: number, field: 'lpa' | 'iccid' | 'qr', value: string) {
+    setEntries(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e))
+  }
+
+  async function save() {
+    const cleaned = entries.map(e => ({ lpa_code: e.lpa.trim(), qr_code_url: e.qr.trim(), iccid: e.iccid.trim() }))
+    if (!cleaned.some(c => c.lpa_code || c.iccid || c.qr_code_url)) { alert('請至少填寫一筆'); return }
+
+    setBusy(true)
+    try {
+      if (isMulti) {
+        // qty>1 走 fill-esims（會拆單）
+        const res = await fetch(`/api/admin/shopee/orders/${orderId}/items/${item.id}/fill-esims`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries: cleaned }),
+        })
+        const data = await res.json()
+        if (!res.ok) { alert(data.error || '儲存失敗'); return }
+      } else {
+        // qty=1 直接 PATCH
+        const c = cleaned[0]
+        const hasContent = !!(c.lpa_code || c.iccid || c.qr_code_url)
+        await fetch(`/api/admin/shopee/orders/${orderId}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            item_id: item.id,
+            lpa_code: c.lpa_code || null,
+            qr_code_url: c.qr_code_url || null,
+            iccid: c.iccid ? [c.iccid] : null,
+            ...(hasContent && !item.bc_order_id ? { status: 'bc_ordered' } : {}),
+          }),
+        })
+      }
+      setEditing(false)
+      onSaved()
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-100 text-xs">
+      {hasData && !editing ? (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-indigo-700 font-medium">eSIM 已就緒</span>
+            {item.iccid && item.iccid[0] && (
+              <a href={`/eSIM/Install/${item.iccid[0]}`} target="_blank" rel="noreferrer"
+                className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[11px] hover:bg-indigo-700">📱 用戶安裝頁</a>
+            )}
+            <button onClick={startEditing} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[11px] hover:bg-gray-200">✏️ 編輯</button>
+          </div>
+          {item.qr_code_url && <div>QR Code：<a href={item.qr_code_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{item.qr_code_url}</a></div>}
+          {item.lpa_code && <div>LPA：<span className="font-mono break-all">{item.lpa_code}</span></div>}
+          {item.iccid && item.iccid.length > 0 && <div>ICCID：{item.iccid.map((ic, j) => <span key={j} className="font-mono bg-gray-100 px-1.5 py-0.5 rounded ml-1">{ic}</span>)}</div>}
+        </div>
+      ) : editing || !hasData ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-600 font-medium">
+              {hasData ? '編輯 eSIM 資料' : '手動填寫 eSIM 資料'}
+              {isMulti && <span className="text-purple-600 ml-1">（共 {qty} 張，儲存後會自動拆成 {qty} 個品項）</span>}
+            </span>
+            {hasData && <button onClick={() => setEditing(false)}
+              className="text-gray-400 hover:text-gray-600">取消</button>}
+          </div>
+          <div className="space-y-3">
+            {entries.map((e, idx) => (
+              <div key={idx} className="border border-gray-200 rounded p-2 bg-gray-50">
+                {isMulti && <div className="text-[11px] text-purple-600 font-medium mb-1.5">eSIM #{idx + 1}</div>}
+                <div className="space-y-1.5">
+                  <div>
+                    <label className="text-[11px] text-gray-500">LPA Code</label>
+                    <input value={e.lpa} onChange={ev => updateEntry(idx, 'lpa', ev.target.value)} placeholder="LPA:1$..."
+                      className="mt-0.5 w-full px-2 py-1 border border-gray-300 rounded font-mono text-[11px]" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] text-gray-500">ICCID</label>
+                      <input value={e.iccid} onChange={ev => updateEntry(idx, 'iccid', ev.target.value)} placeholder="89..."
+                        className="mt-0.5 w-full px-2 py-1 border border-gray-300 rounded font-mono text-[11px]" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-gray-500">QR Code URL（選填）</label>
+                      <input value={e.qr} onChange={ev => updateEntry(idx, 'qr', ev.target.value)} placeholder="https://..."
+                        className="mt-0.5 w-full px-2 py-1 border border-gray-300 rounded font-mono text-[11px]" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end">
+            <button onClick={save} disabled={busy}
+              className="px-3 py-1 bg-indigo-600 text-white rounded text-[11px] hover:bg-indigo-700 disabled:opacity-50">
+              {busy ? '儲存中⋯' : '儲存'}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

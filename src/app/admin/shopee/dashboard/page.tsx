@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { DollarSign, TrendingUp, ShoppingCart, Percent } from 'lucide-react'
+import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard } from 'lucide-react'
 
 interface GroupData {
-  order_count: number; total_revenue: number; platform_fees: number; platform_rate: number
+  order_count: number; card_count: number
+  total_revenue: number; platform_fees: number; platform_rate: number
   product_cost: number; profit_rate: number
   wallet_total?: number; profit?: number; est_profit?: number
 }
@@ -21,7 +22,7 @@ function StatCards({ title, subtitle, cards }: { title: string; subtitle?: strin
         <h2 className="text-base font-semibold text-gray-800">{title}</h2>
         {subtitle && <span className="text-xs text-gray-400">{subtitle}</span>}
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {cards.map(card => (
           <div key={card.label} className="bg-white rounded-xl border border-gray-200 p-5">
             <div className="flex items-center justify-between">
@@ -77,6 +78,7 @@ export default function ShopeeDashboardPage() {
 
   const settledCards = s ? [
     { label: '商品總價', value: `NT$ ${s.total_revenue.toLocaleString()}`, sub: `${s.order_count} 筆訂單`, icon: ShoppingCart, color: 'text-blue-600 bg-blue-50' },
+    { label: '卡片使用張數', value: `${s.card_count.toLocaleString()} 張`, sub: `${s.order_count} 筆訂單`, icon: CreditCard, color: 'text-cyan-600 bg-cyan-50' },
     { label: '平台費用', value: `NT$ ${s.platform_fees.toLocaleString()}`, sub: `費用率 ${s.platform_rate}%`, icon: Percent, color: 'text-orange-600 bg-orange-50' },
     { label: '商品成本', value: `NT$ ${s.product_cost.toLocaleString()}`, sub: `入帳 NT$ ${(s.wallet_total ?? 0).toLocaleString()}`, icon: DollarSign, color: 'text-purple-600 bg-purple-50' },
     { label: '利潤', value: `NT$ ${(s.profit ?? 0).toLocaleString()}`, sub: `利潤率 ${s.profit_rate}%`, icon: TrendingUp, color: (s.profit ?? 0) >= 0 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50' },
@@ -84,6 +86,7 @@ export default function ShopeeDashboardPage() {
 
   const unsettledCards = u ? [
     { label: '商品總價', value: `NT$ ${u.total_revenue.toLocaleString()}`, sub: `${u.order_count} 筆訂單`, icon: ShoppingCart, color: 'text-blue-600 bg-blue-50' },
+    { label: '卡片使用張數', value: `${u.card_count.toLocaleString()} 張`, sub: `${u.order_count} 筆訂單`, icon: CreditCard, color: 'text-cyan-600 bg-cyan-50' },
     { label: '平台費用', value: `NT$ ${u.platform_fees.toLocaleString()}`, sub: `費用率 ${u.platform_rate}%`, icon: Percent, color: 'text-orange-600 bg-orange-50' },
     { label: '商品成本', value: `NT$ ${u.product_cost.toLocaleString()}`, sub: '依訂單資料估算', icon: DollarSign, color: 'text-purple-600 bg-purple-50' },
     { label: '預估利潤', value: `NT$ ${(u.est_profit ?? 0).toLocaleString()}`, sub: `預估利潤率 ${u.profit_rate}%`, icon: TrendingUp, color: (u.est_profit ?? 0) >= 0 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50' },
