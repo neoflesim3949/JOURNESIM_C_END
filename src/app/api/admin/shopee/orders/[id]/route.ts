@@ -20,9 +20,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     expectedStatus = '不成立'
   } else {
     // 判斷單一品項是否已就緒：
+    // - 必須有成本回填（cost_cny 或 cost_twd 任一）
     // - eSIM：有 LPA、QR 或 ICCID 任一
     // - SIM：有 ICCID
-    const isItemReady = (i: { delivery_type?: string | null; iccid?: string[] | null; lpa_code?: string | null; qr_code_url?: string | null }) => {
+    const isItemReady = (i: { delivery_type?: string | null; iccid?: string[] | null; lpa_code?: string | null; qr_code_url?: string | null; cost_cny?: number | null; cost_twd?: number | null }) => {
+      const hasCost = (i.cost_cny != null && i.cost_cny > 0) || (i.cost_twd != null && i.cost_twd > 0)
+      if (!hasCost) return false
       const hasIccid = !!(i.iccid && (i.iccid as string[]).length > 0)
       if (i.delivery_type === 'esim') {
         return hasIccid || !!i.lpa_code || !!i.qr_code_url
