@@ -91,7 +91,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         const item = simWithIccid[i]
         const prices = bcPriceMap.get(item.bc_sku_id) || []
         const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
-        const costCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
+        // SIM 實體卡固定 +¥3 運費/手續費
+        const baseCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
+        const costCny = baseCny > 0 ? baseCny + 3 : 0
         const costTwd = Math.ceil(costCny / cnyRate)
         await supabase.from('shopee_order_items').update({
           bc_order_id: bcResult.orderId,
