@@ -24,7 +24,9 @@ const TRADE_TYPE_LABELS: Record<string, string> = {
   F042: 'eSIM服務狀態', F046: '套餐使用v2', F052: '充值商品',
   F054: '實名認證狀態', F056: '加速包商品',
   N001: 'SIM出貨通知', N002: '數據啟用通知', N003: '數據到期通知',
-  N009: 'eSIM QR碼通知', N013: '充值結果通知',
+  N004: '售後審核通知', N005: '退款通知', N006: '商品資訊修改通知',
+  N009: 'eSIM QR碼通知', N010: 'eSIM郵件發送通知', N012: 'eSIM狀態變更通知',
+  N013: '充值結果通知',
 }
 
 export default function BcLogsPage() {
@@ -36,6 +38,7 @@ export default function BcLogsPage() {
   const [filterDirection, setFilterDirection] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [distinctTypes, setDistinctTypes] = useState<string[]>([])
 
   async function load() {
     setLoading(true)
@@ -44,7 +47,12 @@ export default function BcLogsPage() {
     if (filterDirection) params.set('direction', filterDirection)
     if (filterStatus) params.set('status', filterStatus)
     const res = await fetch(`/api/admin/bc-logs?${params}`)
-    if (res.ok) { const d = await res.json(); setLogs(d.data || []); setTotal(d.total || 0) }
+    if (res.ok) {
+      const d = await res.json()
+      setLogs(d.data || [])
+      setTotal(d.total || 0)
+      if (Array.isArray(d.distinctTypes)) setDistinctTypes(d.distinctTypes)
+    }
     setLoading(false)
   }
 
@@ -79,20 +87,30 @@ export default function BcLogsPage() {
       </div>
 
       <div className="mt-4 flex gap-2 items-center flex-wrap">
-        <select value={filterType} onChange={e => setFilterType(e.target.value)}
-          className="px-2 py-1.5 border border-gray-300 rounded text-xs">
-          <option value="">全部類型</option>
-          <optgroup label="發送">
-            {['F001','F002','F003','F006','F007','F008','F010','F011','F012','F013','F014','F017','F020','F023','F040','F042','F046','F052','F054','F056'].map(t =>
-              <option key={t} value={t}>{t} {TRADE_TYPE_LABELS[t] || ''}</option>
-            )}
-          </optgroup>
-          <optgroup label="接收 (Webhook)">
-            {['N001','N002','N003','N009','N013'].map(t =>
-              <option key={t} value={t}>{t} {TRADE_TYPE_LABELS[t] || ''}</option>
-            )}
-          </optgroup>
-        </select>
+        {(() => {
+          const STATIC_F = ['F001','F002','F003','F006','F007','F008','F010','F011','F012','F013','F014','F017','F020','F023','F040','F042','F046','F052','F054','F056']
+          const STATIC_N = ['N001','N002','N003','N004','N005','N006','N009','N010','N012','N013']
+          const fTypes = Array.from(new Set([...STATIC_F, ...distinctTypes.filter(t => t.startsWith('F'))])).sort()
+          const nTypes = Array.from(new Set([...STATIC_N, ...distinctTypes.filter(t => t.startsWith('N'))])).sort()
+          const otherTypes = distinctTypes.filter(t => !t.startsWith('F') && !t.startsWith('N'))
+          return (
+            <select value={filterType} onChange={e => setFilterType(e.target.value)}
+              className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+              <option value="">全部類型</option>
+              <optgroup label="發送">
+                {fTypes.map(t => <option key={t} value={t}>{t} {TRADE_TYPE_LABELS[t] || ''}</option>)}
+              </optgroup>
+              <optgroup label="接收 (Webhook)">
+                {nTypes.map(t => <option key={t} value={t}>{t} {TRADE_TYPE_LABELS[t] || ''}</option>)}
+              </optgroup>
+              {otherTypes.length > 0 && (
+                <optgroup label="其他">
+                  {otherTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                </optgroup>
+              )}
+            </select>
+          )
+        })()}
         <select value={filterDirection} onChange={e => setFilterDirection(e.target.value)}
           className="px-2 py-1.5 border border-gray-300 rounded text-xs">
           <option value="">全部方向</option>

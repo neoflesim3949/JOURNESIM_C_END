@@ -14,33 +14,45 @@ export async function POST(request: Request) {
   const signValue = request.headers.get('x-sign-value') || ''
 
   if (!verifySign(rawBody, signValue)) {
-    // 記錄失敗的 webhook（方便排查）
+    const failBody = { tradeCode: '9999', tradeMsg: 'Invalid signature' }
     try {
       const supabaseLog = createAdminClient()
       const parsed = JSON.parse(rawBody).tradeType || 'unknown'
       await supabaseLog.from('bc_api_logs').insert({
         trade_type: parsed, direction: 'incoming',
-        request_body: JSON.parse(rawBody), response_body: null,
+        request_body: JSON.parse(rawBody), response_body: failBody,
         status: 'error', error_message: 'Invalid signature',
       })
     } catch {}
-    return NextResponse.json({ tradeCode: '9999', tradeMsg: 'Invalid signature' }, { status: 403 })
+    return NextResponse.json(failBody, { status: 403 })
   }
 
   const payload = JSON.parse(rawBody)
   const { tradeType, tradeData } = payload
   const supabase = createAdminClient()
 
-  // 記錄 BC webhook log
-  await supabase.from('bc_api_logs').insert({
+  // 記錄 BC webhook log（先插入，最後依結果回填 response_body）
+  const { data: logRow } = await supabase.from('bc_api_logs').insert({
     trade_type: tradeType, direction: 'incoming',
     request_body: payload, response_body: null, status: 'success',
-  })
+  }).select('id').single()
+  const logId = logRow?.id as string | undefined
 
-  // 冪等處理
-  const webhookId = `${tradeType}_${tradeData.orderId || tradeData.channelOrderId || tradeData.iccid}_${Date.now()}`
+  const writeResponseLog = async (body: unknown) => {
+    if (!logId) return
+    await supabase.from('bc_api_logs').update({ response_body: body }).eq('id', logId)
+  }
+
+  // 冪等處理（陣列型 tradeData：N002/N003/N006 等以第一筆做 key）
+  const tdFirst = Array.isArray(tradeData) ? tradeData[0] : tradeData
+  const idKey = tdFirst?.orderId || tdFirst?.channelOrderId || tdFirst?.afterSaleId || tdFirst?.iccid || tdFirst?.skuId || 'na'
+  const webhookId = `${tradeType}_${idKey}_${Date.now()}`
   const { data: existing } = await supabase.from('webhook_logs').select('id').eq('webhook_id', webhookId).single()
-  if (existing) return NextResponse.json({ tradeCode: '1000', tradeMsg: 'Already processed' })
+  if (existing) {
+    const dupBody = { tradeCode: '1000', tradeMsg: 'Already processed' }
+    await writeResponseLog(dupBody)
+    return NextResponse.json(dupBody)
+  }
 
   await supabase.from('webhook_logs').insert({ webhook_id: webhookId, trade_type: tradeType, payload: tradeData })
 
@@ -324,7 +336,63 @@ export async function POST(request: Request) {
       }
       break
     }
+
+    case 'N004':
+    case 'N005': {
+      // 售後審核 / 退款通知：目前無對應表，僅靠 bc_api_logs / webhook_logs 留底，方便查詢
+      // tradeData: { afterSaleId, auditStatus|refundState (1=成功,2=失敗), auditOpinion|refundOpinion }
+      console.log(`[${tradeType}] 售後/退款通知`, JSON.stringify(tradeData))
+      break
+    }
+
+    case 'N006': {
+      // 商品資訊修改通知：tradeData 為陣列，結構同 F002
+      // 收到後依 skuId 部分更新 bc_products，避免依賴每日全量 F002
+      const products = Array.isArray(tradeData) ? tradeData : (tradeData?.skuId ? [tradeData] : [])
+      const now = new Date().toISOString()
+      for (const p of products) {
+        if (!p?.skuId) continue
+        const countries = Array.isArray(p.country) ? p.country.map((c: { mcc: string; name: string; apn?: string; apnUsername?: string; apnPassword?: string; operatorInfo?: unknown }) => ({
+          mcc: c.mcc, name: c.name, apn: c.apn,
+          apnUsername: c.apnUsername, apnPassword: c.apnPassword,
+          operatorInfo: c.operatorInfo,
+        })) : null
+        const updates: Record<string, unknown> = { updated_at: now }
+        if (p.name !== undefined) updates.name = p.name
+        if (p.type !== undefined) updates.type = p.type
+        if (p.days !== undefined) updates.days = p.days ? Number(p.days) : null
+        if (p.capacity !== undefined) updates.capacity = p.capacity || null
+        if (p.highFlowSize !== undefined) updates.high_flow_size = p.highFlowSize || null
+        if (p.desc !== undefined) updates.desc = p.desc
+        if (countries) updates.country_data = countries
+        if (p.operatorInfo !== undefined) updates.operator_info = p.operatorInfo || null
+        await supabase.from('bc_products').update(updates).eq('sku_id', p.skuId)
+      }
+      break
+    }
+
+    case 'N010': {
+      // eSIM 郵件發送通知：BC 已寄出二維碼郵件
+      // 我們不寄信給用戶，僅記錄；如需顯示可新增欄位
+      console.log('[N010] eSIM 郵件已寄出', JSON.stringify(tradeData))
+      break
+    }
+
+    case 'N012': {
+      // eSIM 狀態變更通知：依 ICCID 同步 esim_profiles.status
+      // BC profileStatus 對照（參考 F042）：1=Released, 2=Enabled, 3=Disabled, 4=Deleted
+      const { subOrderList } = tradeData
+      const statusMap: Record<number, string> = { 1: 'released', 2: 'active', 3: 'disabled', 4: 'deleted' }
+      for (const sub of subOrderList || []) {
+        if (!sub?.iccid) continue
+        const status = statusMap[Number(sub.profileStatus)] || 'unknown'
+        await supabase.from('esim_profiles').update({ status }).eq('iccid', sub.iccid)
+      }
+      break
+    }
   }
 
-  return NextResponse.json({ tradeCode: '1000', tradeMsg: 'Success' })
+  const okBody = { tradeCode: '1000', tradeMsg: 'Success' }
+  await writeResponseLog(okBody)
+  return NextResponse.json(okBody)
 }
