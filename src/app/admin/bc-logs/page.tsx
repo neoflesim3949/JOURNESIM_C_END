@@ -126,6 +126,20 @@ export default function BcLogsPage() {
         <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
         <button onClick={() => { setFilterType(''); setFilterDirection(''); setFilterStatus(''); setPage(1); setTimeout(load, 0) }}
           className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
+        {filterType && (
+          <button
+            onClick={async () => {
+              if (!confirm(`確定要刪除所有「${filterType}」類型的 log？此操作無法復原。`)) return
+              const res = await fetch(`/api/admin/bc-logs?trade_type=${filterType}`, { method: 'DELETE' })
+              const d = await res.json()
+              if (!res.ok) { alert(d.error || '刪除失敗'); return }
+              alert(`已刪除 ${d.deleted} 筆 ${d.tradeType} log`)
+              setPage(1); load()
+            }}
+            className="px-3 py-1.5 bg-red-600 text-white rounded text-xs hover:bg-red-700">
+            刪除「{filterType}」類型
+          </button>
+        )}
       </div>
 
       {loading ? <p className="mt-8 text-sm text-gray-500">載入中...</p> : logs.length === 0 ? (

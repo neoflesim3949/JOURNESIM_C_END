@@ -34,3 +34,20 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ data: data || [], total: count || 0, distinctTypes })
 }
+
+// DELETE — 依 trade_type 清除 log（強制要求 trade_type，避免誤刪全部）
+export async function DELETE(request: Request) {
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { searchParams } = new URL(request.url)
+  const tradeType = (searchParams.get('trade_type') || '').trim()
+  if (!tradeType) return NextResponse.json({ error: '必須指定 trade_type' }, { status: 400 })
+
+  const supabase = createAdminClient()
+  const { error, count } = await supabase
+    .from('bc_api_logs')
+    .delete({ count: 'exact' })
+    .eq('trade_type', tradeType)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true, deleted: count || 0, tradeType })
+}
