@@ -221,13 +221,15 @@ export default function ShopeeOrderDetailPage() {
     }); load()
   }
 
-  // 對應 BC 商品（直接對應 bc_sku_id + copies）
+  // 對應 BC 商品（直接對應 bc_sku_id + copies）— 保留原已回填的 ICCID，不重設
   async function matchBcItem(itemId: string, bcSkuId: string, copies: string) {
     if (!matchingItem) return
+    const hasIccid = !!(matchingItem.iccid && matchingItem.iccid.length > 0)
     await fetch(`/api/admin/shopee/orders/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        item_id: itemId, bc_sku_id: bcSkuId, matched_copies: copies, status: 'matched',
+        item_id: itemId, bc_sku_id: bcSkuId, matched_copies: copies,
+        status: hasIccid ? 'iccid_filled' : 'matched',
         save_mapping: true,
         shopee_sku_code: matchingItem.shopee_sku_code,
         shopee_product_id: matchingItem.shopee_product_id,
@@ -1279,9 +1281,12 @@ function EditableIdName({ value, onSave, placeholder }: { value: string; onSave:
 }
 
 function IccidInput({ item, onSave }: { item: ShopeeItem; onSave: (id: string, iccids: string[]) => void }) {
-  const [text, setText] = useState(() => (item.iccid || []).filter(Boolean).join('\n'))
+  const dbText = (item.iccid || []).filter(Boolean).join('\n')
+  const [text, setText] = useState(dbText)
   const [startIccid, setStartIccid] = useState('')
   const [endIccid, setEndIccid] = useState('')
+  // 當 DB 的 iccid 改變（例如重新對應後 reload），同步覆蓋到輸入框
+  useEffect(() => { setText(dbText) }, [dbText])
   const lines = [...new Set(text.split(/[\n,]/).map(s => s.trim()).filter(Boolean))]
 
   function generateRange() {
