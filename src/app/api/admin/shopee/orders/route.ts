@@ -24,11 +24,13 @@ export async function GET(request: Request) {
   let query = supabase.from('shopee_orders').select('*, shopee_order_items(*), shopee_settlements(*)', { count: 'exact' })
 
   if (search) {
-    // 先用 iccid 模糊搜尋 shopee_order_items（iccid 為 JSONB 陣列，cast 成 text 做 ilike）
-    const { data: matchItems } = await supabase
+    // 先用 iccid 模糊搜尋 shopee_order_items（iccid 為 JSONB 陣列）
+    // PostgREST URL 用 * 當萬用字元，cast 成 text 做 ilike
+    const { data: matchItems, error: matchErr } = await supabase
       .from('shopee_order_items')
       .select('shopee_order_id')
-      .filter('iccid::text', 'ilike', `%${search}%`)
+      .or(`iccid::text.ilike.*${search}*`)
+    if (matchErr) console.error('[orders search] iccid match error:', matchErr)
     const iccidOrderIds = [...new Set((matchItems || []).map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean))]
     const orFilters = [
       `shopee_order_number.ilike.%${search}%`,
