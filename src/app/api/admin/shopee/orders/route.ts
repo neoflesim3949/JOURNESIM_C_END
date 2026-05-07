@@ -24,14 +24,34 @@ export async function GET(request: Request) {
   let query = supabase.from('shopee_orders').select('*, shopee_order_items(*), shopee_settlements(*)', { count: 'exact' })
 
   if (search) {
-    // 先用 iccid 模糊搜尋 shopee_order_items（iccid 為 JSONB 陣列）
-    // PostgREST URL 用 * 當萬用字元，cast 成 text 做 ilike
-    const { data: matchItems, error: matchErr } = await supabase
+    // 先用 iccid 搜尋 shopee_order_items（iccid 為 JSONB 陣列，用 contains 精準比對）
+    // 同時用前綴匹配（以 search 開頭的 iccid）做兼容：撈所有非空 iccid，JS 過濾
+    const trimmed = search.trim()
+    let iccidOrderIds: string[] = []
+
+    // 1) 精準匹配：iccid 陣列內含 trimmed
+    const { data: exactItems, error: exactErr } = await supabase
       .from('shopee_order_items')
       .select('shopee_order_id')
-      .or(`iccid::text.ilike.*${search}*`)
-    if (matchErr) console.error('[orders search] iccid match error:', matchErr)
-    const iccidOrderIds = [...new Set((matchItems || []).map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean))]
+      .contains('iccid', [trimmed])
+    if (exactErr) console.error('[orders search] iccid contains error:', exactErr)
+    iccidOrderIds = (exactItems || []).map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean)
+
+    // 2) 若精準沒中且 trimmed 像數字（>=4 碼），做前綴/部分匹配（撈出所有有 iccid 的列做 JS 過濾）
+    if (iccidOrderIds.length === 0 && /^\d{4,}$/.test(trimmed)) {
+      const { data: anyItems } = await supabase
+        .from('shopee_order_items')
+        .select('shopee_order_id, iccid')
+        .not('iccid', 'is', null)
+      const matched = (anyItems || []).filter((i: { iccid: unknown }) => {
+        const arr = Array.isArray(i.iccid) ? i.iccid : []
+        return arr.some((x) => typeof x === 'string' && x.includes(trimmed))
+      })
+      iccidOrderIds = matched.map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean)
+    }
+
+    iccidOrderIds = [...new Set(iccidOrderIds)]
+
     const orFilters = [
       `shopee_order_number.ilike.%${search}%`,
       `buyer_account.ilike.%${search}%`,
