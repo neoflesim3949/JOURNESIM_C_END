@@ -23,7 +23,22 @@ export async function GET(request: Request) {
   const supabase = createAdminClient()
   let query = supabase.from('shopee_orders').select('*, shopee_order_items(*), shopee_settlements(*)', { count: 'exact' })
 
-  if (search) query = query.or(`shopee_order_number.ilike.%${search}%,buyer_account.ilike.%${search}%,recipient_name.ilike.%${search}%,shopee_tracking_code.ilike.%${search}%`)
+  if (search) {
+    // 先用 iccid 模糊搜尋 shopee_order_items（iccid 為 JSONB 陣列，cast 成 text 做 ilike）
+    const { data: matchItems } = await supabase
+      .from('shopee_order_items')
+      .select('shopee_order_id')
+      .filter('iccid::text', 'ilike', `%${search}%`)
+    const iccidOrderIds = [...new Set((matchItems || []).map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean))]
+    const orFilters = [
+      `shopee_order_number.ilike.%${search}%`,
+      `buyer_account.ilike.%${search}%`,
+      `recipient_name.ilike.%${search}%`,
+      `shopee_tracking_code.ilike.%${search}%`,
+    ]
+    if (iccidOrderIds.length > 0) orFilters.push(`id.in.(${iccidOrderIds.join(',')})`)
+    query = query.or(orFilters.join(','))
+  }
   if (status) query = query.eq('internal_status', status)
   if (returnStatus === 'has') query = query.not('return_status', 'is', null).neq('return_status', '')
   else if (returnStatus === 'none') query = query.or('return_status.is.null,return_status.eq.')
