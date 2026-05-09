@@ -47,8 +47,9 @@ interface ShopeeItem {
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
 
 interface CardExpiryRow { iccid: string; type?: string; status?: string; expirationDate?: string; usageCount?: string }
-interface PlanUsageSub { subOrderId?: string; skuName?: string; planStatus?: string; planStartTime?: string; planEndTime?: string; totalDays?: string; remainingDays?: string; totalTraffic?: string; remainingTraffic?: string; copies?: string }
-interface PlanUsageResult { iccid: string; ok: boolean; data?: { subOrderList?: PlanUsageSub[] }; error?: string }
+interface PlanUsageSub { subOrderId?: string; skuName?: string; planStatus?: string; planStartTime?: string | null; planEndTime?: string | null; totalDays?: string; remainingDays?: string; totalTraffic?: string; remainingTraffic?: string; copies?: string }
+interface PlanUsageOrder { orderId?: string; channelOrderId?: string; subOrderList?: PlanUsageSub[] }
+interface PlanUsageResult { iccid: string; ok: boolean; data?: PlanUsageOrder[]; error?: string }
 interface CardUsageResp { iccids: string[]; cardExpiry: CardExpiryRow[]; cardError: string | null; planUsage: PlanUsageResult[] }
 
 interface ShopeeOrder {
@@ -940,10 +941,11 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
     '0': '載體有效', '1': '載體無效', '2': '已停用',
   }
 
-  function fmtTraffic(s?: string) {
-    if (!s) return '—'
+  function fmtTraffic(s?: string | null) {
+    if (s == null || s === '') return '—'
     const n = Number(s)
     if (isNaN(n)) return s
+    if (n < 0) return '不限'
     if (n >= 1024) return (n / 1024).toFixed(2) + ' GB'
     return n + ' MB'
   }
@@ -1010,20 +1012,23 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
                           </tr>
                         </thead>
                         <tbody>
-                          {(!p.data?.subOrderList || p.data.subOrderList.length === 0) && (
-                            <tr><td colSpan={7} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
-                          )}
-                          {p.data?.subOrderList?.map((s, j) => (
-                            <tr key={j} className="border-b">
-                              <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
-                              <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
-                              <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
-                              <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
-                              <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
-                              <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
-                              <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
-                            </tr>
-                          ))}
+                          {(() => {
+                            const subs = (p.data || []).flatMap(o => o.subOrderList || [])
+                            if (subs.length === 0) {
+                              return <tr><td colSpan={7} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
+                            }
+                            return subs.map((s, j) => (
+                              <tr key={j} className="border-b">
+                                <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
+                                <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
+                                <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
+                                <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
+                                <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
+                                <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
+                                <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
+                              </tr>
+                            ))
+                          })()}
                         </tbody>
                       </table>
                     )}
