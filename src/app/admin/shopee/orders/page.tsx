@@ -804,15 +804,8 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [sortPrice, setSortPrice] = useState<'asc' | 'desc' | null>(null)
 
-  // 載入 BC SKU 名稱 + BC 篩選選項
+  // 一次性載入 BC 篩選選項
   useEffect(() => {
-    const bcIds = [...new Set(groups.map(g => g.bc_sku_id).filter(Boolean))] as string[]
-    if (bcIds.length > 0) {
-      fetch(`/api/admin/shopee/bc-search?action=names&sku_ids=${bcIds.join(',')}`).then(r => r.json()).then((list: { sku_id: string; name: string }[]) => {
-        const nameMap = new Map(list.map(b => [b.sku_id, b.name]))
-        setGroups(prev => prev.map(g => g.bc_sku_id ? { ...g, bcSkuName: nameMap.get(g.bc_sku_id) || null } : g))
-      })
-    }
     fetch('/api/admin/shopee/bc-search?action=options').then(r => r.json()).then(d => {
       setBcCountries(d.countries || [])
       setBcDaysOpts(d.days || [])
@@ -820,6 +813,17 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
       setBcSpeedOpts(d.speeds || [])
     })
   }, [])
+
+  // 從 data 抓 bc_sku_id 載入名稱（data 抵達後才有 id 可查）
+  useEffect(() => {
+    if (!data || data.length === 0) return
+    const bcIds = [...new Set(data.flatMap(d => d.items).map(i => i.bc_sku_id).filter(Boolean))] as string[]
+    if (bcIds.length === 0) return
+    fetch(`/api/admin/shopee/bc-search?action=names&sku_ids=${bcIds.join(',')}`).then(r => r.json()).then((list: { sku_id: string; name: string }[]) => {
+      const nameMap = new Map(list.map(b => [b.sku_id, b.name]))
+      setGroups(prev => prev.map(g => g.bc_sku_id ? { ...g, bcSkuName: nameMap.get(g.bc_sku_id) || null } : g))
+    })
+  }, [data])
 
   // 點擊外部關閉國家下拉
   useEffect(() => {
