@@ -47,16 +47,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     console.log('[BC F017] 回傳結果:', JSON.stringify(result))
     console.log('========== [BC F017 完成] ==========')
 
-    // 清除系統內 BC 訂單記錄，回到 matched 狀態
+    // 清除系統內 BC 訂單記錄，但保留 ICCID（卡號為實體資產，取消 BC 訂單不代表卡片消失）
+    const keepIccid = Array.isArray(item.iccid) && (item.iccid as string[]).length > 0
     await supabase.from('shopee_order_items').update({
       bc_order_id: null,
       bc_sub_order_id: null,
       bc_channel_order_id: null,
       bc_channel_sub_order_id: null,
-      iccid: null,
       cost_cny: null,
       cost_twd: null,
-      status: 'matched',
+      status: keepIccid ? 'iccid_filled' : 'matched',
     }).eq('id', item_id)
 
     // 更新訂單狀態

@@ -268,11 +268,12 @@ export default function ShopeeOrderDetailPage() {
       // F017 失敗，提供強制取消選項
       const forceCancel = confirm(`售後申請失敗：${data.error}\n\n是否強制取消系統記錄？（不影響 BC 端，需手動至 BC 後台處理）`)
       if (!forceCancel) return
+      const keepIccid = !!(item.iccid && item.iccid.length > 0)
       await fetch(`/api/admin/shopee/orders/${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id: item.id, bc_order_id: null, bc_sub_order_id: null, iccid: null, cost_cny: null, cost_twd: null, status: 'matched' }),
+        body: JSON.stringify({ item_id: item.id, bc_order_id: null, bc_sub_order_id: null, cost_cny: null, cost_twd: null, status: keepIccid ? 'iccid_filled' : 'matched' }),
       })
-      alert('已強制清除系統記錄')
+      alert(keepIccid ? '已強制清除系統記錄（保留 ICCID）' : '已強制清除系統記錄')
       load(); return
     }
     alert(data.warning || `售後申請成功，售後單號：${data.afterSaleId}`)
@@ -994,46 +995,69 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
 
               <div>
                 <h4 className="text-xs font-semibold text-gray-500 mb-2">F012 套餐使用</h4>
-                {modal.data.planUsage.map((p, i) => (
-                  <div key={i} className="mb-3">
-                    <div className="text-xs text-gray-500 mb-1">ICCID: <span className="font-mono">{p.iccid}</span></div>
-                    {!p.ok && <div className="text-red-600 text-xs">{p.error}</div>}
-                    {p.ok && (
-                      <table className="w-full text-xs border border-gray-200">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-2 py-1.5 text-left border-b">套餐名稱</th>
-                            <th className="px-2 py-1.5 text-left border-b">狀態</th>
-                            <th className="px-2 py-1.5 text-left border-b">激活時間</th>
-                            <th className="px-2 py-1.5 text-left border-b">結束時間</th>
-                            <th className="px-2 py-1.5 text-left border-b">剩餘天數</th>
-                            <th className="px-2 py-1.5 text-left border-b">總流量</th>
-                            <th className="px-2 py-1.5 text-left border-b">剩餘流量</th>
+                <table className="w-full text-xs border border-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left border-b">套餐名稱</th>
+                      <th className="px-2 py-1.5 text-left border-b">ICCID</th>
+                      <th className="px-2 py-1.5 text-left border-b">狀態</th>
+                      <th className="px-2 py-1.5 text-left border-b">激活時間</th>
+                      <th className="px-2 py-1.5 text-left border-b">結束時間</th>
+                      <th className="px-2 py-1.5 text-left border-b">剩餘天數</th>
+                      <th className="px-2 py-1.5 text-left border-b">總流量</th>
+                      <th className="px-2 py-1.5 text-left border-b">剩餘流量</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const rows: { iccid: string; sub?: PlanUsageSub; error?: string }[] = []
+                      for (const p of modal.data.planUsage) {
+                        if (!p.ok) {
+                          rows.push({ iccid: p.iccid, error: p.error })
+                          continue
+                        }
+                        const subs = (p.data || []).flatMap(o => o.subOrderList || [])
+                        if (subs.length === 0) {
+                          rows.push({ iccid: p.iccid })
+                        } else {
+                          for (const s of subs) rows.push({ iccid: p.iccid, sub: s })
+                        }
+                      }
+                      if (rows.length === 0) {
+                        return <tr><td colSpan={8} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
+                      }
+                      return rows.map((r, j) => {
+                        if (r.error) return (
+                          <tr key={j} className="border-b">
+                            <td className="px-2 py-1.5 text-red-600" colSpan={1}>—</td>
+                            <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                            <td className="px-2 py-1.5 text-red-600" colSpan={6}>{r.error}</td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {(() => {
-                            const subs = (p.data || []).flatMap(o => o.subOrderList || [])
-                            if (subs.length === 0) {
-                              return <tr><td colSpan={7} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
-                            }
-                            return subs.map((s, j) => (
-                              <tr key={j} className="border-b">
-                                <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
-                                <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
-                                <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
-                                <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
-                                <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
-                                <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
-                                <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
-                              </tr>
-                            ))
-                          })()}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                ))}
+                        )
+                        const s = r.sub
+                        if (!s) return (
+                          <tr key={j} className="border-b">
+                            <td className="px-2 py-1.5 text-gray-400">無套餐</td>
+                            <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                            <td className="px-2 py-1.5 text-gray-400" colSpan={6}>—</td>
+                          </tr>
+                        )
+                        return (
+                          <tr key={j} className="border-b">
+                            <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
+                            <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                            <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
+                            <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
+                            <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
+                            <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
+                            <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
+                            <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
+                          </tr>
+                        )
+                      })
+                    })()}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
