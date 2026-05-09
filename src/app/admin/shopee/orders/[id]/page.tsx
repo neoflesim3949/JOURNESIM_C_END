@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Save, Printer, Send, X, Undo2, Split, Plus, Trash2, Download } from 'lucide-react'
+import { ArrowLeft, Save, Printer, Send, X, Undo2, Split, Plus, Trash2, Download, Activity } from 'lucide-react'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
 function generateCode128SVG(text: string, height = 30, barWidth = 1.5): string {
@@ -45,6 +45,11 @@ interface ShopeeItem {
 }
 
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
+
+interface CardExpiryRow { iccid: string; type?: string; status?: string; expirationDate?: string; usageCount?: string }
+interface PlanUsageSub { subOrderId?: string; skuName?: string; planStatus?: string; planStartTime?: string; planEndTime?: string; totalDays?: string; remainingDays?: string; totalTraffic?: string; remainingTraffic?: string; copies?: string }
+interface PlanUsageResult { iccid: string; ok: boolean; data?: { subOrderList?: PlanUsageSub[] }; error?: string }
+interface CardUsageResp { iccids: string[]; cardExpiry: CardExpiryRow[]; cardError: string | null; planUsage: PlanUsageResult[] }
 
 interface ShopeeOrder {
   id: string; shopee_order_number: string; order_status: string | null; return_status: string | null
@@ -127,6 +132,7 @@ export default function ShopeeOrderDetailPage() {
   const [settlements, setSettlements] = useState<Settlement[]>([])
   const [loading, setLoading] = useState(true)
   const [matchingItem, setMatchingItem] = useState<ShopeeItem | null>(null)
+  const [usageModal, setUsageModal] = useState<{ itemId: string; loading: boolean; data: CardUsageResp | null; error: string | null } | null>(null)
   // 自設名稱（商品名稱 by SKU code, 規格名稱 by variation ID）
   const [skuProductNameMap, setSkuProductNameMap] = useState<Map<string, string>>(new Map())
   const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
@@ -270,6 +276,17 @@ export default function ShopeeOrderDetailPage() {
     }
     alert(data.warning || `售後申請成功，售後單號：${data.afterSaleId}`)
     load()
+  }
+
+  async function openUsage(itemId: string) {
+    setUsageModal({ itemId, loading: true, data: null, error: null })
+    const res = await fetch(`/api/admin/shopee/orders/${id}/items/${itemId}/card-usage`)
+    const d = await res.json()
+    if (!res.ok) {
+      setUsageModal({ itemId, loading: false, data: null, error: d.error || '查詢失敗' })
+      return
+    }
+    setUsageModal({ itemId, loading: false, data: d, error: null })
   }
 
   async function syncFromBc(itemId: string) {
@@ -719,6 +736,10 @@ export default function ShopeeOrderDetailPage() {
                       <button onClick={() => syncFromBc(item.id)} title="從 BC 撈回訂單資料 (F011)"
                         className="p-1 text-gray-400 hover:text-teal-600"><Download className="w-4 h-4" /></button>
                     )}
+                    {item.iccid && item.iccid.length > 0 && (
+                      <button onClick={() => openUsage(item.id)} title="查看卡與套餐使用狀況 (F010 + F012)"
+                        className="p-1 text-gray-400 hover:text-emerald-600"><Activity className="w-4 h-4" /></button>
+                    )}
                   </div>
                 </div>
                 {(item.status === 'matched' || item.status === 'iccid_filled') && item.delivery_type !== 'esim' && <IccidInput item={item} onSave={saveIccid} />}
@@ -901,6 +922,118 @@ export default function ShopeeOrderDetailPage() {
         />
       )}
 
+      {/* 卡 + 套餐使用狀況彈窗 */}
+      {usageModal && (
+        <CardUsageModal modal={usageModal} onClose={() => setUsageModal(null)} />
+      )}
+
+    </div>
+  )
+}
+
+// 卡 + 套餐使用狀況彈窗（F010 + F012）
+function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: boolean; data: CardUsageResp | null; error: string | null }; onClose: () => void }) {
+  const PLAN_STATUS_LABEL: Record<string, string> = {
+    '0': '未使用', '1': '使用中', '2': '已用完', '3': '已過期', '4': '已退訂',
+  }
+  const CARD_STATUS_LABEL: Record<string, string> = {
+    '0': '載體有效', '1': '載體無效', '2': '已停用',
+  }
+
+  function fmtTraffic(s?: string) {
+    if (!s) return '—'
+    const n = Number(s)
+    if (isNaN(n)) return s
+    if (n >= 1024) return (n / 1024).toFixed(2) + ' GB'
+    return n + ' MB'
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+          <h3 className="font-semibold">卡與套餐使用狀況</h3>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex-1 overflow-auto p-5 text-sm">
+          {modal.loading && <div className="text-gray-500">查詢中…（同時打 F010 + F012，每張 ICCID 一次 F012）</div>}
+          {modal.error && <div className="text-red-600">{modal.error}</div>}
+          {modal.data && (
+            <>
+              <div className="mb-4">
+                <h4 className="text-xs font-semibold text-gray-500 mb-2">F010 載體有效期</h4>
+                {modal.data.cardError && <div className="text-red-600 text-xs mb-1">{modal.data.cardError}</div>}
+                <table className="w-full text-xs border border-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left border-b">ICCID</th>
+                      <th className="px-2 py-1.5 text-left border-b">類型</th>
+                      <th className="px-2 py-1.5 text-left border-b">載體狀態</th>
+                      <th className="px-2 py-1.5 text-left border-b">截止日</th>
+                      <th className="px-2 py-1.5 text-left border-b">已用次數</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modal.data.cardExpiry.length === 0 && (
+                      <tr><td colSpan={5} className="px-2 py-2 text-gray-400 text-center">無資料</td></tr>
+                    )}
+                    {modal.data.cardExpiry.map((c, i) => (
+                      <tr key={i} className="border-b">
+                        <td className="px-2 py-1.5 font-mono">{c.iccid}</td>
+                        <td className="px-2 py-1.5">{c.type || '—'}</td>
+                        <td className="px-2 py-1.5">{CARD_STATUS_LABEL[c.status || ''] || c.status || '—'}</td>
+                        <td className="px-2 py-1.5">{c.expirationDate || '—'}</td>
+                        <td className="px-2 py-1.5">{c.usageCount || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div>
+                <h4 className="text-xs font-semibold text-gray-500 mb-2">F012 套餐使用</h4>
+                {modal.data.planUsage.map((p, i) => (
+                  <div key={i} className="mb-3">
+                    <div className="text-xs text-gray-500 mb-1">ICCID: <span className="font-mono">{p.iccid}</span></div>
+                    {!p.ok && <div className="text-red-600 text-xs">{p.error}</div>}
+                    {p.ok && (
+                      <table className="w-full text-xs border border-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-2 py-1.5 text-left border-b">套餐名稱</th>
+                            <th className="px-2 py-1.5 text-left border-b">狀態</th>
+                            <th className="px-2 py-1.5 text-left border-b">激活時間</th>
+                            <th className="px-2 py-1.5 text-left border-b">結束時間</th>
+                            <th className="px-2 py-1.5 text-left border-b">剩餘天數</th>
+                            <th className="px-2 py-1.5 text-left border-b">總流量</th>
+                            <th className="px-2 py-1.5 text-left border-b">剩餘流量</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(!p.data?.subOrderList || p.data.subOrderList.length === 0) && (
+                            <tr><td colSpan={7} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
+                          )}
+                          {p.data?.subOrderList?.map((s, j) => (
+                            <tr key={j} className="border-b">
+                              <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
+                              <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
+                              <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
+                              <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
+                              <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
+                              <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
+                              <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
