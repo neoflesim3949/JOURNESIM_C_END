@@ -755,29 +755,35 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
   onClose: () => void
   onSaved: () => void
 }) {
-  const skuMap = new Map<string, SkuGroup>()
-  for (const d of data) {
-    for (const item of d.items) {
-      const sku = item.shopee_sku_code || ''
-      if (!sku) continue
-      if (skuMap.has(sku)) { skuMap.get(sku)!.count++; continue }
-      skuMap.set(sku, {
-        shopee_sku_code: sku,
-        shopee_product_name: item.shopee_product_name || '',
-        shopee_variation_name: item.shopee_variation_name || '',
-        shopee_product_id: item.shopee_product_id || '',
-        shopee_variation_id: item.shopee_variation_id || '',
-        customProductName: skuProductNameMap.get(sku) || '',
-        customVariationName: variationIdMap.get(item.shopee_variation_id || '') || '',
-        bc_sku_id: item.bc_sku_id,
-        bcSkuName: null,
-        matched_copies: item.matched_copies,
-        count: 1,
-      })
-    }
-  }
+  const [groups, setGroups] = useState<SkuGroup[]>([])
 
-  const [groups, setGroups] = useState<SkuGroup[]>(() => [...skuMap.values()])
+  // data 是非同步 fetch 進來，用 effect 在資料抵達時重算 groups（避免「要點兩次才有資料」）
+  useEffect(() => {
+    if (!data || data.length === 0) { setGroups([]); return }
+    const skuMap = new Map<string, SkuGroup>()
+    for (const d of data) {
+      for (const item of d.items) {
+        const sku = item.shopee_sku_code || ''
+        if (!sku) continue
+        if (skuMap.has(sku)) { skuMap.get(sku)!.count++; continue }
+        skuMap.set(sku, {
+          shopee_sku_code: sku,
+          shopee_product_name: item.shopee_product_name || '',
+          shopee_variation_name: item.shopee_variation_name || '',
+          shopee_product_id: item.shopee_product_id || '',
+          shopee_variation_id: item.shopee_variation_id || '',
+          customProductName: skuProductNameMap.get(sku) || '',
+          customVariationName: variationIdMap.get(item.shopee_variation_id || '') || '',
+          bc_sku_id: item.bc_sku_id,
+          bcSkuName: null,
+          matched_copies: item.matched_copies,
+          count: 1,
+        })
+      }
+    }
+    setGroups([...skuMap.values()])
+  }, [data, skuProductNameMap, variationIdMap])
+
   const [saving, setSaving] = useState(false)
   const [matchingIdx, setMatchingIdx] = useState<number | null>(null)
   // BC 搜尋（完整篩選）
