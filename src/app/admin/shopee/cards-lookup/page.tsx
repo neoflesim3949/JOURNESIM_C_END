@@ -45,6 +45,9 @@ export default function CardsLookupPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState<string | null>(null) // 正在送 F017 的 channelSubOrderId
+  const [onlyUnused, setOnlyUnused] = useState(true)
+  const [selected, setSelected] = useState<Set<string>>(new Set()) // key = `${iccid}|${channelSubOrderId}`
+  const [batchWorking, setBatchWorking] = useState(false)
 
   async function handleLookup() {
     const iccids = [...new Set(text.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean))]
@@ -60,6 +63,69 @@ export default function CardsLookupPage() {
       if (!res.ok) { setError(d.error || '查詢失敗'); return }
       setRows(d.rows || [])
     } finally { setLoading(false) }
+  }
+
+  // 把目前可顯示的 row（含過濾後）全部攤平 — 用於全選
+  function getVisibleRows() {
+    const arr: { iccid: string; sub: PlanSub; order: PlanOrder; key: string }[] = []
+    for (const r of rows) {
+      if (!r.plan.ok) continue
+      for (const o of r.plan.orders || []) {
+        for (const s of o.subOrderList || []) {
+          if (onlyUnused && (s.planStatus || '') !== '0') continue
+          arr.push({ iccid: r.iccid, sub: s, order: o, key: `${r.iccid}|${s.channelSubOrderId || ''}` })
+        }
+      }
+    }
+    return arr
+  }
+
+  function toggleSelect(key: string) {
+    setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }
+  function toggleSelectAll() {
+    const visible = getVisibleRows()
+    const allKeys = visible.map(v => v.key)
+    const allSelected = allKeys.length > 0 && allKeys.every(k => selected.has(k))
+    setSelected(allSelected ? new Set() : new Set(allKeys))
+  }
+
+  async function handleBatchAfterSale() {
+    const visible = getVisibleRows()
+    const picked = visible.filter(v => selected.has(v.key))
+    if (picked.length === 0) { alert('請先勾選'); return }
+    const reason = prompt(`對 ${picked.length} 張卡批次申請售後\n請輸入原因代碼：\n20 = 無理由退訂\n29 = eSIM 未下載退訂`)
+    if (reason === null) return
+    if (!reason.trim()) { alert('請填寫原因代碼'); return }
+    if (!confirm(`確定對 ${picked.length} 張卡申請售後？同 channelOrderId 的會合併到同一張售後單，由 BC 自動拆。`)) return
+
+    setBatchWorking(true)
+    try {
+      const res = await fetch('/api/admin/cards-lookup/aftersale-batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: reason.trim(),
+          items: picked.map(p => ({
+            iccid: p.iccid,
+            channelSubOrderId: p.sub.channelSubOrderId,
+            channelOrderId: p.order.channelOrderId,
+            orderId: p.order.orderId,
+          })),
+        }),
+      })
+      const d = await res.json()
+      if (!res.ok) { alert('批次售後失敗：' + (d.error || '未知錯誤')); return }
+      const ok = (d.results || []).filter((r: { ok: boolean }) => r.ok).length
+      const fail = (d.results || []).filter((r: { ok: boolean }) => !r.ok).length
+      const skipped = (d.failed || []).length
+      const detail = (d.results || []).map((r: { ok: boolean; channelOrderId: string; iccids: string[]; afterSaleId?: string; error?: string }) =>
+        r.ok
+          ? `✅ ${r.channelOrderId} (${r.iccids.length} 張) → ${r.afterSaleId}`
+          : `❌ ${r.channelOrderId} (${r.iccids.length} 張): ${r.error}`
+      ).join('\n')
+      alert(`批次完成\n成功 ${ok} 組 / 失敗 ${fail} 組${skipped > 0 ? ` / 跳過 ${skipped} 張（缺 channelOrderId）` : ''}\n\n${detail}`)
+      setSelected(new Set())
+    } finally { setBatchWorking(false) }
   }
 
   async function handleAfterSale(iccid: string, sub: PlanSub, order: PlanOrder) {
@@ -104,6 +170,16 @@ export default function CardsLookupPage() {
           </button>
           {rows.length > 0 && <span className="text-xs text-gray-500">已查詢 {rows.length} 筆</span>}
           {error && <span className="text-xs text-red-600">{error}</span>}
+          <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
+            <input type="checkbox" checked={onlyUnused} onChange={e => setOnlyUnused(e.target.checked)} />
+            只顯示「未使用」
+          </label>
+          {selected.size > 0 && (
+            <button onClick={handleBatchAfterSale} disabled={batchWorking}
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-60">
+              {batchWorking ? '送出中…' : `批次申請售後 (${selected.size})`}
+            </button>
+          )}
         </div>
       </div>
 
@@ -112,6 +188,13 @@ export default function CardsLookupPage() {
           <table className="w-full text-xs">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-3 py-2 text-left border-b">
+                  {(() => {
+                    const visible = getVisibleRows()
+                    const allSelected = visible.length > 0 && visible.every(v => selected.has(v.key))
+                    return <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
+                  })()}
+                </th>
                 <th className="px-3 py-2 text-left border-b">ICCID</th>
                 <th className="px-3 py-2 text-left border-b">載體狀態</th>
                 <th className="px-3 py-2 text-left border-b">截止日</th>
@@ -130,12 +213,18 @@ export default function CardsLookupPage() {
                 const subs: { sub: PlanSub; order: PlanOrder }[] = []
                 if (r.plan.ok) {
                   for (const o of r.plan.orders || []) {
-                    for (const s of o.subOrderList || []) subs.push({ sub: s, order: o })
+                    for (const s of o.subOrderList || []) {
+                      if (onlyUnused && (s.planStatus || '') !== '0') continue
+                      subs.push({ sub: s, order: o })
+                    }
                   }
                 }
+                // 只顯示未使用 → 無未使用套餐的整列就不顯示
                 if (subs.length === 0) {
+                  if (onlyUnused) return []
                   return [(
                     <tr key={r.iccid} className="border-b hover:bg-gray-50">
+                      <td className="px-3 py-2"></td>
                       <td className="px-3 py-2 font-mono">{r.iccid}</td>
                       <td className="px-3 py-2">{CARD_STATUS[r.card?.status || ''] || r.card?.status || '—'}</td>
                       <td className="px-3 py-2">{r.card?.expirationDate || '—'}</td>
@@ -145,8 +234,13 @@ export default function CardsLookupPage() {
                     </tr>
                   )]
                 }
-                return subs.map(({ sub, order }, i) => (
+                return subs.map(({ sub, order }, i) => {
+                  const key = `${r.iccid}|${sub.channelSubOrderId || ''}`
+                  return (
                   <tr key={`${r.iccid}-${i}`} className="border-b hover:bg-gray-50">
+                    <td className="px-3 py-2">
+                      <input type="checkbox" checked={selected.has(key)} onChange={() => toggleSelect(key)} />
+                    </td>
                     {i === 0 && (
                       <>
                         <td className="px-3 py-2 font-mono align-top" rowSpan={subs.length}>{r.iccid}</td>
@@ -172,7 +266,8 @@ export default function CardsLookupPage() {
                       </button>
                     </td>
                   </tr>
-                ))
+                  )
+                })
               })}
             </tbody>
           </table>
