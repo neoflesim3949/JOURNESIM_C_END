@@ -756,10 +756,15 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
   onSaved: () => void
 }) {
   const [groups, setGroups] = useState<SkuGroup[]>([])
+  // 用 ref 抓最新的 maps，避免 effect 把 maps 列為 dependency 觸發群組重建
+  const nameMapsRef = useRef({ skuProductNameMap, variationIdMap })
+  useEffect(() => { nameMapsRef.current = { skuProductNameMap, variationIdMap } }, [skuProductNameMap, variationIdMap])
 
   // data 是非同步 fetch 進來，用 effect 在資料抵達時重算 groups（避免「要點兩次才有資料」）
+  // 故意不把 maps 放進 deps：儲存後父層會 refetch maps，若依賴會把使用者剛儲存的 bcSkuName 覆蓋掉
   useEffect(() => {
     if (!data || data.length === 0) { setGroups([]); return }
+    const { skuProductNameMap: nameMap, variationIdMap: varMap } = nameMapsRef.current
     const skuMap = new Map<string, SkuGroup>()
     for (const d of data) {
       for (const item of d.items) {
@@ -772,8 +777,8 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
           shopee_variation_name: item.shopee_variation_name || '',
           shopee_product_id: item.shopee_product_id || '',
           shopee_variation_id: item.shopee_variation_id || '',
-          customProductName: skuProductNameMap.get(sku) || '',
-          customVariationName: variationIdMap.get(item.shopee_variation_id || '') || '',
+          customProductName: nameMap.get(sku) || '',
+          customVariationName: varMap.get(item.shopee_variation_id || '') || '',
           bc_sku_id: item.bc_sku_id,
           bcSkuName: null,
           matched_copies: item.matched_copies,
@@ -782,7 +787,7 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
       }
     }
     setGroups([...skuMap.values()])
-  }, [data, skuProductNameMap, variationIdMap])
+  }, [data])
 
   const [saving, setSaving] = useState(false)
   const [matchingIdx, setMatchingIdx] = useState<number | null>(null)
