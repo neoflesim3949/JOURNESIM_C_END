@@ -116,48 +116,44 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
   }
 
-  // ===== eSIM → F040（不需 ICCID，透過 N009 webhook 回傳 QR/LPA） =====
-  if (esimItems.length > 0) {
+  // ===== eSIM → F040 =====
+  // BC 對 F040 有「超过子订单数量」限制，因此一張 BC 訂單只送一個 eSIM 品項
+  // 每個品項各拿一個獨立的 channelOrderId，N009 webhook 會依 channelSubOrderId 回填 QR/LPA
+  for (const item of esimItems) {
     const channelOrderId = generateSubOrderId('esim')
-    const subOrderList = esimItems.map((item, idx) => ({
-      channelSubOrderId: generateSkuId(channelOrderId, idx + 1),
+    const channelSubOrderId = generateSkuId(channelOrderId, 1)
+    const subOrderList = [{
+      channelSubOrderId,
       deviceSkuId: item.bc_sku_id as string,
       planSkuCopies: item.matched_copies || '1',
       number: String(item.quantity || 1),
-    }))
-
+    }]
     try {
       console.log('========== [BC F040 送出 eSIM 訂單] ==========')
-      console.log('[BC F040] 蝦皮訂單ID:', id)
+      console.log('[BC F040] 蝦皮訂單ID:', id, ' item:', item.id)
       console.log('[BC F040] channelOrderId:', channelOrderId)
       console.log('[BC F040] subOrderList:', JSON.stringify(subOrderList, null, 2))
       const bcResult = await createEsimOrder({ channelOrderId, subOrderList })
       console.log('[BC F040] 回傳結果:', JSON.stringify(bcResult, null, 2))
-      for (let i = 0; i < esimItems.length; i++) {
-        const bcSub = bcResult.subOrderList?.[i]
-        const item = esimItems[i]
-        const prices = bcPriceMap.get(item.bc_sku_id) || []
-        const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
-        const costCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
-        const costTwd = Math.ceil(costCny / cnyRate)
-        await supabase.from('shopee_order_items').update({
-          bc_order_id: bcResult.orderId,
-          bc_sub_order_id: bcSub?.subOrderId || null,
-          bc_channel_order_id: channelOrderId,
-          bc_channel_sub_order_id: subOrderList[i].channelSubOrderId,
-          cost_cny: costCny,
-          cost_twd: costTwd,
-          status: 'bc_ordered',
-        }).eq('id', item.id)
-        results.push({ item_id: item.id, bc_order_id: bcResult.orderId })
-      }
-      console.log('========== [BC F040 完成] ==========')
+      const bcSub = bcResult.subOrderList?.[0]
+      const prices = bcPriceMap.get(item.bc_sku_id) || []
+      const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
+      const costCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
+      const costTwd = Math.ceil(costCny / cnyRate)
+      await supabase.from('shopee_order_items').update({
+        bc_order_id: bcResult.orderId,
+        bc_sub_order_id: bcSub?.subOrderId || null,
+        bc_channel_order_id: channelOrderId,
+        bc_channel_sub_order_id: channelSubOrderId,
+        cost_cny: costCny,
+        cost_twd: costTwd,
+        status: 'bc_ordered',
+      }).eq('id', item.id)
+      results.push({ item_id: item.id, bc_order_id: bcResult.orderId })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'F040 失敗'
-      console.error('[BC F040] error:', msg)
-      for (const item of esimItems) {
-        results.push({ item_id: item.id, error: msg })
-      }
+      console.error('[BC F040] error:', msg, ' item:', item.id)
+      results.push({ item_id: item.id, error: msg })
     }
   }
 

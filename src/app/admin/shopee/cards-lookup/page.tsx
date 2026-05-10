@@ -84,7 +84,7 @@ export default function CardsLookupPage() {
     setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
   }
   function toggleSelectAll() {
-    const visible = getVisibleRows()
+    const visible = getVisibleRows().filter(v => v.order.channelOrderId || v.sub.channelSubOrderId)
     const allKeys = visible.map(v => v.key)
     const allSelected = allKeys.length > 0 && allKeys.every(k => selected.has(k))
     setSelected(allSelected ? new Set() : new Set(allKeys))
@@ -236,10 +236,14 @@ export default function CardsLookupPage() {
                 }
                 return subs.map(({ sub, order }, i) => {
                   const key = `${r.iccid}|${sub.channelSubOrderId || ''}`
+                  const noChannel = !order.channelOrderId && !sub.channelSubOrderId
                   return (
-                  <tr key={`${r.iccid}-${i}`} className="border-b hover:bg-gray-50">
+                  <tr key={`${r.iccid}-${i}`} className={`border-b hover:bg-gray-50 ${noChannel ? 'bg-amber-50' : ''}`}>
                     <td className="px-3 py-2">
-                      <input type="checkbox" checked={selected.has(key)} onChange={() => toggleSelect(key)} />
+                      <input type="checkbox" checked={selected.has(key)}
+                        onChange={() => toggleSelect(key)}
+                        disabled={noChannel}
+                        title={noChannel ? '此卡無 channelOrderId，無法透過 F017 退卡' : ''} />
                     </td>
                     {i === 0 && (
                       <>
@@ -257,13 +261,20 @@ export default function CardsLookupPage() {
                     <td className="px-3 py-2">
                       <div className="font-mono text-[10px] text-gray-600">{order.orderId || '—'}</div>
                       <div className="font-mono text-[10px] text-gray-400">{sub.channelSubOrderId || '—'}</div>
+                      {noChannel && <div className="text-[10px] text-amber-700 mt-0.5">⚠️ 無渠道單號</div>}
                     </td>
                     <td className="px-3 py-2">
-                      <button onClick={() => handleAfterSale(r.iccid, sub, order)}
-                        disabled={working === (sub.channelSubOrderId || r.iccid)}
-                        className="px-2 py-1 text-[11px] bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-60">
-                        {working === (sub.channelSubOrderId || r.iccid) ? '送出中…' : '申請售後'}
-                      </button>
+                      {noChannel ? (
+                        <span className="text-[10px] text-amber-700" title="此卡是 BC 端直建（無 channelOrderId），需到 BC 後台手動退">
+                          需 BC 後台退
+                        </span>
+                      ) : (
+                        <button onClick={() => handleAfterSale(r.iccid, sub, order)}
+                          disabled={working === (sub.channelSubOrderId || r.iccid)}
+                          className="px-2 py-1 text-[11px] bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-60">
+                          {working === (sub.channelSubOrderId || r.iccid) ? '送出中…' : '申請售後'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                   )
