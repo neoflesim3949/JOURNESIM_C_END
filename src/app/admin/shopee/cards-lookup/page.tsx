@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Loader2 } from 'lucide-react'
+import { Search, Loader2, Calendar } from 'lucide-react'
 
 interface PlanSub {
   skuName?: string
@@ -152,10 +152,39 @@ export default function CardsLookupPage() {
     } finally { setWorking(null) }
   }
 
+  async function loadExpiring() {
+    const res = await fetch('/api/admin/cards/expiring-tomorrow')
+    const d = await res.json()
+    if (!res.ok) { alert(d.error || '查詢失敗'); return }
+    if (!d.iccids || d.iccids.length === 0) {
+      alert(`${(d.dates || []).join(' / ')} 沒有到期卡片`)
+      return
+    }
+    setText(d.iccids.join('\n'))
+    setLoading(true); setError(null); setRows([])
+    try {
+      const r2 = await fetch('/api/admin/cards-lookup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ iccids: d.iccids }),
+      })
+      const d2 = await r2.json()
+      if (!r2.ok) { setError(d2.error || '查詢失敗'); return }
+      setRows(d2.rows || [])
+    } finally { setLoading(false) }
+  }
+
   return (
     <div>
-      <h1 className="text-2xl font-bold">卡片查詢退卡</h1>
-      <p className="mt-1 text-sm text-gray-500">貼入多筆 ICCID（每行一個或以逗號 / 空白分隔），一次查 F010 卡狀態 + F012 套餐使用，可直接申請 F017 售後</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">卡片查詢退卡</h1>
+          <p className="mt-1 text-sm text-gray-500">貼入多筆 ICCID（每行一個或以逗號 / 空白分隔），一次查 F010 卡狀態 + F012 套餐使用，可直接申請 F017 售後</p>
+        </div>
+        <button onClick={loadExpiring}
+          className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
+          <Calendar className="w-4 h-4" /> 查詢到期卡片
+        </button>
+      </div>
 
       <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
         <textarea value={text} onChange={e => setText(e.target.value)}
