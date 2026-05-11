@@ -111,6 +111,7 @@ export async function POST(request: Request) {
     }
 
     // 寫入 invoices 主檔
+    let dbWriteWarning: string | null = null
     try {
       const supabase = createAdminClient()
       const totalAmount = body.allAmount
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
       }
       // 將 invoiceDate (YYYY/MM/DD) → DATE
       const invoiceDate = (result.invoiceDate || body.invoiceDate).replace(/\//g, '-')
-      await supabase.from('invoices').insert({
+      const { error: insErr } = await supabase.from('invoices').insert({
         invoice_number: result.invoiceNumber,
         random_number: result.randomNumber,
         invoice_date: invoiceDate,
@@ -164,11 +165,13 @@ export async function POST(request: Request) {
         status: 'issued',
         smse_raw_response: result.raw,
       })
+      if (insErr) throw insErr
     } catch (err) {
-      console.error('[invoices] 寫入失敗（不影響發票開立）:', err)
+      dbWriteWarning = err instanceof Error ? err.message : String(err)
+      console.error('[invoices] 寫入失敗（速買配已開立）:', err)
     }
 
-    return NextResponse.json(result)
+    return NextResponse.json({ ...result, dbWriteWarning })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }
