@@ -16,9 +16,14 @@ export async function POST(request: Request) {
   if (!reason) return NextResponse.json({ error: '請輸入原因代碼' }, { status: 400 })
   if (items.length === 0) return NextResponse.json({ error: '請至少選擇一張卡' }, { status: 400 })
 
-  // 1) 補齊 channelOrderId（用 orderId 反查 F011）
+  // 1) 補齊 channelOrderId
+  //    優先順序：item.channelOrderId → 從 channelSubOrderId 去尾數字還原 → F011(orderId) 反查
   const orderIdToChannel = new Map<string, string>()
-  const needsLookup = items.filter(i => !i.channelOrderId && i.orderId).map(i => i.orderId!)
+  const needsLookup = items.filter(i => {
+    if (i.channelOrderId) return false
+    if (i.channelSubOrderId && /[SE]\d+$/.test(i.channelSubOrderId)) return false
+    return !!i.orderId
+  }).map(i => i.orderId!)
   const uniqueOrderIds = [...new Set(needsLookup)]
   for (const oid of uniqueOrderIds) {
     try {
@@ -34,6 +39,9 @@ export async function POST(request: Request) {
   const failed: { iccid: string; error: string }[] = []
   for (const it of items) {
     let cOrder = it.channelOrderId
+    if (!cOrder && it.channelSubOrderId && /[SE]\d+$/.test(it.channelSubOrderId)) {
+      cOrder = it.channelSubOrderId.replace(/\d+$/, '')
+    }
     if (!cOrder && it.orderId) cOrder = orderIdToChannel.get(it.orderId)
     if (!cOrder) {
       failed.push({ iccid: it.iccid, error: '缺 channelOrderId 且 F011 反查失敗' })

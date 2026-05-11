@@ -16,9 +16,15 @@ export async function POST(request: Request) {
 
   if (!iccid) return NextResponse.json({ error: '缺少 ICCID' }, { status: 400 })
   if (!reason) return NextResponse.json({ error: '請輸入售後原因代碼' }, { status: 400 })
-  if (!channelOrderId && !orderId) return NextResponse.json({ error: '缺少 channelOrderId / orderId' }, { status: 400 })
+  if (!channelOrderId && !orderId && !channelSubOrderId) return NextResponse.json({ error: '缺少 channelOrderId / orderId / channelSubOrderId' }, { status: 400 })
 
-  // 沒給 channelOrderId 就先用 F011 查
+  // 1) 沒給 channelOrderId 但有 channelSubOrderId（我們的格式：FL{date}{rand}{S|E}{idx}）
+  //    → 直接去掉末尾數字 index 還原 channelOrderId
+  if (!channelOrderId && channelSubOrderId && /[SE]\d+$/.test(channelSubOrderId)) {
+    channelOrderId = channelSubOrderId.replace(/\d+$/, '')
+  }
+
+  // 2) 還是沒有，再用 orderId 反查 F011
   if (!channelOrderId && orderId) {
     try {
       const info = await getOrderInfo({ orderId })
@@ -28,6 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'F011 查訂單失敗：' + (err instanceof Error ? err.message : String(err)) }, { status: 500 })
     }
   }
+  if (!channelOrderId) return NextResponse.json({ error: '無法取得 channelOrderId' }, { status: 400 })
 
   try {
     const result = await createAfterSale({

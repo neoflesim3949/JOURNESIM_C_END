@@ -84,7 +84,11 @@ export default function CardsLookupPage() {
     setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
   }
   function toggleSelectAll() {
-    const visible = getVisibleRows().filter(v => v.order.channelOrderId || v.sub.channelSubOrderId)
+    const visible = getVisibleRows().filter(v => {
+      if (v.order.channelOrderId) return true
+      if (v.sub.channelSubOrderId && /[SE]\d+$/.test(v.sub.channelSubOrderId)) return true
+      return false
+    })
     const allKeys = visible.map(v => v.key)
     const allSelected = allKeys.length > 0 && allKeys.every(k => selected.has(k))
     setSelected(allSelected ? new Set() : new Set(allKeys))
@@ -265,7 +269,9 @@ export default function CardsLookupPage() {
                 }
                 return subs.map(({ sub, order }, i) => {
                   const key = `${r.iccid}|${sub.channelSubOrderId || ''}`
-                  const noChannel = !order.channelOrderId && !sub.channelSubOrderId
+                  // 我們的 channelSubOrderId 格式 FL...{S|E}{idx}，可以還原 channelOrderId
+                  const derivable = !!sub.channelSubOrderId && /[SE]\d+$/.test(sub.channelSubOrderId)
+                  const noChannel = !order.channelOrderId && !derivable
                   return (
                   <tr key={`${r.iccid}-${i}`} className={`border-b hover:bg-gray-50 ${noChannel ? 'bg-amber-50' : ''}`}>
                     <td className="px-3 py-2">
