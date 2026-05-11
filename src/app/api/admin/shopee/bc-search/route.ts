@@ -153,7 +153,16 @@ export async function GET(request: Request) {
       costTwd: Math.ceil((Number(pr.settlementPrice) || 0) / cnyRate),
     })).sort((a, b) => a.days - b.days)
 
-    const cd = p.country_data as { mcc: string }[] | null
+    const cd = p.country_data as { mcc: string; name?: string; apn?: string; apnUsername?: string; apnPassword?: string; operatorInfo?: string }[] | null
+    // 詳細運營商表（用以展開檢視）
+    const countryDetails = (cd || []).map(c => ({
+      mcc: c.mcc,
+      name_zh: cMap.get(c.mcc) || c.name || c.mcc,
+      apn: c.apn || null,
+      apn_username: c.apnUsername || null,
+      apn_password: c.apnPassword || null,
+      operator: c.operatorInfo || null,
+    }))
     return {
       sku_id: p.sku_id,
       name: p.name,
@@ -166,6 +175,7 @@ export async function GET(request: Request) {
       copies_options: copiesOptions,
       countries: (cd || []).slice(0, 5).map(c => cMap.get(c.mcc) || c.mcc),
       country_total: cd?.length || 0,
+      country_details: countryDetails,
     }
   })
 
