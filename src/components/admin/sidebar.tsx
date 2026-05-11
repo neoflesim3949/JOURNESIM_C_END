@@ -77,7 +77,13 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
-  { href: '/admin/bc-logs', label: 'BC Log', icon: RefreshCw },
+  {
+    href: '/admin/logs', label: 'Log', icon: RefreshCw,
+    children: [
+      { href: '/admin/bc-logs', label: 'BC Log' },
+      { href: '/admin/smse-logs', label: 'smse Log' },
+    ],
+  },
   {
     href: '/admin/params', label: '參數管理', icon: Globe,
     children: [
