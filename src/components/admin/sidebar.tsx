@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, ShoppingCart, RefreshCw, LogOut,
-  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark
+  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark, FileText
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -63,6 +63,17 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/shopee/mappings', label: '商品對應' },
       { href: '/admin/shopee/accounts', label: '帳號管理' },
       { href: '/admin/shopee/cards-lookup', label: '卡片查詢退卡' },
+    ],
+  },
+  {
+    href: '/admin/invoices', label: '發票管理', icon: FileText,
+    children: [
+      { href: '/admin/invoices/issue', label: '發票開立' },
+      { href: '/admin/invoices/list', label: '發票列表' },
+      { href: '/admin/invoices/tracks', label: '發票字軌' },
+      { href: '/admin/invoices/allowances', label: '折讓列表' },
+      { href: '/admin/invoices/cancellations', label: '作廢列表' },
+      { href: '/admin/invoices/voids', label: '註銷列表' },
     ],
   },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
