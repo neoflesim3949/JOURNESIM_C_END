@@ -793,7 +793,7 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
   const [matchingIdx, setMatchingIdx] = useState<number | null>(null)
   // BC 搜尋（完整篩選）
   const [bcSearch, setBcSearch] = useState('')
-  const [bcResults, setBcResults] = useState<{ sku_id: string; name: string; capacity: string; speed: string; countries: string[]; country_total: number; copies_options: { copies: string; days: number; costCny: number }[] }[]>([])
+  const [bcResults, setBcResults] = useState<{ sku_id: string; name: string; capacity: string; speed: string; countries: string[]; country_total: number; copies_options: { copies: string; days: number; costCny: number }[]; country_details?: { mcc: string; name_zh: string; apn: string | null; apn_username: string | null; apn_password: string | null; operator: string | null }[] }[]>([])
   const [bcSearching, setBcSearching] = useState(false)
   const [bcCountries, setBcCountries] = useState<{ mcc: string; name: string }[]>([])
   const [bcDaysOpts, setBcDaysOpts] = useState<string[]>([])
@@ -1109,23 +1109,75 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
                               <td className="px-4 py-2.5 text-right font-medium">{matchedOpt ? `${matchedOpt.days} 天` : `${bc.copies_options.length} 規格`}</td>
                               <td className="px-4 py-2.5 text-right font-medium text-blue-600">{matchedOpt ? `¥${matchedOpt.costCny.toFixed(2)}` : (isExp ? '' : '展開查看')}</td>
                               <td className="px-4 py-2.5 text-center">
-                                {matchedOpt ? (
-                                  <button onClick={(e) => { e.stopPropagation(); matchBc(bc.sku_id, matchedOpt.copies) }}
-                                    className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">選取</button>
-                                ) : '📋'}
+                                <div className="flex items-center justify-center gap-1">
+                                  <button onClick={(e) => { e.stopPropagation(); toggleExp() }}
+                                    className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-[10px] text-gray-700">
+                                    {isExp ? '收合' : '詳情'}
+                                  </button>
+                                  {matchedOpt && (
+                                    <button onClick={(e) => { e.stopPropagation(); matchBc(bc.sku_id, matchedOpt.copies) }}
+                                      className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">選取</button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
-                            {isExp && bc.copies_options.map((opt, oi) => (
-                              <tr key={`${bc.sku_id}-opt-${oi}`} className={`${oi % 2 === 0 ? 'bg-white' : 'bg-blue-50/20'} hover:bg-blue-50/50`}>
-                                <td colSpan={4}></td>
-                                <td className="px-4 py-2 text-right font-medium">{opt.days} 天</td>
-                                <td className="px-4 py-2 text-right font-medium text-blue-600">¥{opt.costCny.toFixed(2)}</td>
-                                <td className="px-4 py-2 text-center">
-                                  <button onClick={(e) => { e.stopPropagation(); matchBc(bc.sku_id, opt.copies) }}
-                                    className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">選取</button>
+                            {isExp && (
+                              <tr className="bg-blue-50/30">
+                                <td colSpan={7} className="px-4 py-3">
+                                  {bc.country_details && bc.country_details.length > 0 && (
+                                    <div className="mb-3">
+                                      <div className="text-xs text-gray-500 mb-1.5">運營商 / APN 詳情（共 {bc.country_details.length} 國）</div>
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-[11px] border border-gray-200 bg-white">
+                                          <thead className="bg-gray-50">
+                                            <tr>
+                                              <th className="px-2 py-1 text-left border-b">國家</th>
+                                              <th className="px-2 py-1 text-left border-b">運營商</th>
+                                              <th className="px-2 py-1 text-left border-b">APN</th>
+                                              <th className="px-2 py-1 text-left border-b">APN 帳號</th>
+                                              <th className="px-2 py-1 text-left border-b">APN 密碼</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {bc.country_details.map((c, ci) => (
+                                              <tr key={ci} className="border-b last:border-0">
+                                                <td className="px-2 py-1">{c.name_zh} <span className="text-gray-400 font-mono">({c.mcc})</span></td>
+                                                <td className="px-2 py-1">{c.operator || '—'}</td>
+                                                <td className="px-2 py-1 font-mono">{c.apn || '—'}</td>
+                                                <td className="px-2 py-1 font-mono">{c.apn_username || '—'}</td>
+                                                <td className="px-2 py-1 font-mono">{c.apn_password || '—'}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className="text-xs text-gray-500 mb-1.5">各天數規格 / 結算價</div>
+                                  <table className="w-full text-[11px] border border-gray-200 bg-white">
+                                    <thead className="bg-gray-50">
+                                      <tr>
+                                        <th className="px-2 py-1 text-left border-b">天數</th>
+                                        <th className="px-2 py-1 text-right border-b">結算價</th>
+                                        <th className="px-2 py-1 text-center border-b w-16">操作</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {bc.copies_options.map((opt, oi) => (
+                                        <tr key={oi} className="border-b last:border-0">
+                                          <td className="px-2 py-1 font-medium">{opt.days} 天</td>
+                                          <td className="px-2 py-1 text-right font-medium text-blue-600">¥{opt.costCny.toFixed(2)}</td>
+                                          <td className="px-2 py-1 text-center">
+                                            <button onClick={(e) => { e.stopPropagation(); matchBc(bc.sku_id, opt.copies) }}
+                                              className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">選取</button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
                                 </td>
                               </tr>
-                            ))}
+                            )}
                           </Fragment>
                         )
                       })}

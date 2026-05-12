@@ -153,7 +153,20 @@ export async function GET(request: Request) {
       costTwd: Math.ceil((Number(pr.settlementPrice) || 0) / cnyRate),
     })).sort((a, b) => a.days - b.days)
 
-    const cd = p.country_data as { mcc: string; name?: string; apn?: string; apnUsername?: string; apnPassword?: string; operatorInfo?: string }[] | null
+    type OpInfo = { network?: string; operator?: string; priority?: string | number }
+    const cd = p.country_data as { mcc: string; name?: string; apn?: string; apnUsername?: string; apnPassword?: string; operatorInfo?: OpInfo[] | string | null }[] | null
+    // 把運營商欄位攤平成字串（"中華電信(4G #1), 遠傳(5G #2)" 之類）
+    const flattenOp = (op: OpInfo[] | string | null | undefined): string | null => {
+      if (!op) return null
+      if (typeof op === 'string') return op
+      if (Array.isArray(op)) {
+        return op.map(o => {
+          const parts = [o.operator, o.network].filter(Boolean)
+          return parts.join(' / ') || null
+        }).filter(Boolean).join(', ') || null
+      }
+      return null
+    }
     // 詳細運營商表（用以展開檢視）
     const countryDetails = (cd || []).map(c => ({
       mcc: c.mcc,
@@ -161,7 +174,7 @@ export async function GET(request: Request) {
       apn: c.apn || null,
       apn_username: c.apnUsername || null,
       apn_password: c.apnPassword || null,
-      operator: c.operatorInfo || null,
+      operator: flattenOp(c.operatorInfo),
     }))
     return {
       sku_id: p.sku_id,

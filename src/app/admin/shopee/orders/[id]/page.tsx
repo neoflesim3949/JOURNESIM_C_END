@@ -47,7 +47,8 @@ interface ShopeeItem {
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
 
 interface CardExpiryRow { iccid: string; type?: string; status?: string; expirationDate?: string; usageCount?: string }
-interface PlanUsageSub { subOrderId?: string; skuName?: string; planStatus?: string; planStartTime?: string | null; planEndTime?: string | null; totalDays?: string; remainingDays?: string; totalTraffic?: string; remainingTraffic?: string; copies?: string }
+interface PlanUsageCountry { mcc?: string; name?: string; apn?: string; apnUsername?: string; apnPassword?: string; operator?: string }
+interface PlanUsageSub { subOrderId?: string; skuName?: string; planStatus?: string; planStartTime?: string | null; planEndTime?: string | null; totalDays?: string; remainingDays?: string; totalTraffic?: string; remainingTraffic?: string; copies?: string; country?: PlanUsageCountry[] }
 interface PlanUsageOrder { orderId?: string; channelOrderId?: string; subOrderList?: PlanUsageSub[] }
 interface PlanUsageResult { iccid: string; ok: boolean; data?: PlanUsageOrder[]; error?: string }
 interface CardUsageResp { iccids: string[]; cardExpiry: CardExpiryRow[]; cardError: string | null; planUsage: PlanUsageResult[] }
@@ -1006,6 +1007,7 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
                     <tr>
                       <th className="px-2 py-1.5 text-left border-b">套餐名稱</th>
                       <th className="px-2 py-1.5 text-left border-b">ICCID</th>
+                      <th className="px-2 py-1.5 text-left border-b">APN</th>
                       <th className="px-2 py-1.5 text-left border-b">狀態</th>
                       <th className="px-2 py-1.5 text-left border-b">激活時間</th>
                       <th className="px-2 py-1.5 text-left border-b">結束時間</th>
@@ -1030,14 +1032,22 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
                         }
                       }
                       if (rows.length === 0) {
-                        return <tr><td colSpan={8} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
+                        return <tr><td colSpan={9} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
+                      }
+                      const fmtApn = (cs?: PlanUsageCountry[]) => {
+                        if (!cs || cs.length === 0) return '—'
+                        return cs.map(c => {
+                          const apn = c.apn || '—'
+                          const op = c.operator ? ` (${c.operator})` : ''
+                          return `${apn}${op}`
+                        }).join(', ')
                       }
                       return rows.map((r, j) => {
                         if (r.error) return (
                           <tr key={j} className="border-b">
                             <td className="px-2 py-1.5 text-red-600" colSpan={1}>—</td>
                             <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
-                            <td className="px-2 py-1.5 text-red-600" colSpan={6}>{r.error}</td>
+                            <td className="px-2 py-1.5 text-red-600" colSpan={7}>{r.error}</td>
                           </tr>
                         )
                         const s = r.sub
@@ -1045,13 +1055,14 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
                           <tr key={j} className="border-b">
                             <td className="px-2 py-1.5 text-gray-400">無套餐</td>
                             <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
-                            <td className="px-2 py-1.5 text-gray-400" colSpan={6}>—</td>
+                            <td className="px-2 py-1.5 text-gray-400" colSpan={7}>—</td>
                           </tr>
                         )
                         return (
                           <tr key={j} className="border-b">
                             <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
                             <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                            <td className="px-2 py-1.5 font-mono text-xs" title={(s.country || []).map(c => `${c.name || c.mcc || ''}: ${c.apn || '—'}${c.operator ? ' / ' + c.operator : ''}${c.apnUsername ? ' / user=' + c.apnUsername : ''}${c.apnPassword ? ' / pwd=' + c.apnPassword : ''}`).join('\n') || ''}>{fmtApn(s.country)}</td>
                             <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
                             <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
                             <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
@@ -1724,12 +1735,18 @@ function BcMatchModal({ item, onMatch, onClose }: {
                           {matchedOpt ? `¥${matchedOpt.costCny.toFixed(2)}` : (isExpanded ? '' : '展開查看')}
                         </td>
                         <td className="px-4 py-2.5 text-center">
-                          {matchedOpt ? (
-                            <button onClick={(e) => { e.stopPropagation(); onMatch(bc.sku_id, matchedOpt.copies) }}
-                              className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
-                              選取
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); toggleExpand() }}
+                              className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-[10px] text-gray-700">
+                              {isExpanded ? '收合' : '詳情'}
                             </button>
-                          ) : '📋'}
+                            {matchedOpt && (
+                              <button onClick={(e) => { e.stopPropagation(); onMatch(bc.sku_id, matchedOpt.copies) }}
+                                className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
+                                選取
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                       {isExpanded && (

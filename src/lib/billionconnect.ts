@@ -407,6 +407,17 @@ export interface BCPlanUsage {
     remainingDays?: string
     totalTraffic?: string
     remainingTraffic?: string
+    country?: {
+      mcc?: string
+      name?: string
+      apn?: string
+      apnType?: string
+      apnTypeDesc?: string
+      apnUsername?: string
+      apnPassword?: string
+      operator?: string
+      authenticationType?: string
+    }[]
   }[]
 }
 
