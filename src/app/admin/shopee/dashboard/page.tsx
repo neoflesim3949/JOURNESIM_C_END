@@ -57,6 +57,15 @@ export default function ShopeeDashboardPage() {
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
 
+  function pickMonth(offset: number) {
+    // offset: 0=本月、-1=上月
+    const m = twMonth + offset
+    const f = fmtTW(new Date(twYear, m, 1, 12))
+    const l = fmtTW(new Date(twYear, m + 1, 0, 12))
+    setFrom(f)
+    setTo(l)
+  }
+
   async function load() {
     setLoading(true)
     const params = new URLSearchParams({ date_field: dateField })
@@ -112,6 +121,8 @@ export default function ShopeeDashboardPage() {
           <span className="text-gray-400">~</span>
           <input type="date" value={to} onChange={e => setTo(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          <button onClick={() => pickMonth(0)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">本期</button>
+          <button onClick={() => pickMonth(-1)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">上期</button>
           <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={async () => {
             if (!confirm('回填所有已下單商品的成本價？')) return
