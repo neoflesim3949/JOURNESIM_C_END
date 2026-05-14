@@ -10,12 +10,24 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const { itemCount } = useCart()
-  const [logo, setLogo] = useState('')
+  const [logo, setLogo] = useState<string | null>(null)
+  const [logoReady, setLogoReady] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => setIsLoggedIn(!!user))
-    fetch('/api/shop/site-config').then((r) => r.json()).then((c) => setLogo(c.logo || '')).catch(() => {})
+    fetch('/api/shop/site-config')
+      .then((r) => r.json())
+      .then((c) => {
+        const url = c.logo || ''
+        if (!url) { setLogo(''); setLogoReady(true); return }
+        // 預下載完成才顯示，避免閃文字 / 破圖
+        const img = new window.Image()
+        img.onload = () => { setLogo(url); setLogoReady(true) }
+        img.onerror = () => { setLogo(''); setLogoReady(true) }
+        img.src = url
+      })
+      .catch(() => { setLogo(''); setLogoReady(true) })
   }, [])
 
   return (
@@ -24,8 +36,10 @@ export function Header() {
         <div className="flex items-center h-16">
           {/* Left: Logo + Nav */}
           <div className="flex items-center gap-8 flex-1">
-            <Link href="/" className="flex items-center gap-2 flex-shrink-0">
-              {logo ? (
+            <Link href="/" className="flex items-center gap-2 flex-shrink-0 h-8">
+              {!logoReady ? (
+                <span className="inline-block h-8" />
+              ) : logo ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={logo} alt="FLESIM" className="h-8 object-contain" />
               ) : (

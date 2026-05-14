@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Globe, Zap, Shield, Smartphone, ArrowRight } from 'lucide-react'
 import { PopularCountries } from '@/components/home/popular-countries'
+import { ConstructionModal } from '@/components/home/construction-modal'
 
 const FEATURES = [
   {
@@ -28,6 +29,7 @@ const FEATURES = [
 export default function HomePage() {
   return (
     <>
+      <ConstructionModal />
       {/* Hero — Apple-inspired */}
       <section className="relative overflow-hidden bg-gradient-to-br from-blue-900 via-blue-800 to-blue-950 text-white">
         {/* Background glow */}
