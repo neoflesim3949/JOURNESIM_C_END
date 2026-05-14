@@ -115,6 +115,7 @@ export default function ShopeeDashboardPage() {
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="wallet_date">入帳日期</option>
             <option value="order_date">訂單日期</option>
+            <option value="created_at">匯入日期</option>
           </select>
           <input type="date" value={from} onChange={e => setFrom(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />

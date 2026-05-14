@@ -39,11 +39,12 @@ export async function GET(request: Request) {
     const { data } = await oq.limit(10000)
     inRangeOrderIds = (data || []).map(o => o.id)
   } else {
-    // wallet_date 模式：撈該月入帳的 settlement，反推訂單
+    // wallet_date / created_at 模式：撈該範圍內的 settlement，反推訂單
+    const settleField = dateField === 'created_at' ? 'created_at' : 'wallet_date'
     let sq = supabase.from('shopee_settlements').select('shopee_order_id')
     if (accountId) sq = sq.eq('shopee_account_id', accountId)
-    if (from) sq = sq.gte('wallet_date', from)
-    if (to) sq = sq.lte('wallet_date', to + 'T23:59:59')
+    if (from) sq = sq.gte(settleField, from)
+    if (to) sq = sq.lte(settleField, to + 'T23:59:59')
     const { data } = await sq.limit(10000)
     const ids = [...new Set((data || []).map(s => s.shopee_order_id).filter(Boolean) as string[])]
     if (ids.length > 0) {
