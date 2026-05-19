@@ -81,6 +81,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.delivery_type !== undefined) updates.delivery_type = body.delivery_type
     if (body.lpa_code !== undefined) updates.lpa_code = body.lpa_code
     if (body.qr_code_url !== undefined) updates.qr_code_url = body.qr_code_url
+    if (body.original_price !== undefined) updates.original_price = body.original_price
+    if (body.sale_price !== undefined) updates.sale_price = body.sale_price
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
     // 如果有對應 + shopee_sku_code，自動記錄到 mappings

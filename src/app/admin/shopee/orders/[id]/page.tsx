@@ -655,8 +655,30 @@ export default function ShopeeOrderDetailPage() {
                     <div className="text-xs text-gray-500 mt-0.5">{item.shopee_variation_name || '-'}</div>
                     <div className="mt-2 grid grid-cols-3 md:grid-cols-6 gap-x-4 gap-y-1 text-xs text-gray-500">
                       <div>數量：<span className="font-medium text-gray-700">{item.quantity}</span>{item.return_quantity > 0 && <span className="text-red-500">（退{item.return_quantity}）</span>}</div>
-                      <div>原價：NT$ {item.original_price ?? '-'}</div>
-                      <div>活動價：NT$ {item.sale_price ?? '-'}</div>
+                      <div className="flex items-center gap-1">原價：NT${item.is_manual ? (
+                        <input type="number" step="1" defaultValue={item.original_price ?? ''} placeholder="-"
+                          onBlur={async e => {
+                            const v = e.target.value === '' ? null : Number(e.target.value)
+                            if (v === item.original_price) return
+                            await fetch(`/api/admin/shopee/orders/${id}`, {
+                              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ item_id: item.id, original_price: v }),
+                            }); load()
+                          }}
+                          className="w-20 px-1.5 py-0.5 border border-gray-200 rounded text-xs" />
+                      ) : <span>&nbsp;{item.original_price ?? '-'}</span>}</div>
+                      <div className="flex items-center gap-1">活動價：NT${item.is_manual ? (
+                        <input type="number" step="1" defaultValue={item.sale_price ?? ''} placeholder="-"
+                          onBlur={async e => {
+                            const v = e.target.value === '' ? null : Number(e.target.value)
+                            if (v === item.sale_price) return
+                            await fetch(`/api/admin/shopee/orders/${id}`, {
+                              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ item_id: item.id, sale_price: v }),
+                            }); load()
+                          }}
+                          className="w-20 px-1.5 py-0.5 border border-gray-200 rounded text-xs" />
+                      ) : <span>&nbsp;{item.sale_price ?? '-'}</span>}</div>
                       <div className="col-span-3">商品編碼：<span className="font-mono text-blue-600">{item.shopee_sku_code || '-'}</span></div>
                     </div>
                     <div className="mt-1 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs text-gray-500">
