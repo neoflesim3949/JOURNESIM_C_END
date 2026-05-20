@@ -59,24 +59,11 @@ async function callBC<T>(tradeType: string, tradeData: object = {}): Promise<T> 
 
   if (!res.ok) {
     const duration = Date.now() - startTime
-    const text = await res.text().catch(() => '')
-    const snippet = text.slice(0, 200).replace(/\s+/g, ' ')
-    logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: { _text: snippet }, status: 'error', error_message: `HTTP ${res.status}: ${snippet}`, duration_ms: duration })
-    // 把 status code 放進 error message 以便 withRetry 偵測（522/502/503/504）
-    throw new Error(`BillionConnect HTTP ${res.status}: ${snippet || 'no body'}`)
+    logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: null, status: 'error', error_message: `HTTP ${res.status}`, duration_ms: duration })
+    throw new Error(`BillionConnect HTTP error: ${res.status}`)
   }
 
-  // 先讀 text，避免 res.json() 在收到非 JSON（CF/閘道錯誤頁）時拋出晦澀錯誤
-  const text = await res.text()
-  let data: { tradeCode?: string; tradeMsg?: string; tradeData?: unknown }
-  try {
-    data = JSON.parse(text)
-  } catch {
-    const duration = Date.now() - startTime
-    const snippet = text.slice(0, 200).replace(/\s+/g, ' ')
-    logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: { _text: snippet }, status: 'error', error_message: `非 JSON 回應: ${snippet}`, duration_ms: duration })
-    throw new Error(`BillionConnect non-JSON response: ${snippet || 'empty'}`)
-  }
+  const data = await res.json()
   const duration = Date.now() - startTime
 
   if (data.tradeCode !== '1000') {
