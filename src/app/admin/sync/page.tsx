@@ -11,6 +11,17 @@ interface SyncResult {
   message: string
 }
 
+interface SyncJob {
+  id: string
+  type: string
+  status: 'running' | 'completed' | 'failed'
+  step_current: number
+  step_total: number
+  step_label: string | null
+  synced_count: number
+  error_message: string | null
+}
+
 interface BCCountryRow {
   id: string
   mcc: string
@@ -36,6 +47,7 @@ interface BCProductRow {
 export default function AdminSyncPage() {
   const [results, setResults] = useState<SyncResult[]>([])
   const [syncing, setSyncing] = useState<string | null>(null)
+  const [jobProgress, setJobProgress] = useState<SyncJob | null>(null)
   const [activeTab, setActiveTab] = useState<'countries' | 'products'>('countries')
 
   // Countries state
@@ -88,28 +100,50 @@ export default function AdminSyncPage() {
 
   async function sync(type: 'countries' | 'products') {
     setSyncing(type)
+    setJobProgress(null)
     try {
-      const res = await fetch(`/api/sync/${type}`, { method: 'POST' })
-      const data = await res.json()
-
-      if (res.ok) {
-        setResults((prev) => [
-          { type, success: true, message: `同步完成，共 ${data.synced} 筆` },
-          ...prev,
-        ])
-        if (type === 'countries') loadCountries()
-        else loadProducts()
-      } else {
-        setResults((prev) => [
-          { type, success: false, message: data.error || '同步失敗' },
-          ...prev,
-        ])
+      // 1) 建立 job
+      const startRes = await fetch(`/api/sync/${type}`, { method: 'POST' })
+      const startData = await startRes.json()
+      if (!startRes.ok) {
+        setResults((prev) => [{ type, success: false, message: startData.error || '建立任務失敗' }, ...prev])
+        return
       }
-    } catch {
-      setResults((prev) => [
-        { type, success: false, message: '網路錯誤' },
-        ...prev,
-      ])
+      const jobId = startData.job_id as string
+
+      // 2) 連續推進 step 直到完成或失敗
+      let done = false
+      let totalSynced = 0
+      while (!done) {
+        const stepRes = await fetch(`/api/sync/${type}/step`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: jobId }),
+        })
+        const stepData = await stepRes.json()
+        if (!stepRes.ok) {
+          setResults((prev) => [{ type, success: false, message: stepData.error || 'step 失敗' }, ...prev])
+          setJobProgress((prev) => prev ? { ...prev, status: 'failed', error_message: stepData.error || 'step 失敗' } : null)
+          return
+        }
+        totalSynced = stepData.synced_count
+        setJobProgress({
+          id: jobId,
+          type,
+          status: stepData.done ? 'completed' : 'running',
+          step_current: stepData.step_current,
+          step_total: stepData.step_total,
+          step_label: stepData.step_label || null,
+          synced_count: stepData.synced_count,
+          error_message: null,
+        })
+        done = stepData.done
+      }
+
+      setResults((prev) => [{ type, success: true, message: `同步完成，共 ${totalSynced} 筆` }, ...prev])
+      if (type === 'countries') loadCountries()
+      else loadProducts()
+    } catch (err) {
+      setResults((prev) => [{ type, success: false, message: err instanceof Error ? err.message : '網路錯誤' }, ...prev])
     } finally {
       setSyncing(null)
     }
@@ -174,6 +208,27 @@ export default function AdminSyncPage() {
           </div>
         </button>
       </div>
+
+      {/* Sync Progress */}
+      {jobProgress && (
+        <div className="mt-6 p-4 bg-white border border-gray-200 rounded-lg">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">{jobProgress.type === 'countries' ? '國家' : '商品'}同步進度</span>
+            <span className="text-gray-500">{jobProgress.step_current} / {jobProgress.step_total} 步</span>
+          </div>
+          <div className="mt-2 w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all ${jobProgress.status === 'failed' ? 'bg-red-500' : jobProgress.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'}`}
+              style={{ width: `${(jobProgress.step_current / jobProgress.step_total) * 100}%` }}
+            />
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            {jobProgress.step_label || '進行中…'}
+            {jobProgress.synced_count > 0 && <span className="ml-2">已同步 {jobProgress.synced_count} 筆</span>}
+            {jobProgress.error_message && <span className="ml-2 text-red-500">{jobProgress.error_message}</span>}
+          </div>
+        </div>
+      )}
 
       {/* Sync Results */}
       {results.length > 0 && (
