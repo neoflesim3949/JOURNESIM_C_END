@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const products = await getProducts({ salesMethod, skuId, language })
+    const products = await getProducts({ salesMethod, skuId, language, networkOperatorScope: '2' })
     const product = (products || []).find(p => p.skuId === skuId) || products?.[0]
     if (!product) return NextResponse.json({ error: '查無此商品' }, { status: 404 })
 
