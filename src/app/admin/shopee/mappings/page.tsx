@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Search, Trash2, Link2, Download, Upload } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 
 interface SkuMapping {
   id: string; shopee_sku_code: string; shopee_product_name: string | null
@@ -19,7 +20,8 @@ interface IdMapping {
 type Tab = 'sku' | 'product' | 'variation'
 
 export default function ShopeeMappingsPage() {
-  const [tab, setTab] = useState<Tab>('sku')
+  const [tabRaw] = useUrlState('tab', 'sku')
+  const tab: Tab = (tabRaw === 'product' || tabRaw === 'variation') ? tabRaw : 'sku'
   const [skuMappings, setSkuMappings] = useState<SkuMapping[]>([])
   const [bcNameMap, setBcNameMap] = useState<Map<string, string>>(new Map())
   const [productMappings, setProductMappings] = useState<IdMapping[]>([])
@@ -28,8 +30,10 @@ export default function ShopeeMappingsPage() {
   const [skuNames, setSkuNames] = useState<Record<string, { product_name: string; variation_name: string }>>({})
   const [varNames, setVarNames] = useState<Record<string, { product_name: string; variation_name: string }>>({})
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [search] = useUrlState('search', '')
+  const [searchInput, setSearchInput] = useState(search)
   const [uploading, setUploading] = useState(false)
+  const setUrl = useUrlStateBatch()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   async function load() {
@@ -61,7 +65,7 @@ export default function ShopeeMappingsPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [tab])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [tab, search])
 
   async function handleDeleteSku(id: string) {
     if (!confirm('確定刪除此對應？')) return
@@ -150,7 +154,7 @@ export default function ShopeeMappingsPage() {
       {/* Tab 切換 */}
       <div className="mt-4 flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
         {tabs.map(t => (
-          <button key={t.key} onClick={() => { setTab(t.key); setSearch('') }}
+          <button key={t.key} onClick={() => { setSearchInput(''); setUrl({ tab: t.key, search: '' }) }}
             className={`px-4 py-2 text-sm rounded-md transition-colors ${tab === t.key ? 'bg-white shadow font-medium text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
             {t.label}
           </button>
@@ -162,11 +166,12 @@ export default function ShopeeMappingsPage() {
       <div className="mt-4 flex gap-3 items-center">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input type="text" placeholder="搜尋..." value={search}
-            onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()}
+          <input type="text" placeholder="搜尋..." value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') setUrl({ search: searchInput }) }}
             className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
         </div>
-        <button onClick={load} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+        <button onClick={() => setUrl({ search: searchInput })} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
         {(tab === 'product' || tab === 'variation') && (
           <>
             <button onClick={downloadTemplate} className="flex items-center gap-1 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">

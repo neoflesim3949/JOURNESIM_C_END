@@ -24,13 +24,9 @@ export async function GET(request: Request) {
 
   const { data, count } = await query
 
-  // 撈最近 5000 筆的不同 trade_type，給前端動態填選單（避免漏掉 N006 等未列在前端清單的類型）
-  const { data: distinctRows } = await supabase
-    .from('bc_api_logs')
-    .select('trade_type')
-    .order('created_at', { ascending: false })
-    .limit(5000)
-  const distinctTypes = Array.from(new Set((distinctRows || []).map(r => r.trade_type).filter(Boolean))).sort()
+  // distinctTypes 改為「只看當前頁的資料」推出 trade_type，避免大量掃描
+  // 前端有 STATIC_F / STATIC_N 硬編清單，這只是補抓沒列到的類型
+  const distinctTypes = Array.from(new Set((data || []).map(r => r.trade_type).filter(Boolean))).sort()
 
   return NextResponse.json({ data: data || [], total: count || 0, distinctTypes })
 }

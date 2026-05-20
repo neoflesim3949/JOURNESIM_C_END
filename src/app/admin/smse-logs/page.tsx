@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
+import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 
 interface SmseLog {
   id: string
@@ -26,12 +27,13 @@ const API_TYPE_LABELS: Record<string, string> = {
 export default function SmseLogsPage() {
   const [logs, setLogs] = useState<SmseLog[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useUrlState('page', 1)
   const [loading, setLoading] = useState(true)
-  const [filterType, setFilterType] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
+  const [filterType] = useUrlState('api_type', '')
+  const [filterStatus] = useUrlState('status', '')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [distinctTypes, setDistinctTypes] = useState<string[]>([])
+  const setUrl = useUrlStateBatch()
 
   async function load() {
     setLoading(true)
@@ -48,7 +50,7 @@ export default function SmseLogsPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [page, filterType, filterStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleExpand(id: string) {
     setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -73,21 +75,21 @@ export default function SmseLogsPage() {
           const STATIC = ['issue', 'allowance', 'modify']
           const all = Array.from(new Set([...STATIC, ...distinctTypes])).sort()
           return (
-            <select value={filterType} onChange={e => setFilterType(e.target.value)}
+            <select value={filterType} onChange={e => setUrl({ api_type: e.target.value, page: 1 })}
               className="px-2 py-1.5 border border-gray-300 rounded text-xs">
               <option value="">全部類型</option>
               {all.map(t => <option key={t} value={t}>{t} {API_TYPE_LABELS[t] || ''}</option>)}
             </select>
           )
         })()}
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+        <select value={filterStatus} onChange={e => setUrl({ status: e.target.value, page: 1 })}
           className="px-2 py-1.5 border border-gray-300 rounded text-xs">
           <option value="">全部狀態</option>
           <option value="success">成功</option>
           <option value="error">失敗</option>
         </select>
-        <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
-        <button onClick={() => { setFilterType(''); setFilterStatus(''); setPage(1); setTimeout(load, 0) }}
+        <button onClick={load} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">重新整理</button>
+        <button onClick={() => setUrl({ api_type: '', status: '', page: 1 })}
           className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
         {filterType && (
           <button
@@ -97,7 +99,7 @@ export default function SmseLogsPage() {
               const d = await res.json()
               if (!res.ok) { alert(d.error || '刪除失敗'); return }
               alert(`已刪除 ${d.deleted} 筆`)
-              setPage(1); load()
+              setPage(1)
             }}
             className="px-3 py-1.5 bg-red-600 text-white rounded text-xs hover:bg-red-700">
             刪除「{filterType}」
@@ -145,10 +147,10 @@ export default function SmseLogsPage() {
 
       {totalPages > 1 && (
         <div className="mt-4 flex items-center justify-end gap-2 text-xs">
-          <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+          <button disabled={page <= 1} onClick={() => setPage(page - 1)}
             className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40">上一頁</button>
           <span>{page} / {totalPages}</span>
-          <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
+          <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}
             className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40">下一頁</button>
         </div>
       )}

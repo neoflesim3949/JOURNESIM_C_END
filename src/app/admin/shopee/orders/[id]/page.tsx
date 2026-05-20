@@ -364,9 +364,11 @@ export default function ShopeeOrderDetailPage() {
 
   return (
     <div>
-      <Link href="/admin/shopee/orders" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600">
+      <button
+        onClick={() => { if (window.history.length > 1) router.back(); else router.push('/admin/shopee/orders') }}
+        className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600">
         <ArrowLeft className="w-4 h-4" /> 返回蝦皮訂單
-      </Link>
+      </button>
 
       <div className="mt-4 flex items-center justify-between">
         <div>

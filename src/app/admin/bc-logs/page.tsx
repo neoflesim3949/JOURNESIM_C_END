@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { RefreshCw, ChevronDown, ChevronRight, PlayCircle } from 'lucide-react'
+import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 
 interface BcLog {
   id: string
@@ -32,13 +33,14 @@ const TRADE_TYPE_LABELS: Record<string, string> = {
 export default function BcLogsPage() {
   const [logs, setLogs] = useState<BcLog[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useUrlState('page', 1)
   const [loading, setLoading] = useState(true)
-  const [filterType, setFilterType] = useState('')
-  const [filterDirection, setFilterDirection] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
+  const [filterType] = useUrlState('trade_type', '')
+  const [filterDirection] = useUrlState('direction', '')
+  const [filterStatus] = useUrlState('status', '')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [distinctTypes, setDistinctTypes] = useState<string[]>([])
+  const setUrl = useUrlStateBatch()
 
   async function load() {
     setLoading(true)
@@ -56,7 +58,7 @@ export default function BcLogsPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, filterType, filterDirection, filterStatus])
 
   function toggleExpand(id: string) {
     setExpandedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -94,7 +96,7 @@ export default function BcLogsPage() {
           const nTypes = Array.from(new Set([...STATIC_N, ...distinctTypes.filter(t => t.startsWith('N'))])).sort()
           const otherTypes = distinctTypes.filter(t => !t.startsWith('F') && !t.startsWith('N'))
           return (
-            <select value={filterType} onChange={e => setFilterType(e.target.value)}
+            <select value={filterType} onChange={e => setUrl({ trade_type: e.target.value, page: 1 })}
               className="px-2 py-1.5 border border-gray-300 rounded text-xs">
               <option value="">全部類型</option>
               <optgroup label="發送">
@@ -111,20 +113,20 @@ export default function BcLogsPage() {
             </select>
           )
         })()}
-        <select value={filterDirection} onChange={e => setFilterDirection(e.target.value)}
+        <select value={filterDirection} onChange={e => setUrl({ direction: e.target.value, page: 1 })}
           className="px-2 py-1.5 border border-gray-300 rounded text-xs">
           <option value="">全部方向</option>
           <option value="outgoing">發送</option>
           <option value="incoming">接收</option>
         </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+        <select value={filterStatus} onChange={e => setUrl({ status: e.target.value, page: 1 })}
           className="px-2 py-1.5 border border-gray-300 rounded text-xs">
           <option value="">全部狀態</option>
           <option value="success">成功</option>
           <option value="error">失敗</option>
         </select>
-        <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
-        <button onClick={() => { setFilterType(''); setFilterDirection(''); setFilterStatus(''); setPage(1); setTimeout(load, 0) }}
+        <button onClick={load} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">重新整理</button>
+        <button onClick={() => setUrl({ trade_type: '', direction: '', status: '', page: 1 })}
           className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
         {filterType && (
           <button

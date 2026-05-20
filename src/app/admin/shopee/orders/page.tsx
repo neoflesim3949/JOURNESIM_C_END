@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3, Plus } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
@@ -92,19 +93,21 @@ export default function ShopeeOrdersPage() {
   const [orders, setOrders] = useState<ShopeeOrder[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  // 篩選
-  const [filterOrderDateFrom, setFilterOrderDateFrom] = useState('')
-  const [filterOrderDateTo, setFilterOrderDateTo] = useState('')
-  const [filterCreatedFrom, setFilterCreatedFrom] = useState('')
-  const [filterCreatedTo, setFilterCreatedTo] = useState('')
-  const [filterReturnStatus, setFilterReturnStatus] = useState('')
-  const [filterFinanceStatus, setFilterFinanceStatus] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  // 排序
-  const [sortBy, setSortBy] = useState('order_date')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // URL 狀態（進入明細後返回會保留分頁／篩選／排序）
+  const [search] = useUrlState('search', '')
+  const [searchInput, setSearchInput] = useState(search)
+  const [page, setPage] = useUrlState('page', 1)
+  const [filterOrderDateFrom] = useUrlState('order_date_from', '')
+  const [filterOrderDateTo] = useUrlState('order_date_to', '')
+  const [filterCreatedFrom] = useUrlState('created_from', '')
+  const [filterCreatedTo] = useUrlState('created_to', '')
+  const [filterReturnStatus] = useUrlState('return_status', '')
+  const [filterFinanceStatus] = useUrlState('finance_status', '')
+  const [filterStatus] = useUrlState('status', '')
+  const [sortBy] = useUrlState('sort_by', 'order_date')
+  const [sortDirRaw] = useUrlState('sort_dir', 'desc')
+  const sortDir: 'asc' | 'desc' = sortDirRaw === 'asc' ? 'asc' : 'desc'
+  const setUrl = useUrlStateBatch()
   const [importing, setImporting] = useState(false)
   const [importingSettlement, setImportingSettlement] = useState(false)
   const [importResult, setImportResult] = useState<string | null>(null)
@@ -122,7 +125,7 @@ export default function ShopeeOrdersPage() {
   // 帳號
   const [accounts, setAccounts] = useState<{ id: string; name: string; excel_password: string | null }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
-  const [filterAccount, setFilterAccount] = useState('')
+  const [filterAccount] = useUrlState('account_id', '')
   // 勾選 & 批次列印
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [batchPrintModal, setBatchPrintModal] = useState<'detail' | 'product' | null>(null)
@@ -178,8 +181,8 @@ export default function ShopeeOrdersPage() {
   }
 
   function toggleSort(col: string) {
-    if (sortBy === col) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
-    else { setSortBy(col); setSortDir('desc') }
+    if (sortBy === col) setUrl({ sort_dir: sortDir === 'asc' ? 'desc' : 'asc' })
+    else setUrl({ sort_by: col, sort_dir: 'desc' })
   }
 
   const accountMap = new Map(accounts.map(a => [a.id, a.name]))
@@ -188,7 +191,7 @@ export default function ShopeeOrdersPage() {
     ? orders.filter(o => getFinanceStatus(o).label === filterFinanceStatus)
     : orders
 
-  useEffect(() => { load() }, [page, sortBy, sortDir])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, sortBy, sortDir, search, filterStatus, filterReturnStatus, filterOrderDateFrom, filterOrderDateTo, filterCreatedFrom, filterCreatedTo, filterAccount])
 
   // 解析 Excel（server 端解密密碼保護）
   async function parseExcel(file: File, manualPassword?: string): Promise<Record<string, string>[]> {
@@ -361,52 +364,53 @@ export default function ShopeeOrdersPage() {
         <div className="flex gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input type="text" placeholder="搜尋訂單號、買家、收件人、ICCID..." value={search}
-              onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (setPage(1), load())}
+            <input type="text" placeholder="搜尋訂單號、買家、收件人、ICCID..." value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') setUrl({ search: searchInput, page: 1 }) }}
               className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
           </div>
-          <button onClick={() => { setPage(1); load() }} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+          <button onClick={() => setUrl({ search: searchInput, page: 1 })} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
         </div>
         <div className="flex flex-wrap gap-2 items-center text-xs">
           <span className="text-gray-500">訂單日期：</span>
-          <input type="date" value={filterOrderDateFrom} onChange={e => setFilterOrderDateFrom(e.target.value)}
+          <input type="date" value={filterOrderDateFrom} onChange={e => setUrl({ order_date_from: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
           <span className="text-gray-400">~</span>
-          <input type="date" value={filterOrderDateTo} onChange={e => setFilterOrderDateTo(e.target.value)}
+          <input type="date" value={filterOrderDateTo} onChange={e => setUrl({ order_date_to: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
           <span className="text-gray-500 ml-2">匯入日期：</span>
-          <input type="date" value={filterCreatedFrom} onChange={e => setFilterCreatedFrom(e.target.value)}
+          <input type="date" value={filterCreatedFrom} onChange={e => setUrl({ created_from: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
           <span className="text-gray-400">~</span>
-          <input type="date" value={filterCreatedTo} onChange={e => setFilterCreatedTo(e.target.value)}
+          <input type="date" value={filterCreatedTo} onChange={e => setUrl({ created_to: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
-          <select value={filterReturnStatus} onChange={e => setFilterReturnStatus(e.target.value)}
+          <select value={filterReturnStatus} onChange={e => setUrl({ return_status: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs ml-2">
             <option value="">退貨/退款</option>
             <option value="has">有退貨/退款</option>
             <option value="none">無退貨/退款</option>
           </select>
-          <select value={filterFinanceStatus} onChange={e => setFilterFinanceStatus(e.target.value)}
+          <select value={filterFinanceStatus} onChange={e => setUrl({ finance_status: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs">
             <option value="">金流狀態</option>
             <option value="未匯入">未匯入</option>
             <option value="已匯入">已匯入</option>
             <option value="金流異常">金流異常</option>
           </select>
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          <select value={filterStatus} onChange={e => setUrl({ status: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs">
             <option value="">系統狀態</option>
             <option value="pending">待處理</option>
             <option value="processing">處理中</option>
             <option value="completed">已完成</option>
           </select>
-          <select value={filterAccount} onChange={e => setFilterAccount(e.target.value)}
+          <select value={filterAccount} onChange={e => setUrl({ account_id: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs">
             <option value="">全部帳號</option>
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
-          <button onClick={() => { setFilterOrderDateFrom(''); setFilterOrderDateTo(''); setFilterCreatedFrom(''); setFilterCreatedTo(''); setFilterReturnStatus(''); setFilterFinanceStatus(''); setFilterStatus(''); setFilterAccount(''); setSearch(''); setPage(1); setTimeout(load, 0) }}
+          <button onClick={load} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">重新整理</button>
+          <button onClick={() => { setSearchInput(''); setUrl({ order_date_from: '', order_date_to: '', created_from: '', created_to: '', return_status: '', finance_status: '', status: '', account_id: '', search: '', page: 1 }) }}
             className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
         </div>
       </div>
