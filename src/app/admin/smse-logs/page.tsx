@@ -8,9 +8,9 @@ interface SmseLog {
   id: string
   api_type: string
   endpoint: string
-  request_body: unknown
-  response_body: unknown
-  response_raw: string | null
+  request_body?: unknown
+  response_body?: unknown
+  response_raw?: string | null
   status: string
   smse_status_code: string | null
   error_message: string | null
@@ -33,6 +33,7 @@ export default function SmseLogsPage() {
   const [filterStatus] = useUrlState('status', '')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [distinctTypes, setDistinctTypes] = useState<string[]>([])
+  const [bodyCache, setBodyCache] = useState<Map<string, { request_body: unknown; response_body: unknown; response_raw: string | null }>>(new Map())
   const setUrl = useUrlStateBatch()
 
   async function load() {
@@ -52,8 +53,16 @@ export default function SmseLogsPage() {
 
   useEffect(() => { load() }, [page, filterType, filterStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function toggleExpand(id: string) {
+  async function toggleExpand(id: string) {
+    const wasOpen = expanded.has(id)
     setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+    if (!wasOpen && !bodyCache.has(id)) {
+      const res = await fetch(`/api/admin/smse-logs/${id}`)
+      if (res.ok) {
+        const d = await res.json()
+        setBodyCache(prev => new Map(prev).set(id, { request_body: d.request_body, response_body: d.response_body, response_raw: d.response_raw }))
+      }
+    }
   }
 
   const totalPages = Math.ceil(total / 50)
@@ -125,21 +134,25 @@ export default function SmseLogsPage() {
                 </span>
                 {log.duration_ms != null && <span className="text-xs text-gray-400">{log.duration_ms}ms</span>}
               </button>
-              {isOpen && (
-                <div className="px-4 pb-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <div className="text-gray-500 mb-1">Request</div>
-                    <pre className="bg-gray-50 p-2 rounded overflow-auto max-h-64 whitespace-pre-wrap">{JSON.stringify(log.request_body, null, 2)}</pre>
+              {isOpen && (() => {
+                const body = bodyCache.get(log.id)
+                if (!body) return <div className="px-4 pb-3 text-xs text-gray-400">載入內容中…</div>
+                return (
+                  <div className="px-4 pb-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <div className="text-gray-500 mb-1">Request</div>
+                      <pre className="bg-gray-50 p-2 rounded overflow-auto max-h-64 whitespace-pre-wrap">{JSON.stringify(body.request_body, null, 2)}</pre>
+                    </div>
+                    <div>
+                      <div className="text-gray-500 mb-1">Response</div>
+                      <pre className="bg-gray-50 p-2 rounded overflow-auto max-h-64 whitespace-pre-wrap">{body.response_raw || JSON.stringify(body.response_body, null, 2)}</pre>
+                    </div>
+                    {log.error_message && (
+                      <div className="md:col-span-2 text-red-600 text-xs">錯誤：{log.error_message}</div>
+                    )}
                   </div>
-                  <div>
-                    <div className="text-gray-500 mb-1">Response</div>
-                    <pre className="bg-gray-50 p-2 rounded overflow-auto max-h-64 whitespace-pre-wrap">{log.response_raw || JSON.stringify(log.response_body, null, 2)}</pre>
-                  </div>
-                  {log.error_message && (
-                    <div className="md:col-span-2 text-red-600 text-xs">錯誤：{log.error_message}</div>
-                  )}
-                </div>
-              )}
+                )
+              })()}
             </div>
           )
         })}

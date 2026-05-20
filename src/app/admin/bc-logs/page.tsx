@@ -8,8 +8,8 @@ interface BcLog {
   id: string
   trade_type: string
   direction: string
-  request_body: any
-  response_body: any
+  request_body?: unknown
+  response_body?: unknown
   status: string
   error_message: string | null
   duration_ms: number | null
@@ -40,6 +40,7 @@ export default function BcLogsPage() {
   const [filterStatus] = useUrlState('status', '')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [distinctTypes, setDistinctTypes] = useState<string[]>([])
+  const [bodyCache, setBodyCache] = useState<Map<string, { request_body: unknown; response_body: unknown }>>(new Map())
   const setUrl = useUrlStateBatch()
 
   async function load() {
@@ -60,8 +61,17 @@ export default function BcLogsPage() {
 
   useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, filterType, filterDirection, filterStatus])
 
-  function toggleExpand(id: string) {
+  async function toggleExpand(id: string) {
+    const wasExpanded = expandedIds.has(id)
     setExpandedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+    // 展開且還沒拿過 body → 拉單筆
+    if (!wasExpanded && !bodyCache.has(id)) {
+      const res = await fetch(`/api/admin/bc-logs/${id}`)
+      if (res.ok) {
+        const d = await res.json()
+        setBodyCache(prev => new Map(prev).set(id, { request_body: d.request_body, response_body: d.response_body }))
+      }
+    }
   }
 
   async function replayLog(logId: string) {
@@ -180,20 +190,26 @@ export default function BcLogsPage() {
                         </button>
                       </div>
                     )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <h4 className="text-xs font-semibold text-gray-500 mb-1">Request</h4>
-                        <pre className="text-[11px] bg-white border border-gray-200 rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
-                          {log.request_body ? JSON.stringify(log.request_body, null, 2) : '-'}
-                        </pre>
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-semibold text-gray-500 mb-1">Response</h4>
-                        <pre className="text-[11px] bg-white border border-gray-200 rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
-                          {log.response_body ? JSON.stringify(log.response_body, null, 2) : '-'}
-                        </pre>
-                      </div>
-                    </div>
+                    {(() => {
+                      const body = bodyCache.get(log.id)
+                      if (!body) return <p className="text-xs text-gray-400">載入內容中…</p>
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-500 mb-1">Request</h4>
+                            <pre className="text-[11px] bg-white border border-gray-200 rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
+                              {body.request_body ? JSON.stringify(body.request_body, null, 2) : '-'}
+                            </pre>
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-500 mb-1">Response</h4>
+                            <pre className="text-[11px] bg-white border border-gray-200 rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
+                              {body.response_body ? JSON.stringify(body.response_body, null, 2) : '-'}
+                            </pre>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
               </div>

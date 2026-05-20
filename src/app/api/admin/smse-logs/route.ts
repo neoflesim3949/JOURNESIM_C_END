@@ -12,20 +12,17 @@ export async function GET(request: Request) {
   const status = searchParams.get('status') || ''
 
   const supabase = createAdminClient()
-  let query = supabase.from('smse_api_logs').select('*', { count: 'exact' })
+  // 列表只拉小欄位（不含 request/response body）+ estimated count，避免 IO 拖慢
+  let query = supabase.from('smse_api_logs')
+    .select('id, api_type, endpoint, status, smse_status_code, error_message, duration_ms, created_at', { count: 'estimated' })
   if (apiType) query = query.eq('api_type', apiType)
   if (status) query = query.eq('status', status)
   const from = (page - 1) * pageSize
   query = query.order('created_at', { ascending: false }).range(from, from + pageSize - 1)
   const { data, count } = await query
 
-  // distinct types 給選單
-  const { data: distinctRows } = await supabase
-    .from('smse_api_logs')
-    .select('api_type')
-    .order('created_at', { ascending: false })
-    .limit(5000)
-  const distinctTypes = Array.from(new Set((distinctRows || []).map(r => r.api_type).filter(Boolean))).sort()
+  // distinct types 改用當頁推算（搭配前端 STATIC 清單）
+  const distinctTypes = Array.from(new Set((data || []).map(r => r.api_type).filter(Boolean))).sort()
 
   return NextResponse.json({ data: data || [], total: count || 0, distinctTypes })
 }

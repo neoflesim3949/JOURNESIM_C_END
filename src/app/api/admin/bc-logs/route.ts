@@ -13,7 +13,10 @@ export async function GET(request: Request) {
   const status = searchParams.get('status') || ''
 
   const supabase = createAdminClient()
-  let query = supabase.from('bc_api_logs').select('*', { count: 'exact' })
+  // 列表只拉小欄位（不含 JSONB body）+ estimated count，避免 IO 拖慢
+  // 展開那筆才呼叫單筆 API 拿 body
+  let query = supabase.from('bc_api_logs')
+    .select('id, trade_type, direction, status, error_message, duration_ms, created_at', { count: 'estimated' })
 
   if (tradeType) query = query.eq('trade_type', tradeType)
   if (direction) query = query.eq('direction', direction)

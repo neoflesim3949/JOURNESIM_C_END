@@ -121,7 +121,7 @@ export default function ShopeeOrdersPage() {
   const [creating, setCreating] = useState(false)
   const [showLabelSettings, setShowLabelSettings] = useState(false)
   const [expiryDate, setExpiryDate] = useState('')
-  const [labelSettings, setLabelSettings] = useState({ line1: 12, line2: 12, line3: 10 })
+  const [labelSettings, setLabelSettings] = useState<{ line1: number; line2: number; line3: number; orientation: 'landscape' | 'portrait' }>({ line1: 12, line2: 12, line3: 10, orientation: 'landscape' })
   // 帳號
   const [accounts, setAccounts] = useState<{ id: string; name: string; excel_password: string | null }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
@@ -142,7 +142,14 @@ export default function ShopeeOrdersPage() {
   // 從 localStorage 載入設定 + 載入帳號
   useEffect(() => {
     const saved = localStorage.getItem('shopee_label_settings')
-    if (saved) { try { setLabelSettings(JSON.parse(saved)) } catch {} }
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        // 舊資料沒有 orientation → 補預設 landscape
+        if (!parsed.orientation) parsed.orientation = 'landscape'
+        setLabelSettings(parsed)
+      } catch {}
+    }
     const savedExpiry = localStorage.getItem('shopee_expiry_date')
     if (savedExpiry) setExpiryDate(savedExpiry)
     fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
@@ -158,7 +165,7 @@ export default function ShopeeOrdersPage() {
     localStorage.setItem('shopee_expiry_date', date)
   }
 
-  function saveLabelSettings(s: { line1: number; line2: number; line3: number }) {
+  function saveLabelSettings(s: { line1: number; line2: number; line3: number; orientation: 'landscape' | 'portrait' }) {
     setLabelSettings(s)
     localStorage.setItem('shopee_label_settings', JSON.stringify(s))
     setShowLabelSettings(false)
@@ -526,23 +533,31 @@ export default function ShopeeOrdersPage() {
                 <button onClick={() => {
                   const el = document.getElementById('batch-print-area')
                   if (!el) return
-                  const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
-                  if (!w) return
+                  let html: string
                   if (batchPrintModal === 'product') {
-                    w.document.write(`<html><head><style>
-                      @page{size:30mm 15mm;margin:0}
-                      body{margin:0;padding:0;font-family:sans-serif}
-                      body>div{gap:0!important}
-                      .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1mm;page-break-after:always;border:none!important}
-                    </style></head><body>${el.innerHTML}</body></html>`)
+                    const isPortrait = labelSettings.orientation === 'portrait'
+                    const pageW = isPortrait ? '15mm' : '30mm'
+                    const pageH = isPortrait ? '30mm' : '15mm'
+                    html = `<html><head><style>
+                      @page{size:${pageW} ${pageH};margin:0}
+                      html,body{margin:0!important;padding:0!important;font-family:sans-serif;width:${pageW}!important}
+                      .label-grid{display:block!important;gap:0!important;margin:0!important;padding:0!important;width:${pageW}!important}
+                      .label{width:${pageW}!important;height:${pageH}!important;padding:1mm 2mm!important;box-sizing:border-box!important;display:flex!important;flex-direction:column!important;justify-content:center!important;align-items:center!important;text-align:center!important;gap:0!important;overflow:hidden!important;page-break-inside:avoid;border:none!important;margin:0!important}
+                      .label>div{line-height:1.1!important;overflow:hidden!important}
+                    </style></head><body>${el.innerHTML}</body></html>`
                   } else {
-                    w.document.write(`<html><head><style>
+                    html = `<html><head><style>
                       @page{size:100mm 150mm;margin:0}
                       body{margin:0;font-family:sans-serif}
                       .detail-label{page-break-after:always}
-                    </style></head><body>${el.innerHTML}</body></html>`)
+                    </style></head><body>${el.innerHTML}</body></html>`
                   }
-                  w.document.close(); w.print(); w.close()
+                  const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
+                  if (!w) return
+                  w.document.write(html)
+                  w.document.close()
+                  // 直接呼叫 print；macOS Chrome 預設會跳 Chrome 對話框，按 ⌥⌘P 切到系統對話框
+                  setTimeout(() => { w.print() }, 100)
                 }} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-2">
                   <Printer className="w-4 h-4" /> 列印
                 </button>
@@ -585,21 +600,21 @@ export default function ShopeeOrdersPage() {
                   </div>
                 ))
               ) : (
-                /* 批次商品標籤 */
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
+                /* 批次商品標籤 — 螢幕預覽用 padding 撐出間隔；列印時 CSS 會清掉 */
+                <div className="label-grid" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4mm' }}>
                   {batchPrintData.flatMap((d, idx) =>
                     d.items.flatMap((item: any) =>
                       Array.from({ length: item.quantity }, (_, j) => (
                         <div key={`${idx}-${item.id}-${j}`} className="label"
-                          style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', pageBreakAfter: 'always' }}>
-                          <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                          style={{ width: labelSettings.orientation === 'portrait' ? '15mm' : '30mm', height: labelSettings.orientation === 'portrait' ? '30mm' : '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', overflow: 'hidden' }}>
+                          <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                             {skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name}
                           </div>
-                          <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                          <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                             {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
                           </div>
                           {expiryDate && (
-                            <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2, whiteSpace: 'nowrap' }}>使用期限：{expiryDate.replace(/-/g, '/')}</div>
+                            <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.1, whiteSpace: 'nowrap' }}>使用期限：{expiryDate.replace(/-/g, '/')}</div>
                           )}
                         </div>
                       ))
@@ -681,7 +696,18 @@ export default function ShopeeOrdersPage() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
             <h2 className="font-bold mb-4">標籤 / 收據設定</h2>
             <div className="space-y-3">
-              <p className="text-xs text-gray-500 font-medium">商品標籤字體</p>
+              <p className="text-xs text-gray-500 font-medium">商品標籤方向</p>
+              <div className="flex gap-2">
+                <button onClick={() => setLabelSettings({ ...labelSettings, orientation: 'landscape' })}
+                  className={`flex-1 py-2 text-sm rounded-lg border ${labelSettings.orientation === 'landscape' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                  橫向 30×15
+                </button>
+                <button onClick={() => setLabelSettings({ ...labelSettings, orientation: 'portrait' })}
+                  className={`flex-1 py-2 text-sm rounded-lg border ${labelSettings.orientation === 'portrait' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                  直向 15×30
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 font-medium pt-2">商品標籤字體</p>
               {([['line1', '第一行（商品名稱）'], ['line2', '第二行（規格名稱）'], ['line3', '第三行（使用期限）']] as const).map(([key, label]) => (
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-sm">{label}</span>
@@ -719,7 +745,7 @@ export default function ShopeeOrdersPage() {
                 )}
               </div>
             </div>
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-center" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', border: '1px solid #ccc' }}>
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-center" style={{ width: labelSettings.orientation === 'portrait' ? '15mm' : '30mm', height: labelSettings.orientation === 'portrait' ? '30mm' : '15mm', margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', border: '1px solid #ccc' }}>
               <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2 }}>商品名稱預覽</div>
               <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.2 }}>規格名稱預覽</div>
               <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2 }}>使用期限：2026/04/06</div>

@@ -838,11 +838,16 @@ export default function ShopeeOrderDetailPage() {
                   const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
                   if (!w) { alert('彈出視窗被瀏覽器封鎖，請允許此網站開啟彈出視窗後再試'); return }
                   if (printModal === 'product') {
+                    let savedOrientation: 'landscape' | 'portrait' = 'landscape'
+                    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) { const p = JSON.parse(saved); if (p.orientation === 'portrait') savedOrientation = 'portrait' } } catch {}
+                    const pageW = savedOrientation === 'portrait' ? '15mm' : '30mm'
+                    const pageH = savedOrientation === 'portrait' ? '30mm' : '15mm'
                     w.document.write(`<html><head><style>
-                      @page{size:30mm 15mm;margin:0}
-                      body{margin:0;padding:0;font-family:sans-serif}
-                      body>div{gap:0!important}
-                      .label{width:30mm;height:15mm;padding:1mm 2mm;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:1mm;page-break-after:always;border:none!important}
+                      @page{size:${pageW} ${pageH};margin:0}
+                      html,body{margin:0!important;padding:0!important;font-family:sans-serif;width:${pageW}!important}
+                      body>div{display:block!important;gap:0!important;margin:0!important;padding:0!important;width:${pageW}!important}
+                      .label{width:${pageW}!important;height:${pageH}!important;padding:1mm 2mm!important;box-sizing:border-box!important;display:flex!important;flex-direction:column!important;justify-content:center!important;align-items:center!important;text-align:center!important;gap:0!important;overflow:hidden!important;page-break-inside:avoid;border:none!important;margin:0!important}
+                      .label>div{line-height:1.1!important;overflow:hidden!important}
                     </style></head><body>${el.innerHTML}</body></html>`)
                   } else if (printModal === 'receipt' || printModal === 'receipt_a5') {
                     const pageSize = printModal === 'receipt_a5' ? 'A5' : '100mm 150mm'
@@ -912,23 +917,26 @@ export default function ShopeeOrderDetailPage() {
                 </div>
               ) : printModal === 'product' ? (
                 /* 商品標籤 30mm × 15mm — 每標籤獨立一頁，頁面尺寸即標籤尺寸 */
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4mm', alignItems: 'center' }}>
+                <div style={{ display: 'block', textAlign: 'center' }}>
                   {(() => {
-                    let ls = { line1: 12, line2: 12, line3: 10 }
+                    let ls: { line1: number; line2: number; line3: number; orientation?: 'landscape' | 'portrait' } = { line1: 12, line2: 12, line3: 10 }
                     try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) ls = JSON.parse(saved) } catch { }
+                    const isPortrait = ls.orientation === 'portrait'
+                    const w = isPortrait ? '15mm' : '30mm'
+                    const h = isPortrait ? '30mm' : '15mm'
                     const expiry = localStorage.getItem('shopee_expiry_date') || ''
                     return items.flatMap(item =>
                       Array.from({ length: item.quantity }, (_, j) => (
                         <div key={`${item.id}-${j}`} className="label"
-                          style={{ width: '30mm', height: '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', pageBreakAfter: 'always' }}>
-                          <div style={{ fontSize: `${ls.line1}px`, fontWeight: 'bold', lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                          style={{ width: w, height: h, border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', overflow: 'hidden', margin: '0 auto 4mm' }}>
+                          <div style={{ fontSize: `${ls.line1}px`, fontWeight: 'bold', lineHeight: 1.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                             {skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name}
                           </div>
-                          <div style={{ fontSize: `${ls.line2}px`, lineHeight: 1.2, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                          <div style={{ fontSize: `${ls.line2}px`, lineHeight: 1.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
                             {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
                           </div>
                           {expiry && (
-                            <div style={{ fontSize: `${ls.line3}px`, lineHeight: 1.2, whiteSpace: 'nowrap' }}>使用期限：{expiry.replace(/-/g, '/')}</div>
+                            <div style={{ fontSize: `${ls.line3}px`, lineHeight: 1.1, whiteSpace: 'nowrap' }}>使用期限：{expiry.replace(/-/g, '/')}</div>
                           )}
                         </div>
                       ))
