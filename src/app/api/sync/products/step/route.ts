@@ -32,7 +32,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, fallback: T, ma
       lastErr = err
       const msg = err instanceof Error ? err.message : String(err)
       // [1999] 系统繁忙 也視為可重試，1047 不重試
-      const isRetryable = /\b(522|502|503|504|1999|timeout|ECONNRESET|fetch failed)\b/i.test(msg) && !msg.includes('[1047]')
+      const isRetryable = (/\b(522|502|503|504|1999|timeout|ECONNRESET|fetch failed)\b/i.test(msg) || /non-JSON|An error occurred|sorry|temporarily unavailable/i.test(msg)) && !msg.includes('[1047]')
       console.warn(`[BC retry] ${label} attempt ${attempt}/${maxAttempts} failed: ${msg}`)
       if (attempt === maxAttempts || !isRetryable) break
       // backoff: 3s, 7s, 15s

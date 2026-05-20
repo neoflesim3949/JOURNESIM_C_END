@@ -13,7 +13,7 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, fallback: T, ma
     try { return await fn() }
     catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const isRetryable = /\b(522|502|503|504|timeout|ECONNRESET|fetch failed)\b/i.test(msg)
+      const isRetryable = /\b(522|502|503|504|1999|timeout|ECONNRESET|fetch failed)\b/i.test(msg) || /non-JSON|An error occurred|sorry|temporarily unavailable/i.test(msg)
       console.warn(`[BC retry] ${label} attempt ${attempt}/${maxAttempts} failed: ${msg}`)
       if (attempt === maxAttempts || !isRetryable) break
       await new Promise((r) => setTimeout(r, attempt === 1 ? 2000 : 5000))
