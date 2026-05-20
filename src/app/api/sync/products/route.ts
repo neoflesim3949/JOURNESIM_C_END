@@ -116,14 +116,21 @@ export async function POST() {
       const { error } = await supabase
         .from('bc_products')
         .upsert(batch, { onConflict: 'sku_id' })
-      if (error) throw error
+      if (error) throw new Error(`upsert 失敗：${error.message}${error.details ? ' / ' + error.details : ''}${error.hint ? ' / ' + error.hint : ''}`)
       synced += batch.length
     }
 
     return NextResponse.json({ synced })
   } catch (err) {
     console.error('Product sync failed:', err)
-    let msg = err instanceof Error ? err.message : String(err)
+    let msg: string
+    if (err instanceof Error) msg = err.message
+    else if (typeof err === 'string') msg = err
+    else if (err && typeof err === 'object') {
+      const eo = err as { message?: unknown; details?: unknown; hint?: unknown }
+      msg = String(eo.message ?? '') + (eo.details ? ` / ${String(eo.details)}` : '') + (eo.hint ? ` / ${String(eo.hint)}` : '')
+      if (!msg.trim()) msg = JSON.stringify(err)
+    } else msg = String(err)
     // 如果錯誤內容包含 HTML（例如 Cloudflare 502 error page），萃取狀態資訊
     if (msg.includes('<!DOCTYPE') || msg.includes('<html')) {
       const codeMatch = msg.match(/Error code (\d+)/i) || msg.match(/\b(502|503|504|500)\b/)
