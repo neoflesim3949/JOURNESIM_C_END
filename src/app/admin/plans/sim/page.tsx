@@ -8,6 +8,15 @@ import SkuCompareModal from '@/components/admin/sku-compare-modal'
 
 interface PriceItem { copies: string; retailPrice: string; settlementPrice: string }
 interface CountryItem { mcc: string; name: string }
+interface F002OperatorInfo { operator?: string; network?: string; priority?: string }
+interface F002CountryDetail {
+  mcc: string; name: string
+  apn?: string; apnUsername?: string; apnPassword?: string
+  apnType?: string; apnTypeDesc?: string; authenticationType?: string
+  operatorInfo?: F002OperatorInfo[]
+  ProviderZone?: string
+  ip1?: string; ip2?: string; ip3?: string; ipRemarks?: string
+}
 interface BCProduct {
   id: string; sku_id: string; name: string; type: string
   days: number | null; capacity: string | null; high_flow_size: string | null
@@ -29,6 +38,9 @@ export default function AdminSimPlansPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [syncing, setSyncing] = useState(false)
   const [detailProduct, setDetailProduct] = useState<BCProduct | null>(null)
+  const [detailCountries, setDetailCountries] = useState<F002CountryDetail[] | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
   const [filterPlanType, setFilterPlanType] = useState('')
   const [filterProductType, setFilterProductType] = useState('')
   const [filterSalesMethod, setFilterSalesMethod] = useState('')
@@ -217,12 +229,12 @@ export default function AdminSimPlansPage() {
 
       {/* Detail Modal */}
       {detailProduct && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetailProduct(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { setDetailProduct(null); setDetailCountries(null); setDetailError('') }}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold">套餐詳情</h2>
-                <button onClick={() => setDetailProduct(null)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+                <button onClick={() => { setDetailProduct(null); setDetailCountries(null); setDetailError('') }} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
               </div>
               <div className="space-y-3 text-sm">
                 {[
@@ -255,12 +267,82 @@ export default function AdminSimPlansPage() {
 
               {detailProduct.country_data && detailProduct.country_data.length > 0 && (
                 <div className="mt-4">
-                  <div className="text-xs font-medium text-gray-500 mb-2">覆蓋國家 / 運營商 · {detailProduct.country_data.length}</div>
-                  <div className="flex flex-wrap gap-1">
-                    {detailProduct.country_data.map((c) => (
-                      <span key={c.mcc} className="px-2 py-0.5 bg-gray-100 rounded text-xs">{c.name}</span>
-                    ))}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-medium text-gray-500">覆蓋國家 / 運營商 · {detailProduct.country_data.length}</div>
+                    {!detailCountries && (
+                      <button
+                        onClick={async () => {
+                          if (!detailProduct.sales_method) { setDetailError('此商品無 sales_method，無法呼叫 F002'); return }
+                          setDetailLoading(true); setDetailError('')
+                          try {
+                            const res = await fetch(`/api/admin/plans/details?sku_id=${encodeURIComponent(detailProduct.sku_id)}&sales_method=${encodeURIComponent(detailProduct.sales_method)}`)
+                            const data = await res.json()
+                            if (!res.ok) throw new Error(data.error || '查詢失敗')
+                            setDetailCountries(data.countries || [])
+                          } catch (err) {
+                            setDetailError(err instanceof Error ? err.message : String(err))
+                          } finally { setDetailLoading(false) }
+                        }}
+                        disabled={detailLoading}
+                        className="px-2 py-0.5 text-[11px] border border-blue-300 text-blue-600 rounded hover:bg-blue-50 disabled:opacity-50">
+                        {detailLoading ? '查詢中…' : '查詢運營商 / APN (F002)'}
+                      </button>
+                    )}
                   </div>
+                  {detailError && <div className="text-xs text-red-500 mb-2">{detailError}</div>}
+                  {!detailCountries ? (
+                    <div className="flex flex-wrap gap-1">
+                      {detailProduct.country_data.map((c) => (
+                        <span key={c.mcc} className="px-2 py-0.5 bg-gray-100 rounded text-xs">{c.name}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {detailCountries.map((c) => (
+                        <div key={c.mcc} className="border border-gray-200 rounded-lg p-2.5 text-xs">
+                          <div className="font-medium text-gray-800">
+                            {c.name} <span className="text-gray-400">({c.mcc})</span>
+                          </div>
+                          {(c.apn || c.apnUsername || c.apnPassword) && (
+                            <div className="mt-1 text-gray-600">
+                              <span className="text-gray-400">APN：</span>
+                              <span className="font-mono">{c.apn || '—'}</span>
+                              {c.apnUsername && <span className="ml-2 text-gray-400">user: <span className="font-mono text-gray-700">{c.apnUsername}</span></span>}
+                              {c.apnPassword && <span className="ml-2 text-gray-400">pwd: <span className="font-mono text-gray-700">{c.apnPassword}</span></span>}
+                            </div>
+                          )}
+                          {c.operatorInfo && c.operatorInfo.length > 0 && (
+                            <div className="mt-1">
+                              <div className="text-gray-400 mb-0.5">運營商：</div>
+                              <table className="w-full text-[11px]">
+                                <thead className="text-gray-400">
+                                  <tr><th className="text-left font-normal">優先級</th><th className="text-left font-normal">運營商</th><th className="text-left font-normal">網絡</th></tr>
+                                </thead>
+                                <tbody>
+                                  {c.operatorInfo.map((op, i) => (
+                                    <tr key={i} className="text-gray-700">
+                                      <td className="py-0.5">{op.priority ?? '—'}</td>
+                                      <td className="py-0.5">{op.operator ?? '—'}</td>
+                                      <td className="py-0.5">{op.network ?? '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                          {(c.ProviderZone || c.ip1 || c.ip2 || c.ip3 || c.ipRemarks) && (
+                            <div className="mt-1 text-gray-600 grid grid-cols-2 gap-x-3">
+                              {c.ProviderZone && <div><span className="text-gray-400">IMSI 歸屬地：</span>{c.ProviderZone}</div>}
+                              {c.ip1 && <div><span className="text-gray-400">IP1：</span><span className="font-mono">{c.ip1}</span></div>}
+                              {c.ip2 && <div><span className="text-gray-400">IP2：</span><span className="font-mono">{c.ip2}</span></div>}
+                              {c.ip3 && <div><span className="text-gray-400">IP3：</span><span className="font-mono">{c.ip3}</span></div>}
+                              {c.ipRemarks && <div className="col-span-2"><span className="text-gray-400">IP 描述：</span>{c.ipRemarks}</div>}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
