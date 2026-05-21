@@ -973,12 +973,42 @@ export default function ShopeeOrderDetailPage() {
 }
 
 // 卡 + 套餐使用狀況彈窗（F010 + F012）
+interface DailyTrafficItem { usedDate: string; type: string; usedAmount: string; country: string; countryRegionCode: string }
+interface DailyTrafficResult { loading: boolean; items?: DailyTrafficItem[]; error?: string; beginDate?: string; endDate?: string }
+
 function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: boolean; data: CardUsageResp | null; error: string | null }; onClose: () => void }) {
   const PLAN_STATUS_LABEL: Record<string, string> = {
     '0': '未使用', '1': '使用中', '2': '已用完', '3': '已過期', '4': '已退訂',
   }
   const CARD_STATUS_LABEL: Record<string, string> = {
     '0': '載體有效', '1': '載體無效', '2': '已停用',
+  }
+
+  const [trafficByIccid, setTrafficByIccid] = useState<Record<string, DailyTrafficResult>>({})
+
+  async function loadDailyTraffic(iccid: string, expirationDate?: string) {
+    setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: true } }))
+    try {
+      const params = new URLSearchParams({ iccid })
+      // 從截止日往前推 30 天（含當天 → 共 30 天區間）
+      if (expirationDate) {
+        const endStr = expirationDate.slice(0, 10) // "2026-05-23 00:00:00" → "2026-05-23"
+        const end = new Date(endStr + 'T00:00:00Z')
+        const begin = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000)
+        const fmt = (d: Date) => d.toISOString().slice(0, 10)
+        params.set('end_date', fmt(end))
+        params.set('begin_date', fmt(begin))
+      }
+      const res = await fetch(`/api/admin/cards/daily-traffic?${params}`)
+      const d = await res.json()
+      if (!res.ok) {
+        setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: false, error: d.error || '查詢失敗' } }))
+        return
+      }
+      setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: false, items: d.items || [], beginDate: d.beginDate, endDate: d.endDate } }))
+    } catch (err) {
+      setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: false, error: err instanceof Error ? err.message : String(err) } }))
+    }
   }
 
   function fmtTraffic(s?: string | null) {
@@ -1013,21 +1043,66 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
                       <th className="px-2 py-1.5 text-left border-b">載體狀態</th>
                       <th className="px-2 py-1.5 text-left border-b">截止日</th>
                       <th className="px-2 py-1.5 text-left border-b">已用次數</th>
+                      <th className="px-2 py-1.5 text-left border-b">日流量</th>
                     </tr>
                   </thead>
                   <tbody>
                     {modal.data.cardExpiry.length === 0 && (
-                      <tr><td colSpan={5} className="px-2 py-2 text-gray-400 text-center">無資料</td></tr>
+                      <tr><td colSpan={6} className="px-2 py-2 text-gray-400 text-center">無資料</td></tr>
                     )}
-                    {modal.data.cardExpiry.map((c, i) => (
-                      <tr key={i} className="border-b">
-                        <td className="px-2 py-1.5 font-mono">{c.iccid}</td>
-                        <td className="px-2 py-1.5">{c.type || '—'}</td>
-                        <td className="px-2 py-1.5">{CARD_STATUS_LABEL[c.status || ''] || c.status || '—'}</td>
-                        <td className="px-2 py-1.5">{c.expirationDate || '—'}</td>
-                        <td className="px-2 py-1.5">{c.usageCount || '—'}</td>
-                      </tr>
-                    ))}
+                    {modal.data.cardExpiry.map((c, i) => {
+                      const tr = trafficByIccid[c.iccid]
+                      return (
+                        <Fragment key={i}>
+                          <tr className="border-b">
+                            <td className="px-2 py-1.5 font-mono">{c.iccid}</td>
+                            <td className="px-2 py-1.5">{c.type || '—'}</td>
+                            <td className="px-2 py-1.5">{CARD_STATUS_LABEL[c.status || ''] || c.status || '—'}</td>
+                            <td className="px-2 py-1.5">{c.expirationDate || '—'}</td>
+                            <td className="px-2 py-1.5">{c.usageCount || '—'}</td>
+                            <td className="px-2 py-1.5">
+                              <button onClick={() => loadDailyTraffic(c.iccid, c.expirationDate)} disabled={tr?.loading}
+                                className="px-2 py-0.5 text-[11px] border border-blue-300 text-blue-600 rounded hover:bg-blue-50 disabled:opacity-50">
+                                {tr?.loading ? '查詢中…' : tr ? '重新查詢' : '查流量 (F023)'}
+                              </button>
+                            </td>
+                          </tr>
+                          {tr && !tr.loading && (
+                            <tr className="bg-gray-50">
+                              <td colSpan={6} className="px-3 py-2">
+                                {tr.error && <div className="text-red-500 text-xs">{tr.error}</div>}
+                                {tr.items && tr.items.length === 0 && <div className="text-gray-400 text-xs">查詢期間 {tr.beginDate} ~ {tr.endDate} 無流量紀錄</div>}
+                                {tr.items && tr.items.length > 0 && (
+                                  <div>
+                                    <div className="text-[11px] text-gray-500 mb-1">期間 {tr.beginDate} ~ {tr.endDate} · 共 {tr.items.length} 筆 · 合計 {fmtTraffic(String(tr.items.reduce((s, it) => s + (Number(it.usedAmount) || 0), 0)))}</div>
+                                    <table className="w-full text-[11px] border border-gray-200">
+                                      <thead className="bg-white">
+                                        <tr>
+                                          <th className="px-2 py-1 text-left border-b">日期</th>
+                                          <th className="px-2 py-1 text-left border-b">國家</th>
+                                          <th className="px-2 py-1 text-left border-b">用量</th>
+                                          <th className="px-2 py-1 text-left border-b">類型</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {tr.items.map((it, j) => (
+                                          <tr key={j} className="border-b">
+                                            <td className="px-2 py-1 font-mono">{it.usedDate}</td>
+                                            <td className="px-2 py-1">{it.country || it.countryRegionCode || '—'}</td>
+                                            <td className="px-2 py-1">{fmtTraffic(it.usedAmount)}</td>
+                                            <td className="px-2 py-1">{it.type || '—'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
