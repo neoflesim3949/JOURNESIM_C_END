@@ -149,7 +149,7 @@ export default function ShopeeOrderDetailPage() {
   // 蝦皮帳號
   const [accountMap, setAccountMap] = useState<Map<string, string>>(new Map())
   // 列印彈窗
-  const [printModal, setPrintModal] = useState<'detail' | 'product' | 'receipt' | 'receipt_a5' | null>(null)
+  const [printModal, setPrintModal] = useState<'detail' | 'product' | 'receipt' | 'receipt_a5' | 'shipping' | null>(null)
   // 收據資訊
   const [receiptBuyer, setReceiptBuyer] = useState('')
   const [receiptTaxId, setReceiptTaxId] = useState('')
@@ -390,6 +390,9 @@ export default function ShopeeOrderDetailPage() {
           </button>
           <button onClick={() => setPrintModal('receipt_a5')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
             <Printer className="w-4 h-4" /> 收據 A5
+          </button>
+          <button onClick={() => setPrintModal('shipping')} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+            <Printer className="w-4 h-4" /> 寄件單
           </button>
           {canSubmitBc && (
             <button onClick={submitBcOrder} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
@@ -830,7 +833,7 @@ export default function ShopeeOrderDetailPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPrintModal(null)}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : printModal === 'receipt_a5' ? '收據預覽（A5）' : '收據預覽（10×15）'}</h2>
+              <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : printModal === 'receipt_a5' ? '收據預覽（A5）' : printModal === 'shipping' ? '寄件單預覽（10×15）' : '收據預覽（10×15）'}</h2>
               <div className="flex items-center gap-2">
                 <button onClick={() => {
                   const el = document.getElementById('print-area')
@@ -868,6 +871,12 @@ export default function ShopeeOrderDetailPage() {
                       w.addEventListener('load', () => setTimeout(doPrint, 150))
                     }
                     return
+                  } else if (printModal === 'shipping') {
+                    w.document.write(`<html><head><style>
+                      @page{size:100mm 150mm;margin:0}
+                      html,body{margin:0;padding:0;font-family:'Microsoft JhengHei','PingFang TC','Noto Sans TC',sans-serif}
+                      .shipping-root{border:none!important}
+                    </style></head><body>${el.innerHTML}</body></html>`)
                   } else {
                     w.document.write(`<html><head><style>
                       @page{size:100mm 150mm;margin:0}
@@ -943,6 +952,9 @@ export default function ShopeeOrderDetailPage() {
                     )
                   })()}
                 </div>
+              ) : printModal === 'shipping' ? (
+                /* 寄件單 100mm × 150mm — 直書（右至左、字正寫） */
+                <ShippingLabel order={order} />
               ) : (
                 /* 收據 */
                 <ReceiptTemplate order={order} items={items} skuProductNameMap={skuProductNameMap} variationIdMap={variationIdMap}
@@ -1215,6 +1227,52 @@ function numberToChinese(n: number): string {
   }
   result = result.replace(/零+$/, '')
   return result + '元整'
+}
+
+function ShippingLabel({ order }: { order: ShopeeOrder }) {
+  // 從 localStorage 讀寄件人預設（在訂單列表的「標籤 / 收據設定」可設定）
+  let sender = { name: '', tax_id: '', phone: '', zip_city: '', address: '', contents: '文件', undeliverable: '退回寄件人' }
+  try {
+    const saved = localStorage.getItem('shopee_sender_info')
+    if (saved) sender = { ...sender, ...JSON.parse(saved) }
+  } catch {}
+  const recipientLine1 = `${order.zip_code || ''}${order.city || ''}${order.district || ''}`.trim()
+  const recipientLine2 = order.shipping_address || ''
+
+  const headerStyle: React.CSSProperties = { fontSize: '18pt', fontWeight: 700, marginBottom: '2mm' }
+  const bodyLineStyle: React.CSSProperties = { fontSize: '14pt', lineHeight: '1.45', whiteSpace: 'pre-line', fontWeight: 400 }
+
+  // 整體轉 90°：外框 100×150 紙張不變、內容按 150×100 排版然後旋轉 90° 填回外框
+  return (
+    <div className="shipping-root" style={{ width: '100mm', height: '150mm', border: '1px solid #ccc', margin: '0 auto', boxSizing: 'border-box', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ width: '150mm', height: '100mm', padding: '5mm 6mm', boxSizing: 'border-box', fontFamily: '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif', transformOrigin: 'top left', transform: 'translate(100mm, 0) rotate(90deg)', position: 'absolute', top: 0, left: 0 }}>
+      {/* 寄件人（整段縮 5mm） */}
+      <div style={{ marginBottom: '3mm', paddingLeft: '5mm' }}>
+        <div style={headerStyle}>寄件人</div>
+        {(sender.zip_city || sender.address) && <div style={bodyLineStyle}>{sender.zip_city}{sender.address}</div>}
+        {sender.tax_id && <div style={bodyLineStyle}>統編：{sender.tax_id}</div>}
+        {sender.name && <div style={bodyLineStyle}>{sender.name}</div>}
+        {sender.phone && <div style={bodyLineStyle}>{sender.phone}</div>}
+      </div>
+      {/* 收件人（header 縮 40mm + 黑點；body 再縮 10mm = 50mm） */}
+      <div style={{ marginBottom: '3mm', paddingLeft: '40mm' }}>
+        <div style={headerStyle}><span style={{ fontSize: '18pt', marginRight: '2mm' }}>●</span>收件人</div>
+        {recipientLine1 && <div style={{ ...bodyLineStyle, paddingLeft: '10mm' }}>{recipientLine1}</div>}
+        {recipientLine2 && <div style={{ ...bodyLineStyle, paddingLeft: '10mm' }}>{recipientLine2}</div>}
+        {(order.recipient_name || order.recipient_phone) && (
+          <div style={{ ...bodyLineStyle, paddingLeft: '10mm' }}>
+            {order.recipient_name || ''}{order.recipient_name && order.recipient_phone ? '  ' : ''}{order.recipient_phone || ''}
+          </div>
+        )}
+      </div>
+      {/* 內裝物品 / 處理方式（整段縮 5mm，字體跟 body 一致） */}
+      <div style={{ fontSize: '14pt', lineHeight: '1.45', paddingLeft: '5mm', fontWeight: 400 }}>
+        <div>內裝物品：{sender.contents}</div>
+        <div>無法投遞處理方式：{sender.undeliverable}</div>
+      </div>
+    </div>
+    </div>
+  )
 }
 
 function ReceiptTemplate({ order, items, skuProductNameMap, variationIdMap, buyerName, taxId, address, size = 'small' }: {

@@ -122,6 +122,8 @@ export default function ShopeeOrdersPage() {
   const [showLabelSettings, setShowLabelSettings] = useState(false)
   const [expiryDate, setExpiryDate] = useState('')
   const [labelSettings, setLabelSettings] = useState<{ line1: number; line2: number; line3: number; orientation: 'landscape' | 'portrait' }>({ line1: 12, line2: 12, line3: 10, orientation: 'landscape' })
+  // 寄件單預設寄件人（存 localStorage shopee_sender_info）
+  const [senderInfo, setSenderInfo] = useState({ name: '', tax_id: '', phone: '', zip_city: '', address: '', contents: '文件', undeliverable: '退回寄件人' })
   // 帳號
   const [accounts, setAccounts] = useState<{ id: string; name: string; excel_password: string | null }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
@@ -152,6 +154,8 @@ export default function ShopeeOrdersPage() {
     }
     const savedExpiry = localStorage.getItem('shopee_expiry_date')
     if (savedExpiry) setExpiryDate(savedExpiry)
+    const savedSender = localStorage.getItem('shopee_sender_info')
+    if (savedSender) { try { setSenderInfo(prev => ({ ...prev, ...JSON.parse(savedSender) })) } catch {} }
     fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
     // 載入自訂名稱對應
     fetch('/api/admin/shopee/id-mappings').then(r => r.json()).then(d => {
@@ -744,6 +748,34 @@ export default function ShopeeOrdersPage() {
                   </label>
                 )}
               </div>
+              <div className="border-t border-gray-200 pt-3 mt-3">
+                <p className="text-xs text-gray-500 font-medium mb-2">寄件單預設寄件人</p>
+                <div className="space-y-2">
+                  <input type="text" placeholder="寄件人姓名 / 公司" value={senderInfo.name}
+                    onChange={e => setSenderInfo({ ...senderInfo, name: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input type="text" placeholder="統一編號" value={senderInfo.tax_id}
+                    onChange={e => setSenderInfo({ ...senderInfo, tax_id: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input type="text" placeholder="寄件人電話" value={senderInfo.phone}
+                    onChange={e => setSenderInfo({ ...senderInfo, phone: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input type="text" placeholder="郵遞區號 + 城市 + 區（例：110 台北市信義區）" value={senderInfo.zip_city}
+                    onChange={e => setSenderInfo({ ...senderInfo, zip_city: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <input type="text" placeholder="詳細地址（例：東興路 41 號 10 樓）" value={senderInfo.address}
+                    onChange={e => setSenderInfo({ ...senderInfo, address: e.target.value })}
+                    className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" placeholder="內裝物品" value={senderInfo.contents}
+                      onChange={e => setSenderInfo({ ...senderInfo, contents: e.target.value })}
+                      className="px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                    <input type="text" placeholder="無法投遞處理方式" value={senderInfo.undeliverable}
+                      onChange={e => setSenderInfo({ ...senderInfo, undeliverable: e.target.value })}
+                      className="px-2 py-1.5 border border-gray-300 rounded text-sm" />
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="mt-4 p-3 bg-gray-50 rounded-lg text-center" style={{ width: labelSettings.orientation === 'portrait' ? '15mm' : '30mm', height: labelSettings.orientation === 'portrait' ? '30mm' : '15mm', margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', border: '1px solid #ccc' }}>
               <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.2 }}>商品名稱預覽</div>
@@ -751,7 +783,7 @@ export default function ShopeeOrdersPage() {
               <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2 }}>使用期限：2026/04/06</div>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={() => saveLabelSettings(labelSettings)} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
+              <button onClick={() => { localStorage.setItem('shopee_sender_info', JSON.stringify(senderInfo)); saveLabelSettings(labelSettings) }} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
               <button onClick={() => setShowLabelSettings(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
             </div>
           </div>
