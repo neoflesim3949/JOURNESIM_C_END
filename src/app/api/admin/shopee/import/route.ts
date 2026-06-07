@@ -20,9 +20,18 @@ export async function POST(request: Request) {
 
   const supabase = createAdminClient()
 
-  // 取得所有商品對應
-  const { data: mappings } = await supabase.from('shopee_product_mappings').select('*')
-  const mappingMap = new Map((mappings || []).map(m => [m.shopee_sku_code, m]))
+  // 對應來源＝V2 蝦皮表（依選項ID；只認 V2，不回退舊表）— 分頁撈全
+  const v2opts: { shopee_variation_id: string; bc_sku_id: string | null; copies: string | null }[] = []
+  for (let from = 0; ; from += 1000) {
+    let q = supabase.from('shopee_product_options_v2')
+      .select('shopee_variation_id, bc_sku_id, copies').not('bc_sku_id', 'is', null)
+    if (account_id) q = q.eq('account_id', account_id)
+    const { data } = await q.range(from, from + 999)
+    if (!data || data.length === 0) break
+    v2opts.push(...data)
+    if (data.length < 1000) break
+  }
+  const mappingMap = new Map(v2opts.map(o => [String(o.shopee_variation_id), o]))
 
   // 按訂單編號分組
   const orderGroups = new Map<string, Record<string, string>[]>()
@@ -97,8 +106,8 @@ export async function POST(request: Request) {
       const productId = row['商品ID'] || ''
       const variationId = row['規格ID'] || ''
 
-      // 查對應
-      const mapping = mappingMap.get(skuCode)
+      // 查對應（依選項ID 從 V2 蝦皮表）
+      const mapping = variationId ? mappingMap.get(String(variationId)) : undefined
 
       const itemData = {
         shopee_order_id: orderId,
@@ -111,11 +120,11 @@ export async function POST(request: Request) {
         sale_price: parseFloat(row['商品活動價格']) || null,
         quantity: parseInt(row['數量']) || 1,
         return_quantity: parseInt(row['退貨數量']) || 0,
-        matched_package_id: mapping?.package_id || null,
-        matched_plan_id: mapping?.package_plan_id || null,
+        matched_package_id: null,
+        matched_plan_id: null,
         matched_copies: mapping?.copies || null,
         bc_sku_id: mapping?.bc_sku_id || null,
-        status: mapping ? 'matched' : 'pending',
+        status: mapping?.bc_sku_id ? 'matched' : 'pending',
         raw_data: row,
       }
 
@@ -135,15 +144,7 @@ export async function POST(request: Request) {
 
       await supabase.from('shopee_order_items').insert(itemData)
       itemsCreated++
-
-      // 更新 mapping 的顯示名稱（如果已有對應）
-      if (mapping && skuCode) {
-        await supabase.from('shopee_product_mappings').update({
-          shopee_product_name: row['商品名稱'] || mapping.shopee_product_name,
-          shopee_variation_name: row['商品選項名稱'] || mapping.shopee_variation_name,
-          updated_at: new Date().toISOString(),
-        }).eq('shopee_sku_code', skuCode)
-      }
+      // 註：不回寫任何共用對應表；訂單只保存自己的快照
     }
   }
 

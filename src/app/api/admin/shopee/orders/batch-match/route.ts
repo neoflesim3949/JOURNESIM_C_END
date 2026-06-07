@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await request.json()
-  const { order_ids, shopee_sku_code, bc_sku_id, copies, shopee_product_id, shopee_variation_id, shopee_product_name, shopee_variation_name } = body
+  const { order_ids, shopee_sku_code, bc_sku_id, copies } = body
 
   if (!shopee_sku_code || !bc_sku_id) return NextResponse.json({ error: '缺少必要參數' }, { status: 400 })
 
@@ -23,17 +23,7 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // 儲存到 mappings 表
-  await supabase.from('shopee_product_mappings').upsert({
-    shopee_sku_code,
-    shopee_product_id: shopee_product_id || null,
-    shopee_variation_id: shopee_variation_id || null,
-    shopee_product_name: shopee_product_name || null,
-    shopee_variation_name: shopee_variation_name || null,
-    bc_sku_id,
-    copies: copies || null,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'shopee_sku_code' })
+  // 註：只調整訂單明細，不回寫共用對應表（對應源頭為 V2 蝦皮表）
 
   return NextResponse.json({ ok: true, updated: updated?.length || 0 })
 }
