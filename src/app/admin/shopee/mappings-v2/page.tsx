@@ -160,6 +160,15 @@ export default function ShopeeMappingsV2Page() {
   }
   function copyText(t: string) { try { navigator.clipboard?.writeText(t) } catch {} }
 
+  // 編輯自設名稱（寫回 V1 id-mappings 表，標籤/收據共用）
+  async function saveName(type: 'product' | 'variation', key: string, name: string) {
+    await fetch('/api/admin/shopee/mappings-v2/names', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, key, display_name: name }),
+    })
+    await load()
+  }
+
   async function saveRule() {
     await fetch('/api/admin/shopee/mappings-v2/rules', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -479,6 +488,15 @@ export default function ShopeeMappingsV2Page() {
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
             <div className="font-bold text-gray-800">{current.name}</div>
             <div className="text-[11px] text-gray-400 font-mono mt-0.5">商品ID: {current.id.startsWith('__') ? '—' : current.id} · {current.opts.length} 個選項</div>
+            {!current.id.startsWith('__') && (
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs text-gray-500 whitespace-nowrap">商品自設名稱</label>
+                <input key={current.id} defaultValue={current.opts.find(o => o.custom_product_name)?.custom_product_name || ''}
+                  onBlur={e => { const v = e.target.value.trim(); const cur = current.opts.find(o => o.custom_product_name)?.custom_product_name || ''; if (v !== cur) saveName('product', current.id, v) }}
+                  placeholder="例：中國（整個商品共用，標籤/收據同步）"
+                  className="px-2 py-1 border border-gray-300 rounded text-sm w-72" />
+              </div>
+            )}
           </div>
 
           {/* 數據量排序（拖曳） */}
@@ -545,7 +563,11 @@ export default function ShopeeMappingsV2Page() {
                       <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
                       <td className="px-3 py-2 font-mono text-[10px] text-gray-500">{o.shopee_variation_id}</td>
                       <td className="px-3 py-2 text-gray-600">{o.custom_product_name || <span className="text-gray-300">—</span>}</td>
-                      <td className="px-3 py-2 text-gray-600">{o.custom_variation_name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2">
+                        <input defaultValue={o.custom_variation_name ?? ''} placeholder="自設規格名稱"
+                          onBlur={e => { const v = e.target.value.trim(); if (v !== (o.custom_variation_name ?? '')) saveName('variation', o.shopee_variation_id, v) }}
+                          className="w-28 px-2 py-1 border border-gray-200 rounded text-xs" />
+                      </td>
                       <td className="px-3 py-2">
                         {o.bc_sku_id ? (
                           <div>

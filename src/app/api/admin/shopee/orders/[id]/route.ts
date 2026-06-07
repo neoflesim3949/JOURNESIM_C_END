@@ -85,7 +85,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.sale_price !== undefined) updates.sale_price = body.sale_price
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
-    // 註：訂單編輯只調整這筆訂單（服務顧客），不回寫任何共用對應表（對應源頭為 V2 蝦皮表）
+    // 訂單端對應回寫 V2 蝦皮表（讓 V2 逐步補齊；只在設定 BC 對應時寫，缺的選項自動建立）
+    // 名稱等其餘只服務該筆訂單、不回寫
+    if (body.bc_sku_id && body.shopee_variation_id) {
+      const { data: ord } = await supabase.from('shopee_orders').select('shopee_account_id').eq('id', id).single()
+      if (ord?.shopee_account_id) {
+        await supabase.from('shopee_product_options_v2').upsert({
+          account_id: ord.shopee_account_id,
+          shopee_variation_id: String(body.shopee_variation_id),
+          shopee_product_id: body.shopee_product_id || null,
+          shopee_product_name: body.shopee_product_name || null,
+          shopee_variation_name: body.shopee_variation_name || null,
+          bc_sku_id: body.bc_sku_id,
+          copies: body.matched_copies || null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'account_id,shopee_variation_id' })
+      }
+    }
 
     return NextResponse.json({ ok: true })
   }

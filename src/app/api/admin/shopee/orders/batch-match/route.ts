@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await request.json()
-  const { order_ids, shopee_sku_code, bc_sku_id, copies } = body
+  const { order_ids, shopee_sku_code, bc_sku_id, copies, shopee_variation_id, shopee_product_id, shopee_product_name, shopee_variation_name } = body
 
   if (!shopee_sku_code || !bc_sku_id) return NextResponse.json({ error: '缺少必要參數' }, { status: 400 })
 
@@ -23,7 +23,24 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // 註：只調整訂單明細，不回寫共用對應表（對應源頭為 V2 蝦皮表）
+  // 訂單端對應回寫 V2 蝦皮表（依各訂單所屬帳號；讓 V2 逐步補齊）
+  if (shopee_variation_id && bc_sku_id) {
+    const { data: ords } = await supabase.from('shopee_orders').select('shopee_account_id').in('id', order_ids)
+    const accts = [...new Set((ords || []).map(o => o.shopee_account_id).filter(Boolean))] as string[]
+    if (accts.length) {
+      const rows = accts.map(acc => ({
+        account_id: acc,
+        shopee_variation_id: String(shopee_variation_id),
+        shopee_product_id: shopee_product_id || null,
+        shopee_product_name: shopee_product_name || null,
+        shopee_variation_name: shopee_variation_name || null,
+        bc_sku_id,
+        copies: copies || null,
+        updated_at: new Date().toISOString(),
+      }))
+      await supabase.from('shopee_product_options_v2').upsert(rows, { onConflict: 'account_id,shopee_variation_id' })
+    }
+  }
 
   return NextResponse.json({ ok: true, updated: updated?.length || 0 })
 }

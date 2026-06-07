@@ -72,7 +72,7 @@ export async function GET(request: Request) {
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
     return {
       ...o,
-      custom_product_name: prodNameMap.get(`${o.shopee_product_id}_${o.shopee_variation_id}`) || prodNameMap.get(o.shopee_product_id) || null,
+      custom_product_name: prodNameMap.get(o.shopee_product_id) || prodNameMap.get(`${o.shopee_product_id}_${o.shopee_variation_id}`) || null,
       custom_variation_name: varNameMap.get(o.shopee_variation_id) || null,
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
