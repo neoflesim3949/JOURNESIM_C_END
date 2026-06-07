@@ -54,6 +54,7 @@ export default function ShopeeMappingsV2Page() {
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [importingV1, setImportingV1] = useState(false)
   const [search, setSearch] = useState('')
   const [showRule, setShowRule] = useState(false)
   const [matching, setMatching] = useState<OptionRow | null>(null) // BC 對應彈窗
@@ -150,6 +151,22 @@ export default function ShopeeMappingsV2Page() {
     })
     setShowRule(false)
     load()
+  }
+
+  async function importV1() {
+    if (!accountId) return
+    if (!confirm('從舊版「商品對應」帶入已對應的 BC SKU？\n\n只會補目前「未對應」的選項，不會覆蓋你在 V2 改過的。')) return
+    setImportingV1(true)
+    try {
+      const res = await fetch('/api/admin/shopee/mappings-v2/import-v1', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId }),
+      })
+      const d = await res.json()
+      if (!res.ok) { alert(d.error || '帶入失敗'); return }
+      alert(`已帶入 ${d.count} 筆對應`)
+      load()
+    } finally { setImportingV1(false) }
   }
 
   async function doExport() {
@@ -254,6 +271,10 @@ export default function ShopeeMappingsV2Page() {
           <button onClick={() => setShowRule(true)} disabled={!accountId}
             className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
             <Settings className="w-4 h-4" /> 加價規則
+          </button>
+          <button onClick={importV1} disabled={!accountId || importingV1}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
+            <Link2 className="w-4 h-4" /> {importingV1 ? '帶入中…' : '帶入舊版對應'}
           </button>
           <label className={`flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm rounded-lg ${accountId && !importing ? 'hover:bg-gray-50 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
             <Upload className="w-4 h-4" /> {importing ? '匯入中…' : '匯入蝦皮表'}

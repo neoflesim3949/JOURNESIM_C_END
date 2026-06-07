@@ -39,14 +39,20 @@ export async function GET(request: Request) {
     : { data: [] }
   const bcMap = new Map((bcProducts || []).map(p => [p.sku_id, p]))
 
-  // V1 自設名稱（商品 / 規格）— chunked .in 避免單次 1000 筆上限
-  const productIds = [...new Set(options.map(o => o.shopee_product_id).filter(Boolean))] as string[]
+  // V1 自設名稱（商品名稱 / 規格名稱）— chunked .in 避免單次 1000 筆上限
+  // V1「商品名稱」key 是完整編碼 商品ID_規格ID（也相容只用商品ID 的舊資料）
+  const prodKeySet = new Set<string>()
+  for (const o of options) {
+    if (o.shopee_product_id) prodKeySet.add(String(o.shopee_product_id))
+    if (o.shopee_product_id && o.shopee_variation_id) prodKeySet.add(`${o.shopee_product_id}_${o.shopee_variation_id}`)
+  }
+  const prodKeys = [...prodKeySet]
   const variationIds = [...new Set(options.map(o => o.shopee_variation_id).filter(Boolean))] as string[]
   const prodNameMap = new Map<string, string>()
   const varNameMap = new Map<string, string>()
-  for (let i = 0; i < productIds.length; i += 300) {
+  for (let i = 0; i < prodKeys.length; i += 300) {
     const { data } = await supabase.from('shopee_product_id_mappings')
-      .select('shopee_product_id, display_name').in('shopee_product_id', productIds.slice(i, i + 300))
+      .select('shopee_product_id, display_name').in('shopee_product_id', prodKeys.slice(i, i + 300))
     for (const r of data || []) prodNameMap.set(r.shopee_product_id, r.display_name)
   }
   for (let i = 0; i < variationIds.length; i += 300) {
@@ -64,7 +70,7 @@ export async function GET(request: Request) {
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
     return {
       ...o,
-      custom_product_name: prodNameMap.get(o.shopee_product_id) || null,
+      custom_product_name: prodNameMap.get(`${o.shopee_product_id}_${o.shopee_variation_id}`) || prodNameMap.get(o.shopee_product_id) || null,
       custom_variation_name: varNameMap.get(o.shopee_variation_id) || null,
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
