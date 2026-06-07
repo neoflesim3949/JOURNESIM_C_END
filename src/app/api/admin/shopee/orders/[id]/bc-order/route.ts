@@ -10,44 +10,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params
   const supabase = createAdminClient()
 
-  let { data: items } = await supabase.from('shopee_order_items')
+  const { data: items } = await supabase.from('shopee_order_items')
     .select('*').eq('shopee_order_id', id).in('status', ['matched', 'iccid_filled']).is('bc_order_id', null)
 
   if (!items || items.length === 0) return NextResponse.json({ error: '無可下單的商品' }, { status: 400 })
 
-  // eSIM 自動拆單：quantity>1 的 eSIM 品項拆成多筆 qty=1，讓每張 eSIM 有獨立 channelSubOrderId / QR / LPA
-  const esimToSplit = items.filter(i => i.delivery_type === 'esim' && i.quantity > 1)
-  if (esimToSplit.length > 0) {
-    for (const item of esimToSplit) {
-      const n = item.quantity
-      const rows = Array.from({ length: n }, () => ({
-        shopee_order_id: item.shopee_order_id,
-        shopee_product_name: item.shopee_product_name,
-        shopee_product_id: item.shopee_product_id,
-        shopee_variation_name: item.shopee_variation_name,
-        shopee_variation_id: item.shopee_variation_id,
-        shopee_sku_code: item.shopee_sku_code,
-        original_price: item.original_price,
-        sale_price: item.sale_price,
-        quantity: 1,
-        return_quantity: 0,
-        matched_package_id: item.matched_package_id,
-        matched_plan_id: item.matched_plan_id,
-        matched_copies: item.matched_copies,
-        bc_sku_id: item.bc_sku_id,
-        status: 'matched',
-        is_manual: item.is_manual,
-        delivery_type: 'esim',
-      }))
-      await supabase.from('shopee_order_items').insert(rows)
-      await supabase.from('shopee_order_items').delete().eq('id', item.id)
-    }
-    // 重新撈取（拿到拆分後的新 rows）
-    const { data: reFetched } = await supabase.from('shopee_order_items')
-      .select('*').eq('shopee_order_id', id).in('status', ['matched', 'iccid_filled']).is('bc_order_id', null)
-    items = reFetched
-    if (!items || items.length === 0) return NextResponse.json({ error: '無可下單的商品' }, { status: 400 })
-  }
+  // 註：qty>1 的 eSIM 不再拆單 —— F040 以 number=quantity 一次跟 BC 要多張，
+  //     N009 webhook 會把多張卡聚合進同一筆的 esim_cards（各張獨立 ICCID/QR/LPA）
 
   // 查詢成本價（從 bc_products.prices + 匯率）
   const skuIds = [...new Set(items.map(i => i.bc_sku_id).filter(Boolean))]
@@ -138,7 +107,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const bcSub = bcResult.subOrderList?.[0]
       const prices = bcPriceMap.get(item.bc_sku_id) || []
       const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
-      const costCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
+      // 一筆 eSIM 代表 quantity 張卡，成本 ×quantity（取代過往拆成多筆各算一次）
+      const unitCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
+      const costCny = unitCny * (item.quantity || 1)
       const costTwd = Math.ceil(costCny / cnyRate)
       await supabase.from('shopee_order_items').update({
         bc_order_id: bcResult.orderId,
