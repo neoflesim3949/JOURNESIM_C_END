@@ -54,7 +54,6 @@ export default function ShopeeMappingsV2Page() {
   const [exporting, setExporting] = useState(false)
   const [search, setSearch] = useState('')
   const [showRule, setShowRule] = useState(false)
-  const [editing, setEditing] = useState<OptionRow | null>(null)   // 單格編輯
   const [matching, setMatching] = useState<OptionRow | null>(null) // BC 對應彈窗
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -73,8 +72,6 @@ export default function ShopeeMappingsV2Page() {
       const d = await res.json()
       setOptions(d.options || [])
       if (d.rule) setRule(d.rule)
-      // 保持編輯中的格子資料同步
-      setEditing(prev => prev ? (d.options || []).find((o: OptionRow) => o.id === prev.id) || null : null)
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [accountId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -180,20 +177,21 @@ export default function ShopeeMappingsV2Page() {
 
   const current = productId ? products.find(p => p.id === productId) : null
 
-  // 當前商品的矩陣
-  const matrix = useMemo(() => {
-    if (!current) return null
-    const rows: string[] = []         // 規格1（數據量），首見順序
-    const colsSet = new Map<string, number>() // 規格2（天數）→ 排序值
-    const cell = new Map<string, OptionRow>()
+  // 當前商品：依數據量(規格1)分組，組內依天數(規格2)排序，每個組合一列展開
+  const groups = useMemo(() => {
+    if (!current) return []
+    const map = new Map<string, OptionRow[]>()
+    const order: string[] = []
     for (const o of current.opts) {
-      const [s1, s2] = splitSpec(o.shopee_variation_name)
-      if (!rows.includes(s1)) rows.push(s1)
-      if (!colsSet.has(s2)) colsSet.set(s2, dayNum(s2))
-      cell.set(`${s1} ${s2}`, o)
+      const s1 = splitSpec(o.shopee_variation_name)[0]
+      if (!map.has(s1)) { map.set(s1, []); order.push(s1) }
+      map.get(s1)!.push(o)
     }
-    const cols = [...colsSet.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0])
-    return { rows, cols, cell }
+    return order.map(s1 => ({
+      spec1: s1,
+      rows: map.get(s1)!.slice().sort((a, b) =>
+        dayNum(splitSpec(a.shopee_variation_name)[1]) - dayNum(splitSpec(b.shopee_variation_name)[1])),
+    }))
   }, [current])
 
   const priceOf = (o: OptionRow) => o.final_price ?? o.original_price ?? null
@@ -266,7 +264,7 @@ export default function ShopeeMappingsV2Page() {
           )}
         </>
       ) : (
-        /* ───── 商品矩陣 ───── */
+        /* ───── 商品詳情：數據量分組 + 天數逐列展開 ───── */
         <>
           <button onClick={() => setProductId('')} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 mb-3">
             <ArrowLeft className="w-4 h-4" /> 返回商品列表
@@ -276,45 +274,69 @@ export default function ShopeeMappingsV2Page() {
             <div className="text-[11px] text-gray-400 font-mono mt-0.5">商品ID: {current.id.startsWith('__') ? '—' : current.id} · {current.opts.length} 個選項</div>
           </div>
 
-          {matrix && (
-            <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
-              <table className="text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-500">
-                    <th className="sticky left-0 bg-gray-50 px-3 py-2 text-left font-medium border-b border-r border-gray-200 min-w-[160px]">數據量 \ 天數</th>
-                    {matrix.cols.map(c => <th key={c} className="px-2 py-2 font-medium border-b border-gray-200 whitespace-nowrap min-w-[88px]">{c}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {matrix.rows.map(r => (
-                    <tr key={r}>
-                      <td className="sticky left-0 bg-white px-3 py-2 font-medium text-gray-700 border-b border-r border-gray-200 align-top">{r}</td>
-                      {matrix.cols.map(c => {
-                        const o = matrix.cell.get(`${r} ${c}`)
-                        if (!o) return <td key={c} className="border-b border-gray-100 bg-gray-50/50"></td>
-                        const mapped = !!o.bc_sku_id
-                        const price = priceOf(o)
-                        return (
-                          <td key={c} className="border-b border-gray-100 p-1 align-top">
-                            <button onClick={() => setEditing(o)}
-                              className={`w-full rounded-lg px-2 py-1.5 text-left border transition ${mapped ? 'border-green-200 bg-green-50/60 hover:bg-green-100' : 'border-gray-200 bg-white hover:bg-gray-50'}`}>
-                              <div className="flex items-center justify-between">
-                                <span className="font-medium text-gray-800">{price != null ? `NT$${price}` : '—'}</span>
-                                <span className={`w-1.5 h-1.5 rounded-full ${mapped ? 'bg-green-500' : 'bg-gray-300'}`}></span>
-                              </div>
-                              <div className="text-[10px] text-gray-400 mt-0.5">
-                                {o.price_override != null ? '已覆蓋' : (mapped ? `算 NT$${o.calc_price ?? '—'}` : '未對應')}
-                              </div>
-                            </button>
-                          </td>
-                        )
-                      })}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="text-left px-3 py-2.5 font-medium border-r border-gray-200 min-w-[140px]">數據量</th>
+                  <th className="text-left px-3 py-2.5 font-medium w-16">天數</th>
+                  <th className="text-left px-3 py-2.5 font-medium min-w-[220px]">對應億點 BC</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-24">BC 成本</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-24">計算售價</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-28">售價(覆蓋)</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-28">毛利</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-20">原蝦皮價</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g, gi) => g.rows.map((o, ri) => {
+                  const s2 = splitSpec(o.shopee_variation_name)[1]
+                  return (
+                    <tr key={o.id} className={`hover:bg-gray-50/40 ${ri === 0 && gi > 0 ? 'border-t-2 border-gray-200' : 'border-t border-gray-100'}`}>
+                      {ri === 0 && (
+                        <td rowSpan={g.rows.length} className="px-3 py-2 align-top font-medium text-gray-700 border-r border-gray-200 bg-gray-50/40">{g.spec1}</td>
+                      )}
+                      <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
+                      <td className="px-3 py-2">
+                        {o.bc_sku_id ? (
+                          <div>
+                            <div className="text-blue-700 font-medium max-w-[260px] truncate">{o.bc_name || o.bc_sku_id}</div>
+                            <div className="text-[10px] text-gray-400 font-mono">{o.bc_sku_id} · copies {o.copies}</div>
+                          </div>
+                        ) : <span className="text-gray-300">未對應</span>}
+                        <div className="mt-1 flex gap-1">
+                          <button onClick={() => setMatching(o)} className="inline-flex items-center gap-1 px-2 py-0.5 border border-gray-300 rounded text-[10px] text-gray-600 hover:bg-gray-100">
+                            <Link2 className="w-3 h-3" /> {o.bc_sku_id ? '重新對應' : '對應'}
+                          </button>
+                          {o.bc_sku_id && (
+                            <button onClick={() => patch(o.id, { bc_sku_id: null, copies: null })} className="px-2 py-0.5 border border-gray-200 rounded text-[10px] text-gray-400 hover:bg-gray-100">取消</button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">{o.cost_twd ? <>NT$ {o.cost_twd}<div className="text-[10px] text-gray-400">¥{o.cost_cny}</div></> : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-600">{o.calc_price ? `NT$ ${o.calc_price}` : '—'}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input type="number" defaultValue={o.price_override ?? ''} placeholder={o.calc_price ? String(o.calc_price) : ''}
+                          onBlur={e => {
+                            const v = e.target.value.trim()
+                            const cur = o.price_override ?? null
+                            const next = v === '' ? null : Number(v)
+                            if (next !== cur) patch(o.id, { price_override: next })
+                          }}
+                          className="w-20 px-2 py-1 border border-gray-300 rounded text-right" />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {o.margin != null ? (
+                          <span className={o.margin >= 0 ? 'text-green-600' : 'text-red-500'}>NT$ {o.margin}<div className="text-[10px] text-gray-400">{o.margin_pct}%</div></span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-400">{o.original_price != null ? `NT$ ${o.original_price}` : '—'}</td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  )
+                }))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
 
@@ -327,7 +349,7 @@ export default function ShopeeMappingsV2Page() {
               <button onClick={() => setShowRule(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-3 text-sm">
-              <p className="text-xs text-gray-500">售價 = 成本(TWD) × 倍率 + 固定金額，再依進位方式處理。個別組合可在矩陣手動覆蓋。</p>
+              <p className="text-xs text-gray-500">售價 = 成本(TWD) × 倍率 + 固定金額，再依進位方式處理。個別組合可在表格手動覆蓋。</p>
               <label className="block">倍率
                 <input type="number" step="0.01" value={rule.multiplier} onChange={e => setRule({ ...rule, multiplier: Number(e.target.value) })}
                   className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded" />
@@ -360,14 +382,6 @@ export default function ShopeeMappingsV2Page() {
         </div>
       )}
 
-      {/* 單格編輯 */}
-      {editing && (
-        <CellEditor key={editing.id} row={editing} onClose={() => setEditing(null)}
-          onMatchClick={() => setMatching(editing)}
-          onSavePrice={(v) => patch(editing.id, { price_override: v })}
-          onClearMap={() => patch(editing.id, { bc_sku_id: null, copies: null })} />
-      )}
-
       {/* BC 對應 */}
       {matching && (
         <BcMatchModal
@@ -376,82 +390,6 @@ export default function ShopeeMappingsV2Page() {
           onClose={() => setMatching(null)}
         />
       )}
-    </div>
-  )
-}
-
-// 單格編輯彈窗
-function CellEditor({ row, onClose, onMatchClick, onSavePrice, onClearMap }: {
-  row: OptionRow
-  onClose: () => void
-  onMatchClick: () => void
-  onSavePrice: (v: number | null) => void
-  onClearMap: () => void
-}) {
-  const [price, setPrice] = useState(row.price_override != null ? String(row.price_override) : '')
-  const [, spec2] = splitSpec(row.shopee_variation_name)
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-          <div>
-            <h2 className="font-bold">{row.shopee_variation_name || '選項'}</h2>
-            <p className="text-[11px] text-gray-400 font-mono mt-0.5">選項ID: {row.shopee_variation_id}</p>
-          </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="p-5 space-y-4 text-sm">
-          {/* BC 對應 */}
-          <div>
-            <div className="text-xs text-gray-500 mb-1">對應億點 BC 商品</div>
-            {row.bc_sku_id ? (
-              <div className="flex items-center justify-between bg-blue-50 rounded-lg px-3 py-2">
-                <div>
-                  <div className="text-blue-700 font-medium">{row.bc_name || row.bc_sku_id}</div>
-                  <div className="text-[11px] text-gray-400 font-mono">{row.bc_sku_id} · copies {row.copies}</div>
-                </div>
-                <div className="flex gap-1">
-                  <button onClick={onMatchClick} className="px-2 py-1 border border-gray-300 rounded text-[11px] hover:bg-white">換</button>
-                  <button onClick={onClearMap} className="px-2 py-1 border border-gray-200 rounded text-[11px] text-gray-400 hover:bg-white">取消</button>
-                </div>
-              </div>
-            ) : (
-              <button onClick={onMatchClick} className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
-                <Link2 className="w-4 h-4" /> 對應 BC 商品（{spec2}）
-              </button>
-            )}
-          </div>
-
-          {/* 成本 / 計算售價 / 毛利 */}
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-gray-50 rounded-lg py-2">
-              <div className="text-[11px] text-gray-400">BC 成本</div>
-              <div className="font-medium">{row.cost_twd ? `NT$${row.cost_twd}` : '—'}</div>
-            </div>
-            <div className="bg-gray-50 rounded-lg py-2">
-              <div className="text-[11px] text-gray-400">計算售價</div>
-              <div className="font-medium">{row.calc_price ? `NT$${row.calc_price}` : '—'}</div>
-            </div>
-            <div className="bg-gray-50 rounded-lg py-2">
-              <div className="text-[11px] text-gray-400">毛利</div>
-              <div className={`font-medium ${row.margin != null && row.margin < 0 ? 'text-red-500' : 'text-green-600'}`}>{row.margin != null ? `NT$${row.margin}` : '—'}</div>
-            </div>
-          </div>
-
-          {/* 售價覆蓋 */}
-          <div>
-            <div className="text-xs text-gray-500 mb-1">售價（留空＝用計算售價 {row.calc_price ? `NT$${row.calc_price}` : ''}）</div>
-            <div className="flex gap-2">
-              <input type="number" value={price} onChange={e => setPrice(e.target.value)} placeholder={row.calc_price ? String(row.calc_price) : '售價'}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" />
-              <button onClick={() => onSavePrice(price.trim() === '' ? null : Number(price))}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">存</button>
-            </div>
-            <div className="text-[11px] text-gray-400 mt-1">原蝦皮價：{row.original_price != null ? `NT$${row.original_price}` : '—'}</div>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
