@@ -66,7 +66,9 @@ export async function GET(request: Request) {
     const costCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, o.copies) : 0
     const costTwd = computeCostTwd(costCny, cnyRate)
     const calcPrice = costTwd ? computePrice(costTwd, rule) : 0
-    const finalPrice = o.price_override != null ? Number(o.price_override) : calcPrice
+    // 售價：覆蓋值 > 原蝦皮價 > 加價規則計算價
+    const finalPrice = o.price_override != null ? Number(o.price_override)
+      : (o.original_price != null ? Number(o.original_price) : calcPrice)
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
     return {
       ...o,

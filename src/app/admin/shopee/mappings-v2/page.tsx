@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import { Upload, Download, Settings, Link2, ArrowLeft, X, GripVertical } from 'lucide-react'
+import { Upload, Download, Settings, Link2, ArrowLeft, X, GripVertical, Trash2, LayoutGrid, List } from 'lucide-react'
 import { useUrlState } from '@/lib/use-url-state'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
 
@@ -27,6 +27,7 @@ interface OptionRow {
   final_price: number | null
   margin: number | null
   margin_pct: number | null
+  updated_at: string | null
 }
 interface Rule { multiplier: number; add_amount: number; rounding: string; round_to: number }
 interface Account { id: string; name: string; excel_password: string | null }
@@ -61,6 +62,10 @@ export default function ShopeeMappingsV2Page() {
   const [specOrders, setSpecOrders] = useState<{ product_id: string; spec_type: string; spec_value: string; sort_index: number }[]>([])
   const [orderOverride, setOrderOverride] = useState<Record<string, string[]>>({})
   const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [batchPrice, setBatchPrice] = useState('')
+  const [productView, setProductView] = useState<'card' | 'list'>('card')
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -144,6 +149,17 @@ export default function ShopeeMappingsV2Page() {
     await load()
   }
 
+  // 快速碼：skuId_copies → 直接對應
+  async function applyQuick(id: string, raw: string, el?: HTMLInputElement) {
+    const v = raw.trim()
+    if (!v) return
+    const m = v.match(/^(.+)_([0-9]+)$/)
+    if (!m) { alert('快速碼格式：skuId_copies，例如 1753758976610890_7'); return }
+    if (el) el.value = ''
+    await patch(id, { bc_sku_id: m[1], copies: m[2] })
+  }
+  function copyText(t: string) { try { navigator.clipboard?.writeText(t) } catch {} }
+
   async function saveRule() {
     await fetch('/api/admin/shopee/mappings-v2/rules', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -173,7 +189,10 @@ export default function ShopeeMappingsV2Page() {
     if (!accountId) return
     setExporting(true)
     try {
-      const res = await fetch(`/api/admin/shopee/mappings-v2/export?account_id=${accountId}`, { method: 'POST' })
+      const body = selectedProducts.size > 0 ? { product_ids: [...selectedProducts] } : {}
+      const res = await fetch(`/api/admin/shopee/mappings-v2/export?account_id=${accountId}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || '匯出失敗'); return }
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
@@ -246,6 +265,75 @@ export default function ShopeeMappingsV2Page() {
     saveSpecOrder(current.id, cur)
   }
 
+  // 勾選 / 批量
+  const currentIds = current ? current.opts.map(o => o.id) : []
+  const allSelected = currentIds.length > 0 && currentIds.every(id => selectedIds.has(id))
+  const selectedCount = currentIds.filter(id => selectedIds.has(id)).length
+
+  function toggleSelect(id: string) {
+    setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+  function toggleSelectAll() {
+    setSelectedIds(prev => {
+      const n = new Set(prev)
+      if (currentIds.every(id => n.has(id))) currentIds.forEach(id => n.delete(id))
+      else currentIds.forEach(id => n.add(id))
+      return n
+    })
+  }
+  function openProduct(id: string) { setSelectedIds(new Set()); setProductId(id); setSearch('') }
+
+  async function deleteOne(id: string) {
+    if (!confirm('刪除此選項？')) return
+    await fetch(`/api/admin/shopee/mappings-v2?id=${id}`, { method: 'DELETE' })
+    setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n })
+    load()
+  }
+  async function batchAction(action: 'delete' | 'set_price') {
+    const ids = currentIds.filter(id => selectedIds.has(id))
+    if (ids.length === 0) return
+    if (action === 'delete' && !confirm(`刪除選取的 ${ids.length} 個選項？`)) return
+    const price = batchPrice.trim() === '' ? null : Number(batchPrice)
+    await fetch('/api/admin/shopee/mappings-v2/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, ids, action, ...(action === 'set_price' ? { price } : {}) }),
+    })
+    if (action === 'delete') setSelectedIds(new Set())
+    if (action === 'set_price') setBatchPrice('')
+    load()
+  }
+
+  // 商品層：勾選 / 刪除 / 更新時間
+  const latestUpdate = (opts: OptionRow[]) => {
+    const ts = opts.map(o => o.updated_at).filter(Boolean).sort()
+    const last = ts[ts.length - 1]
+    if (!last) return '—'
+    return new Date(last).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  }
+  const allProductsSelected = filteredProducts.length > 0 && filteredProducts.every(p => selectedProducts.has(p.id))
+  function toggleProduct(id: string) {
+    setSelectedProducts(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+  function toggleAllProducts() {
+    setSelectedProducts(prev => {
+      const n = new Set(prev)
+      if (filteredProducts.every(p => n.has(p.id))) filteredProducts.forEach(p => n.delete(p.id))
+      else filteredProducts.forEach(p => n.add(p.id))
+      return n
+    })
+  }
+  async function deleteProducts(pids: Set<string>) {
+    const ids = products.filter(p => pids.has(p.id)).flatMap(p => p.opts.map(o => o.id))
+    if (ids.length === 0) return
+    if (!confirm(`刪除選取的 ${pids.size} 件商品（共 ${ids.length} 個選項）？`)) return
+    await fetch('/api/admin/shopee/mappings-v2/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, ids, action: 'delete' }),
+    })
+    setSelectedProducts(new Set())
+    load()
+  }
+
   const priceOf = (o: OptionRow) => o.final_price ?? o.original_price ?? null
   const rangeStr = (opts: OptionRow[]) => {
     const ps = opts.map(priceOf).filter((x): x is number => x != null)
@@ -263,7 +351,7 @@ export default function ShopeeMappingsV2Page() {
           <p className="text-sm text-gray-500 mt-1">匯入蝦皮批量上傳表 → 依商品分組對應億點、設加價規則 → 匯出改價檔回傳蝦皮</p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={accountId} onChange={e => { setProductId(''); setAccountId(e.target.value) }}
+          <select value={accountId} onChange={e => { setProductId(''); setSelectedIds(new Set()); setAccountId(e.target.value) }}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
             <option value="">選擇帳號</option>
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -282,7 +370,7 @@ export default function ShopeeMappingsV2Page() {
           </label>
           <button onClick={doExport} disabled={!accountId || exporting}
             className="flex items-center gap-1.5 px-3 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">
-            <Download className="w-4 h-4" /> {exporting ? '匯出中…' : '匯出改價檔'}
+            <Download className="w-4 h-4" /> {exporting ? '匯出中…' : (selectedProducts.size > 0 ? `匯出選取 (${selectedProducts.size})` : '匯出改價檔')}
           </button>
         </div>
       </div>
@@ -290,39 +378,102 @@ export default function ShopeeMappingsV2Page() {
       {!current ? (
         /* ───── 商品列表 ───── */
         <>
-          <div className="mb-3">
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋商品名稱 / 商品ID"
-              className="w-80 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            <span className="text-xs text-gray-400 ml-3">{filteredProducts.length} 件商品</span>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <div className="flex items-center gap-3">
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋商品名稱 / 商品ID"
+                className="w-72 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              <span className="text-xs text-gray-400 whitespace-nowrap">{filteredProducts.length} 件商品</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {selectedProducts.size > 0 && (
+                <>
+                  <span className="text-sm text-blue-700 font-medium">已選 {selectedProducts.size} 商品</span>
+                  <button onClick={() => deleteProducts(selectedProducts)} className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">刪除選取</button>
+                  <button onClick={() => setSelectedProducts(new Set())} className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">清除</button>
+                  <span className="text-gray-300">|</span>
+                </>
+              )}
+              <div className="inline-flex border border-gray-300 rounded-lg overflow-hidden">
+                <button onClick={() => setProductView('card')} title="圖卡" className={`p-2 ${productView === 'card' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}><LayoutGrid className="w-4 h-4" /></button>
+                <button onClick={() => setProductView('list')} title="列表" className={`p-2 ${productView === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}><List className="w-4 h-4" /></button>
+              </div>
+            </div>
           </div>
+
           {loading ? (
             <div className="text-center py-16 text-gray-400">載入中…</div>
           ) : filteredProducts.length === 0 ? (
             <div className="text-center py-16 text-gray-400">{accountId ? '尚無資料，請匯入蝦皮批量上傳表' : '請先選擇蝦皮帳號'}</div>
-          ) : (
+          ) : productView === 'card' ? (
+            /* 圖卡 */
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
               {filteredProducts.map(p => {
                 const mapped = p.opts.filter(o => o.bc_sku_id).length
                 return (
-                  <button key={p.id} onClick={() => { setProductId(p.id); setSearch('') }}
-                    className="text-left bg-white border border-gray-200 rounded-xl p-4 hover:border-blue-400 hover:shadow-sm transition">
-                    <div className="font-medium text-gray-800 line-clamp-2 min-h-[2.5rem]">{p.name}</div>
+                  <div key={p.id} onClick={() => openProduct(p.id)}
+                    className="relative cursor-pointer bg-white border border-gray-200 rounded-xl p-4 hover:border-blue-400 hover:shadow-sm transition">
+                    <input type="checkbox" checked={selectedProducts.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => toggleProduct(p.id)}
+                      className="absolute top-3 right-3 accent-blue-600" />
+                    <div className="font-medium text-gray-800 line-clamp-2 min-h-[2.5rem] pr-6">{p.name}</div>
                     <div className="text-[11px] text-gray-400 font-mono mt-1">商品ID: {p.id.startsWith('__') ? '—' : p.id}</div>
                     <div className="flex items-center justify-between mt-3 text-sm">
                       <span className="text-gray-500">{p.opts.length} 個選項</span>
                       <span className={mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}>已對應 {mapped}/{p.opts.length}</span>
                     </div>
-                    <div className="mt-1 text-sm font-medium text-blue-600">{rangeStr(p.opts)}</div>
-                  </button>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-sm font-medium text-blue-600">{rangeStr(p.opts)}</span>
+                      <button onClick={e => { e.stopPropagation(); deleteProducts(new Set([p.id])) }} title="刪除商品" className="text-gray-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    <div className="text-[10px] text-gray-400 text-right mt-1">更新：{latestUpdate(p.opts)}</div>
+                  </div>
                 )
               })}
+            </div>
+          ) : (
+            /* 列表 */
+            <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-500 text-xs">
+                  <tr>
+                    <th className="px-3 py-2.5 w-10 text-center"><input type="checkbox" checked={allProductsSelected} onChange={toggleAllProducts} className="accent-blue-600" /></th>
+                    <th className="text-left px-3 py-2.5 font-medium">商品</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-32">商品ID</th>
+                    <th className="text-right px-3 py-2.5 font-medium w-20">選項數</th>
+                    <th className="text-right px-3 py-2.5 font-medium w-24">已對應</th>
+                    <th className="text-right px-3 py-2.5 font-medium w-32">售價範圍</th>
+                    <th className="text-left px-3 py-2.5 font-medium w-40">最近更新</th>
+                    <th className="px-2 py-2.5 w-12"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredProducts.map(p => {
+                    const mapped = p.opts.filter(o => o.bc_sku_id).length
+                    return (
+                      <tr key={p.id} className="hover:bg-gray-50/60 cursor-pointer" onClick={() => openProduct(p.id)}>
+                        <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProduct(p.id)} className="accent-blue-600" />
+                        </td>
+                        <td className="px-3 py-2"><div className="font-medium text-gray-800 max-w-[520px] truncate">{p.name}</div></td>
+                        <td className="px-3 py-2 font-mono text-[11px] text-gray-400">{p.id.startsWith('__') ? '—' : p.id}</td>
+                        <td className="px-3 py-2 text-right text-gray-500">{p.opts.length}</td>
+                        <td className={`px-3 py-2 text-right ${mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}`}>{mapped}/{p.opts.length}</td>
+                        <td className="px-3 py-2 text-right text-blue-600 font-medium whitespace-nowrap">{rangeStr(p.opts)}</td>
+                        <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">{latestUpdate(p.opts)}</td>
+                        <td className="px-2 py-2 text-center" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => deleteProducts(new Set([p.id]))} title="刪除商品" className="text-gray-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </>
       ) : (
         /* ───── 商品詳情：數據量分組 + 天數逐列展開 ───── */
         <>
-          <button onClick={() => setProductId('')} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 mb-3">
+          <button onClick={() => { setProductId(''); setSelectedIds(new Set()) }} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 mb-3">
             <ArrowLeft className="w-4 h-4" /> 返回商品列表
           </button>
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
@@ -349,6 +500,19 @@ export default function ShopeeMappingsV2Page() {
             </div>
           )}
 
+          {/* 批量工具列 */}
+          {selectedCount > 0 && (
+            <div className="flex items-center gap-2 mb-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+              <span className="text-blue-700 font-medium">已選 {selectedCount} 項</span>
+              <span className="text-gray-300">|</span>
+              <input type="number" value={batchPrice} onChange={e => setBatchPrice(e.target.value)} placeholder="批量售價(留空=清除覆蓋)"
+                className="w-44 px-2 py-1 border border-gray-300 rounded text-right" />
+              <button onClick={() => batchAction('set_price')} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">套用售價</button>
+              <button onClick={() => batchAction('delete')} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">刪除選取</button>
+              <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1 border border-gray-300 rounded hover:bg-white">清除選取</button>
+            </div>
+          )}
+
           <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
@@ -359,11 +523,15 @@ export default function ShopeeMappingsV2Page() {
                   <th className="text-left px-3 py-2.5 font-medium min-w-[120px]">商品自設名稱</th>
                   <th className="text-left px-3 py-2.5 font-medium min-w-[120px]">規格自設名稱</th>
                   <th className="text-left px-3 py-2.5 font-medium min-w-[220px]">對應億點 BC</th>
-                  <th className="text-right px-3 py-2.5 font-medium w-24">BC 成本</th>
-                  <th className="text-right px-3 py-2.5 font-medium w-24">計算售價</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-20">BC 成本</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-24">計算成本</th>
                   <th className="text-right px-3 py-2.5 font-medium w-28">售價(覆蓋)</th>
-                  <th className="text-right px-3 py-2.5 font-medium w-28">毛利</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-24">毛利</th>
+                  <th className="text-right px-3 py-2.5 font-medium w-20">毛利率</th>
                   <th className="text-right px-3 py-2.5 font-medium w-20">原蝦皮價</th>
+                  <th className="text-center px-2 py-2.5 font-medium w-16">
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="accent-blue-600" />
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -382,36 +550,42 @@ export default function ShopeeMappingsV2Page() {
                         {o.bc_sku_id ? (
                           <div>
                             <div className="text-blue-700 font-medium max-w-[260px] truncate">{o.bc_name || o.bc_sku_id}</div>
-                            <div className="text-[10px] text-gray-400 font-mono">{o.bc_sku_id} · copies {o.copies}</div>
+                            <button onClick={() => copyText(`${o.bc_sku_id}_${o.copies}`)} title="點擊複製快速碼"
+                              className="text-[10px] text-gray-400 font-mono hover:text-blue-600">{o.bc_sku_id}_{o.copies} 📋</button>
                           </div>
-                        ) : <span className="text-gray-300">未對應</span>}
-                        <div className="mt-1 flex gap-1">
-                          <button onClick={() => setMatching(o)} className="inline-flex items-center gap-1 px-2 py-0.5 border border-gray-300 rounded text-[10px] text-gray-600 hover:bg-gray-100">
-                            <Link2 className="w-3 h-3" /> {o.bc_sku_id ? '重新對應' : '對應'}
+                        ) : <span className="text-gray-300 text-[11px]">未對應</span>}
+                        <div className="mt-1 flex items-center gap-1">
+                          <input placeholder="快速碼 skuId_copies"
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyQuick(o.id, (e.target as HTMLInputElement).value, e.target as HTMLInputElement) } }}
+                            onBlur={e => applyQuick(o.id, e.target.value, e.target)}
+                            className="w-36 px-2 py-1 border border-gray-300 rounded text-[11px] font-mono" />
+                          <button onClick={() => setMatching(o)} title="搜尋對應" className="inline-flex items-center px-2 py-1 border border-gray-300 rounded text-[10px] text-gray-600 hover:bg-gray-100">
+                            <Link2 className="w-3 h-3" />
                           </button>
                           {o.bc_sku_id && (
-                            <button onClick={() => patch(o.id, { bc_sku_id: null, copies: null })} className="px-2 py-0.5 border border-gray-200 rounded text-[10px] text-gray-400 hover:bg-gray-100">取消</button>
+                            <button onClick={() => patch(o.id, { bc_sku_id: null, copies: null })} className="px-2 py-1 border border-gray-200 rounded text-[10px] text-gray-400 hover:bg-gray-100">取消</button>
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right">{o.cost_twd ? <>NT$ {o.cost_twd}<div className="text-[10px] text-gray-400">¥{o.cost_cny}</div></> : '—'}</td>
-                      <td className="px-3 py-2 text-right text-gray-600">{o.calc_price ? `NT$ ${o.calc_price}` : '—'}</td>
+                      <td className="px-3 py-2 text-right text-gray-600">{o.cost_cny != null ? `¥${o.cost_cny}` : '—'}</td>
+                      <td className="px-3 py-2 text-right">{o.cost_twd ? `NT$ ${o.cost_twd}` : '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <input type="number" defaultValue={o.price_override ?? ''} placeholder={o.calc_price ? String(o.calc_price) : ''}
+                        <input type="number" defaultValue={o.price_override ?? o.original_price ?? ''} placeholder={o.cost_twd ? String(o.cost_twd) : ''}
                           onBlur={e => {
                             const v = e.target.value.trim()
-                            const cur = o.price_override ?? null
+                            const displayed = o.price_override != null ? o.price_override : (o.original_price ?? null)
                             const next = v === '' ? null : Number(v)
-                            if (next !== cur) patch(o.id, { price_override: next })
+                            if (next !== displayed) patch(o.id, { price_override: next })
                           }}
                           className="w-20 px-2 py-1 border border-gray-300 rounded text-right" />
                       </td>
-                      <td className="px-3 py-2 text-right">
-                        {o.margin != null ? (
-                          <span className={o.margin >= 0 ? 'text-green-600' : 'text-red-500'}>NT$ {o.margin}<div className="text-[10px] text-gray-400">{o.margin_pct}%</div></span>
-                        ) : '—'}
-                      </td>
+                      <td className="px-3 py-2 text-right">{o.margin != null ? <span className={o.margin >= 0 ? 'text-green-600' : 'text-red-500'}>NT$ {o.margin}</span> : '—'}</td>
+                      <td className="px-3 py-2 text-right">{o.margin_pct != null ? <span className={o.margin_pct >= 0 ? 'text-green-600' : 'text-red-500'}>{o.margin_pct}%</span> : '—'}</td>
                       <td className="px-3 py-2 text-right text-gray-400">{o.original_price != null ? `NT$ ${o.original_price}` : '—'}</td>
+                      <td className="px-2 py-2 text-center whitespace-nowrap">
+                        <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} className="accent-blue-600 align-middle" />
+                        <button onClick={() => deleteOne(o.id)} className="ml-2 text-gray-300 hover:text-red-500 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </td>
                     </tr>
                   )
                 }))}
