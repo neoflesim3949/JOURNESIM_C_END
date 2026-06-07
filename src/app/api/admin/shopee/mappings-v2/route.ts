@@ -76,7 +76,17 @@ export async function GET(request: Request) {
     }
   })
 
-  return NextResponse.json({ options: result, rule })
+  // 規格自訂排序
+  const specOrders: { product_id: string; spec_type: string; spec_value: string; sort_index: number }[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase.from('shopee_spec_order')
+      .select('product_id, spec_type, spec_value, sort_index').eq('account_id', accountId).range(from, from + 999)
+    if (!data || data.length === 0) break
+    specOrders.push(...data)
+    if (data.length < 1000) break
+  }
+
+  return NextResponse.json({ options: result, rule, spec_orders: specOrders })
 }
 
 // PATCH — 更新對應(bc_sku_id+copies) 或 覆蓋售價(price_override，null=清除)

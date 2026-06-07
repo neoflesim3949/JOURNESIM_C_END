@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import { Upload, Download, Settings, Link2, ArrowLeft, X } from 'lucide-react'
+import { Upload, Download, Settings, Link2, ArrowLeft, X, GripVertical } from 'lucide-react'
 import { useUrlState } from '@/lib/use-url-state'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
 
@@ -57,6 +57,9 @@ export default function ShopeeMappingsV2Page() {
   const [search, setSearch] = useState('')
   const [showRule, setShowRule] = useState(false)
   const [matching, setMatching] = useState<OptionRow | null>(null) // BC 對應彈窗
+  const [specOrders, setSpecOrders] = useState<{ product_id: string; spec_type: string; spec_value: string; sort_index: number }[]>([])
+  const [orderOverride, setOrderOverride] = useState<Record<string, string[]>>({})
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -74,6 +77,7 @@ export default function ShopeeMappingsV2Page() {
       const d = await res.json()
       setOptions(d.options || [])
       if (d.rule) setRule(d.rule)
+      setSpecOrders(d.spec_orders || [])
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [accountId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -196,6 +200,35 @@ export default function ShopeeMappingsV2Page() {
     }))
   }, [current])
 
+  // 套用自訂數據量排序（拖曳覆蓋優先，其次 DB 儲存的順序，其餘首見順序殿後）
+  const orderedGroups = useMemo(() => {
+    if (!current) return groups
+    const override = orderOverride[current.id]
+    const savedIdx = new Map<string, number>()
+    for (const s of specOrders) {
+      if (s.product_id === current.id && s.spec_type === 'data') savedIdx.set(s.spec_value, s.sort_index)
+    }
+    const rank = (s1: string) => override ? (override.indexOf(s1) === -1 ? 9999 : override.indexOf(s1)) : (savedIdx.get(s1) ?? 9999)
+    return [...groups].sort((a, b) => rank(a.spec1) - rank(b.spec1))
+  }, [groups, orderOverride, specOrders, current])
+
+  async function saveSpecOrder(productId: string, order: string[]) {
+    setOrderOverride(prev => ({ ...prev, [productId]: order }))
+    await fetch('/api/admin/shopee/mappings-v2/spec-order', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, product_id: productId, spec_type: 'data', order }),
+    })
+  }
+
+  function onDropSpec(toIdx: number) {
+    if (dragIdx === null || dragIdx === toIdx || !current) { setDragIdx(null); return }
+    const cur = orderedGroups.map(g => g.spec1)
+    const [moved] = cur.splice(dragIdx, 1)
+    cur.splice(toIdx, 0, moved)
+    setDragIdx(null)
+    saveSpecOrder(current.id, cur)
+  }
+
   const priceOf = (o: OptionRow) => o.final_price ?? o.original_price ?? null
   const rangeStr = (opts: OptionRow[]) => {
     const ps = opts.map(priceOf).filter((x): x is number => x != null)
@@ -276,6 +309,25 @@ export default function ShopeeMappingsV2Page() {
             <div className="text-[11px] text-gray-400 font-mono mt-0.5">商品ID: {current.id.startsWith('__') ? '—' : current.id} · {current.opts.length} 個選項</div>
           </div>
 
+          {/* 數據量排序（拖曳） */}
+          {orderedGroups.length > 1 && (
+            <div className="bg-white border border-gray-200 rounded-xl p-3 mb-3">
+              <div className="text-xs text-gray-500 mb-2">數據量排序（拖曳調整，會自動儲存；天數依數字排序）</div>
+              <div className="flex flex-wrap gap-2">
+                {orderedGroups.map((g, i) => (
+                  <div key={g.spec1} draggable
+                    onDragStart={() => setDragIdx(i)}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={() => onDropSpec(i)}
+                    className={`cursor-grab active:cursor-grabbing select-none inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border text-sm ${dragIdx === i ? 'border-blue-400 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100'}`}>
+                    <GripVertical className="w-3.5 h-3.5 text-gray-400" />
+                    {g.spec1}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="bg-white border border-gray-200 rounded-xl overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
@@ -294,7 +346,7 @@ export default function ShopeeMappingsV2Page() {
                 </tr>
               </thead>
               <tbody>
-                {groups.map((g, gi) => g.rows.map((o, ri) => {
+                {orderedGroups.map((g, gi) => g.rows.map((o, ri) => {
                   const s2 = splitSpec(o.shopee_variation_name)[1]
                   return (
                     <tr key={o.id} className={`hover:bg-gray-50/40 ${ri === 0 && gi > 0 ? 'border-t-2 border-gray-200' : 'border-t border-gray-100'}`}>
