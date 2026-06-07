@@ -42,6 +42,7 @@ interface ShopeeItem {
   delivery_type?: 'sim' | 'esim'
   qr_code_url?: string | null
   lpa_code?: string | null
+  esim_cards?: { iccid: string | null; lpa_code: string | null; qr_code_url: string | null }[] | null
 }
 
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
@@ -1548,10 +1549,19 @@ function OrderField({ label, value, onSave, readOnly, mono, className }: {
 function EsimManualEdit({ item, orderId, onSaved }: { item: ShopeeItem; orderId: string; onSaved: () => void }) {
   const qty = item.quantity || 1
   const [editing, setEditing] = useState(false)
-  const buildEntries = () => Array.from({ length: qty }, (_, i) => i === 0
-    ? { lpa: item.lpa_code || '', iccid: (item.iccid && item.iccid[0]) || '', qr: item.qr_code_url || '' }
-    : { lpa: '', iccid: '', qr: '' }
-  )
+  const buildEntries = () => {
+    const saved = item.esim_cards
+    if (saved && saved.length) {
+      // 已存多張卡：依各張卡載入
+      return Array.from({ length: qty }, (_, i) => ({
+        lpa: saved[i]?.lpa_code || '', iccid: saved[i]?.iccid || '', qr: saved[i]?.qr_code_url || '',
+      }))
+    }
+    return Array.from({ length: qty }, (_, i) => i === 0
+      ? { lpa: item.lpa_code || '', iccid: (item.iccid && item.iccid[0]) || '', qr: item.qr_code_url || '' }
+      : { lpa: '', iccid: '', qr: '' }
+    )
+  }
   const [entries, setEntries] = useState(buildEntries)
   const [busy, setBusy] = useState(false)
 
@@ -1561,8 +1571,12 @@ function EsimManualEdit({ item, orderId, onSaved }: { item: ShopeeItem; orderId:
     setEditing(true)
   }
 
-  const hasData = item.qr_code_url || item.lpa_code
   const isMulti = qty > 1
+  // 顯示用：多張走 esim_cards，單張用舊單一欄位
+  const savedCards = (item.esim_cards && item.esim_cards.length)
+    ? item.esim_cards
+    : [{ iccid: (item.iccid && item.iccid[0]) || null, lpa_code: item.lpa_code || null, qr_code_url: item.qr_code_url || null }]
+  const hasData = savedCards.some(c => c.lpa_code || c.qr_code_url || c.iccid)
 
   function updateEntry(idx: number, field: 'lpa' | 'iccid' | 'qr', value: string) {
     setEntries(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e))
@@ -1575,7 +1589,7 @@ function EsimManualEdit({ item, orderId, onSaved }: { item: ShopeeItem; orderId:
     setBusy(true)
     try {
       if (isMulti) {
-        // qty>1 走 fill-esims（會拆單）
+        // qty>1 走 fill-esims（存於同一筆的 esim_cards 陣列，不拆單）
         const res = await fetch(`/api/admin/shopee/orders/${orderId}/items/${item.id}/fill-esims`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ entries: cleaned }),
@@ -1605,25 +1619,32 @@ function EsimManualEdit({ item, orderId, onSaved }: { item: ShopeeItem; orderId:
   return (
     <div className="mt-3 pt-3 border-t border-gray-100 text-xs">
       {hasData && !editing ? (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-indigo-700 font-medium">eSIM 已就緒</span>
-            {item.iccid && item.iccid[0] && (
-              <a href={`/eSIM/Install/${item.iccid[0]}`} target="_blank" rel="noreferrer"
-                className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[11px] hover:bg-indigo-700">📱 用戶安裝頁</a>
-            )}
+            <span className="text-indigo-700 font-medium">eSIM 已就緒{isMulti ? ` · 共 ${savedCards.length} 張` : ''}</span>
             <button onClick={startEditing} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[11px] hover:bg-gray-200">✏️ 編輯</button>
           </div>
-          {item.qr_code_url && <div>QR Code：<a href={item.qr_code_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{item.qr_code_url}</a></div>}
-          {item.lpa_code && <div>LPA：<span className="font-mono break-all">{item.lpa_code}</span></div>}
-          {item.iccid && item.iccid.length > 0 && <div>ICCID：{item.iccid.map((ic, j) => <span key={j} className="font-mono bg-gray-100 px-1.5 py-0.5 rounded ml-1">{ic}</span>)}</div>}
+          {savedCards.map((c, k) => (
+            <div key={k} className={isMulti ? 'border border-gray-200 rounded p-2 bg-gray-50 space-y-0.5' : 'space-y-0.5'}>
+              <div className="flex items-center gap-2">
+                {isMulti && <span className="text-[11px] text-indigo-600 font-medium">eSIM #{k + 1}</span>}
+                {c.iccid && (
+                  <a href={`/eSIM/Install/${c.iccid}`} target="_blank" rel="noreferrer"
+                    className="px-2 py-0.5 bg-indigo-600 text-white rounded text-[11px] hover:bg-indigo-700">📱 用戶安裝頁</a>
+                )}
+              </div>
+              {c.qr_code_url && <div>QR Code：<a href={c.qr_code_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline break-all">{c.qr_code_url}</a></div>}
+              {c.lpa_code && <div>LPA：<span className="font-mono break-all">{c.lpa_code}</span></div>}
+              {c.iccid && <div>ICCID：<span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">{c.iccid}</span></div>}
+            </div>
+          ))}
         </div>
       ) : editing || !hasData ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-gray-600 font-medium">
               {hasData ? '編輯 eSIM 資料' : '手動填寫 eSIM 資料'}
-              {isMulti && <span className="text-purple-600 ml-1">（共 {qty} 張，儲存後會自動拆成 {qty} 個品項）</span>}
+              {isMulti && <span className="text-purple-600 ml-1">（共 {qty} 張，存於同一筆，各張獨立卡號／安裝連結）</span>}
             </span>
             {hasData && <button onClick={() => setEditing(false)}
               className="text-gray-400 hover:text-gray-600">取消</button>}

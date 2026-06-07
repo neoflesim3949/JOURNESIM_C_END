@@ -12,7 +12,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ icc
   // 先查 shopee_order_items（手動 eSIM / Shopee 訂單）
   // JSONB contains 寫法：用字串形式的 JSON array 做 filter
   const { data: shopeeItems } = await supabase.from('shopee_order_items')
-    .select('iccid, qr_code_url, lpa_code, delivery_type')
+    .select('iccid, qr_code_url, lpa_code, esim_cards, delivery_type')
     .eq('delivery_type', 'esim')
     .not('iccid', 'is', null)
 
@@ -21,10 +21,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ icc
   )
 
   if (shopeeItem) {
+    // 多張卡：依此 ICCID 對應到該卡的 LPA/QR（不可回整筆的單一值）
+    const cards = Array.isArray(shopeeItem.esim_cards) ? shopeeItem.esim_cards as { iccid?: string; lpa_code?: string; qr_code_url?: string }[] : []
+    const card = cards.find(c => c.iccid === iccid)
     return NextResponse.json({
       iccid,
-      qr_code_url: shopeeItem.qr_code_url || null,
-      lpa_code: shopeeItem.lpa_code || null,
+      qr_code_url: (card ? card.qr_code_url : shopeeItem.qr_code_url) || null,
+      lpa_code: (card ? card.lpa_code : shopeeItem.lpa_code) || null,
       source: 'shopee',
     })
   }
