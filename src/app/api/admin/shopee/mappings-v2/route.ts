@@ -10,8 +10,17 @@ export async function GET(request: Request) {
   if (!accountId) return NextResponse.json({ error: '請選擇蝦皮帳號' }, { status: 400 })
   const supabase = createAdminClient()
 
-  const { data: options } = await supabase.from('shopee_product_options_v2')
-    .select('*').eq('account_id', accountId).order('shopee_product_name').order('shopee_variation_name')
+  // 分頁撈全部（PostgREST 單次預設上限 1000 筆）
+  const options: any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase.from('shopee_product_options_v2')
+      .select('*').eq('account_id', accountId)
+      .order('shopee_product_name').order('shopee_variation_name')
+      .range(from, from + 999)
+    if (!data || data.length === 0) break
+    options.push(...data)
+    if (data.length < 1000) break
+  }
 
   const { data: ruleRow } = await supabase.from('shopee_pricing_rules')
     .select('multiplier, add_amount, rounding, round_to').eq('account_id', accountId).maybeSingle()

@@ -35,8 +35,16 @@ export async function POST(request: Request) {
   const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
   const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
 
-  const { data: options } = await supabase.from('shopee_product_options_v2')
-    .select('shopee_variation_id, bc_sku_id, copies, price_override').eq('account_id', accountId)
+  // 分頁撈全部（PostgREST 單次預設上限 1000 筆）
+  const options: any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase.from('shopee_product_options_v2')
+      .select('shopee_variation_id, bc_sku_id, copies, price_override').eq('account_id', accountId)
+      .range(from, from + 999)
+    if (!data || data.length === 0) break
+    options.push(...data)
+    if (data.length < 1000) break
+  }
 
   const skuIds = [...new Set((options || []).map(o => o.bc_sku_id).filter(Boolean))] as string[]
   const { data: bcProducts } = skuIds.length
