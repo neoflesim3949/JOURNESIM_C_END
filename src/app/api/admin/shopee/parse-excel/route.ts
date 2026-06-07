@@ -26,7 +26,16 @@ export async function POST(request: Request) {
   }
 
   const wb = XLSX.read(buffer, { type: 'buffer' })
-  const ws = wb.Sheets[wb.SheetNames[0]]
+  const sheetName = wb.SheetNames[0]
+  const ws = wb.Sheets[sheetName]
+
+  // mode=aoa：回傳 array-of-arrays（保留表頭/說明列/所有 cell，商品對應V2 匯出還原用）
+  const mode = new URL(request.url).searchParams.get('mode')
+  if (mode === 'aoa') {
+    const aoa = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '', raw: false })
+    return NextResponse.json({ aoa, sheet_name: sheetName })
+  }
+
   const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' })
 
   return NextResponse.json({ rows })
