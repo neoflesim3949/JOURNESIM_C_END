@@ -362,30 +362,71 @@ export default function ShopeeOrderDetailPage() {
   const pendingCount = items.filter(i => i.status === 'pending').length
   const canSubmitBc = items.some(i => i.status === 'matched' || i.status === 'iccid_filled')
 
-  // 商品標籤：每張轉圖、每張一頁，產成 PDF（頁面尺寸＝標籤尺寸，不靠印表機驅動切，避免位移）
+  // 商品標籤：用 Canvas 把每張標籤畫出來、每張一頁產成 PDF（頁面尺寸＝標籤尺寸，
+  // 不靠印表機驅動切，避免位移；純前端 Canvas 繪字，不需外部資源、不會卡）
   async function printProductLabelsPdf() {
-    const area = document.getElementById('print-area')
-    const labels = area ? Array.from(area.querySelectorAll<HTMLElement>('.label')) : []
-    if (!labels.length) { alert('沒有可列印的標籤'); return }
-    let orientation: 'landscape' | 'portrait' = 'landscape'
-    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved && JSON.parse(saved).orientation === 'portrait') orientation = 'portrait' } catch {}
+    let ls: { line1: number; line2: number; line3: number; orientation?: 'landscape' | 'portrait' } = { line1: 12, line2: 12, line3: 10 }
+    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) ls = { ...ls, ...JSON.parse(saved) } } catch {}
+    const orientation: 'landscape' | 'portrait' = ls.orientation === 'portrait' ? 'portrait' : 'landscape'
     const wMm = orientation === 'portrait' ? 15 : 30
     const hMm = orientation === 'portrait' ? 30 : 15
-    // 先同步開分頁，保留使用者手勢、避免被彈窗封鎖
+    const expiry = localStorage.getItem('shopee_expiry_date') || ''
+    // 攤平成「每件數量一張」，與預覽一致
+    const cards = items.flatMap(item => Array.from({ length: item.quantity }, () => ({
+      line1: skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name || '',
+      line2: variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name || '',
+      line3: expiry ? `使用期限：${expiry.replace(/-/g, '/')}` : '',
+    })))
+    if (!cards.length) { alert('沒有可列印的標籤'); return }
+
+    const PX_PER_MM = 24                     // 畫布解析度（約 600dpi，夠清晰）
+    const CSS_PX_PER_MM = 96 / 25.4          // 標籤設定的 px 字級是相對 CSS mm
+    const scale = PX_PER_MM / CSS_PX_PER_MM
+    const FONT = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif'
+    const cw = Math.round(wMm * PX_PER_MM)
+    const ch = Math.round(hMm * PX_PER_MM)
+    const padX = 2 * PX_PER_MM, padY = 1 * PX_PER_MM
+    const maxW = cw - padX * 2
+
+    const fit = (ctx: CanvasRenderingContext2D, text: string) => {
+      if (!text || ctx.measureText(text).width <= maxW) return text
+      let t = text
+      while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1)
+      return t + '…'
+    }
+    const drawCard = (c: typeof cards[number]) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = cw; canvas.height = ch
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch)
+      ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = [
+        { text: c.line1, fpx: ls.line1 * scale, bold: true, ellipsis: true },
+        { text: c.line2, fpx: ls.line2 * scale, bold: false, ellipsis: true },
+        ...(c.line3 ? [{ text: c.line3, fpx: ls.line3 * scale, bold: false, ellipsis: false }] : []),
+      ]
+      const heights = lines.map(l => l.fpx * 1.1)
+      const totalH = heights.reduce((a, b) => a + b, 0)
+      let y = (ch - totalH) / 2
+      lines.forEach((l, idx) => {
+        ctx.font = `${l.bold ? 'bold ' : ''}${l.fpx}px ${FONT}`
+        const text = l.ellipsis ? fit(ctx, l.text) : l.text
+        ctx.fillText(text, cw / 2, y + heights[idx] / 2)
+        y += heights[idx]
+      })
+      return canvas.toDataURL('image/png')
+    }
+
     const win = window.open('', '_blank')
     if (win) win.document.body.innerHTML = '<p id="msg" style="font-family:sans-serif;padding:16px">PDF 產生中…</p>'
     const setMsg = (t: string) => { try { const m = win?.document.getElementById('msg'); if (m) m.textContent = t } catch {} }
     try {
-      const [{ toPng }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')])
+      const { jsPDF } = await import('jspdf')
       const doc = new jsPDF({ unit: 'mm', format: [wMm, hMm], orientation })
-      for (let i = 0; i < labels.length; i++) {
-        setMsg(`PDF 產生中… ${i + 1}/${labels.length}`)
-        // skipFonts：不去抓網頁字型 CSS（用系統字即可），避免卡死；加 15 秒逾時保護
-        const capture = toPng(labels[i], { pixelRatio: 5, backgroundColor: '#ffffff', skipFonts: true, cacheBust: true, style: { border: 'none', margin: '0' } })
-        const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`第 ${i + 1} 張轉檔逾時`)), 15000))
-        const dataUrl = await Promise.race([capture, timeout])
+      for (let i = 0; i < cards.length; i++) {
+        setMsg(`PDF 產生中… ${i + 1}/${cards.length}`)
         if (i > 0) doc.addPage([wMm, hMm], orientation)
-        doc.addImage(dataUrl, 'PNG', 0, 0, wMm, hMm)
+        doc.addImage(drawCard(cards[i]), 'PNG', 0, 0, wMm, hMm)
       }
       const blobUrl = doc.output('bloburl') as unknown as string
       if (win) win.location.href = blobUrl
