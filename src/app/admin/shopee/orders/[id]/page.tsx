@@ -362,6 +362,35 @@ export default function ShopeeOrderDetailPage() {
   const pendingCount = items.filter(i => i.status === 'pending').length
   const canSubmitBc = items.some(i => i.status === 'matched' || i.status === 'iccid_filled')
 
+  // 商品標籤：每張轉圖、每張一頁，產成 PDF（頁面尺寸＝標籤尺寸，不靠印表機驅動切，避免位移）
+  async function printProductLabelsPdf() {
+    const area = document.getElementById('print-area')
+    const labels = area ? Array.from(area.querySelectorAll<HTMLElement>('.label')) : []
+    if (!labels.length) { alert('沒有可列印的標籤'); return }
+    let orientation: 'landscape' | 'portrait' = 'landscape'
+    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved && JSON.parse(saved).orientation === 'portrait') orientation = 'portrait' } catch {}
+    const wMm = orientation === 'portrait' ? 15 : 30
+    const hMm = orientation === 'portrait' ? 30 : 15
+    // 先同步開分頁，保留使用者手勢、避免被彈窗封鎖
+    const win = window.open('', '_blank')
+    if (win) win.document.write('<p style="font-family:sans-serif;padding:16px">PDF 產生中…</p>')
+    try {
+      const [{ toPng }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')])
+      const doc = new jsPDF({ unit: 'mm', format: [wMm, hMm], orientation })
+      for (let i = 0; i < labels.length; i++) {
+        const dataUrl = await toPng(labels[i], { pixelRatio: 8, backgroundColor: '#ffffff', style: { border: 'none', margin: '0' } })
+        if (i > 0) doc.addPage([wMm, hMm], orientation)
+        doc.addImage(dataUrl, 'PNG', 0, 0, wMm, hMm)
+      }
+      const blobUrl = doc.output('bloburl') as unknown as string
+      if (win) win.location.href = blobUrl
+      else window.open(blobUrl, '_blank')
+    } catch (e) {
+      if (win) win.close()
+      alert('PDF 產生失敗：' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
   return (
     <div>
       <button
@@ -835,24 +864,13 @@ export default function ShopeeOrderDetailPage() {
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : printModal === 'receipt_a5' ? '收據預覽（A5）' : printModal === 'shipping' ? '寄件單預覽（10×15）' : '收據預覽（10×15）'}</h2>
               <div className="flex items-center gap-2">
-                <button onClick={() => {
+                <button onClick={async () => {
+                  if (printModal === 'product') { await printProductLabelsPdf(); return }
                   const el = document.getElementById('print-area')
                   if (!el) { alert('找不到列印內容'); return }
                   const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
                   if (!w) { alert('彈出視窗被瀏覽器封鎖，請允許此網站開啟彈出視窗後再試'); return }
-                  if (printModal === 'product') {
-                    let savedOrientation: 'landscape' | 'portrait' = 'landscape'
-                    try { const saved = localStorage.getItem('shopee_label_settings'); if (saved) { const p = JSON.parse(saved); if (p.orientation === 'portrait') savedOrientation = 'portrait' } } catch {}
-                    const pageW = savedOrientation === 'portrait' ? '15mm' : '30mm'
-                    const pageH = savedOrientation === 'portrait' ? '30mm' : '15mm'
-                    w.document.write(`<html><head><style>
-                      @page{size:${pageW} ${pageH};margin:0}
-                      html,body{margin:0!important;padding:0!important;font-family:sans-serif;width:${pageW}!important}
-                      body>div{display:block!important;gap:0!important;margin:0!important;padding:0!important;width:${pageW}!important}
-                      .label{width:${pageW}!important;height:${pageH}!important;padding:1mm 2mm!important;box-sizing:border-box!important;display:flex!important;flex-direction:column!important;justify-content:center!important;align-items:center!important;text-align:center!important;gap:0!important;overflow:hidden!important;page-break-inside:avoid;border:none!important;margin:0!important}
-                      .label>div{line-height:1.1!important;overflow:hidden!important}
-                    </style></head><body>${el.innerHTML}</body></html>`)
-                  } else if (printModal === 'receipt' || printModal === 'receipt_a5') {
+                  if (printModal === 'receipt' || printModal === 'receipt_a5') {
                     const pageSize = printModal === 'receipt_a5' ? 'A5' : '100mm 150mm'
                     w.document.write(`<html><head><title>收據</title><style>
                       @page{size:${pageSize};margin:0}
