@@ -373,12 +373,17 @@ export default function ShopeeOrderDetailPage() {
     const hMm = orientation === 'portrait' ? 30 : 15
     // 先同步開分頁，保留使用者手勢、避免被彈窗封鎖
     const win = window.open('', '_blank')
-    if (win) win.document.write('<p style="font-family:sans-serif;padding:16px">PDF 產生中…</p>')
+    if (win) win.document.body.innerHTML = '<p id="msg" style="font-family:sans-serif;padding:16px">PDF 產生中…</p>'
+    const setMsg = (t: string) => { try { const m = win?.document.getElementById('msg'); if (m) m.textContent = t } catch {} }
     try {
       const [{ toPng }, { jsPDF }] = await Promise.all([import('html-to-image'), import('jspdf')])
       const doc = new jsPDF({ unit: 'mm', format: [wMm, hMm], orientation })
       for (let i = 0; i < labels.length; i++) {
-        const dataUrl = await toPng(labels[i], { pixelRatio: 8, backgroundColor: '#ffffff', style: { border: 'none', margin: '0' } })
+        setMsg(`PDF 產生中… ${i + 1}/${labels.length}`)
+        // skipFonts：不去抓網頁字型 CSS（用系統字即可），避免卡死；加 15 秒逾時保護
+        const capture = toPng(labels[i], { pixelRatio: 5, backgroundColor: '#ffffff', skipFonts: true, cacheBust: true, style: { border: 'none', margin: '0' } })
+        const timeout = new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`第 ${i + 1} 張轉檔逾時`)), 15000))
+        const dataUrl = await Promise.race([capture, timeout])
         if (i > 0) doc.addPage([wMm, hMm], orientation)
         doc.addImage(dataUrl, 'PNG', 0, 0, wMm, hMm)
       }
@@ -386,8 +391,9 @@ export default function ShopeeOrderDetailPage() {
       if (win) win.location.href = blobUrl
       else window.open(blobUrl, '_blank')
     } catch (e) {
-      if (win) win.close()
-      alert('PDF 產生失敗：' + (e instanceof Error ? e.message : String(e)))
+      const msg = 'PDF 產生失敗：' + (e instanceof Error ? e.message : String(e))
+      setMsg(msg)
+      alert(msg)
     }
   }
 
