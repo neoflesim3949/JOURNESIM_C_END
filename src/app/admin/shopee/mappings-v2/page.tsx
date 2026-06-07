@@ -18,6 +18,8 @@ interface OptionRow {
   bc_sku_id: string | null
   copies: string | null
   price_override: number | null
+  custom_product_name: string | null
+  custom_variation_name: string | null
   bc_name: string | null
   cost_cny: number | null
   cost_twd: number | null
@@ -280,6 +282,9 @@ export default function ShopeeMappingsV2Page() {
                 <tr>
                   <th className="text-left px-3 py-2.5 font-medium border-r border-gray-200 min-w-[140px]">數據量</th>
                   <th className="text-left px-3 py-2.5 font-medium w-16">天數</th>
+                  <th className="text-left px-3 py-2.5 font-medium w-32">蝦皮商品選項ID</th>
+                  <th className="text-left px-3 py-2.5 font-medium min-w-[120px]">商品自設名稱</th>
+                  <th className="text-left px-3 py-2.5 font-medium min-w-[120px]">規格自設名稱</th>
                   <th className="text-left px-3 py-2.5 font-medium min-w-[220px]">對應億點 BC</th>
                   <th className="text-right px-3 py-2.5 font-medium w-24">BC 成本</th>
                   <th className="text-right px-3 py-2.5 font-medium w-24">計算售價</th>
@@ -297,6 +302,9 @@ export default function ShopeeMappingsV2Page() {
                         <td rowSpan={g.rows.length} className="px-3 py-2 align-top font-medium text-gray-700 border-r border-gray-200 bg-gray-50/40">{g.spec1}</td>
                       )}
                       <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
+                      <td className="px-3 py-2 font-mono text-[10px] text-gray-500">{o.shopee_variation_id}</td>
+                      <td className="px-3 py-2 text-gray-600">{o.custom_product_name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2 text-gray-600">{o.custom_variation_name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2">
                         {o.bc_sku_id ? (
                           <div>

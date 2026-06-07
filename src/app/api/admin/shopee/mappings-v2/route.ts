@@ -39,6 +39,22 @@ export async function GET(request: Request) {
     : { data: [] }
   const bcMap = new Map((bcProducts || []).map(p => [p.sku_id, p]))
 
+  // V1 自設名稱（商品 / 規格）— chunked .in 避免單次 1000 筆上限
+  const productIds = [...new Set(options.map(o => o.shopee_product_id).filter(Boolean))] as string[]
+  const variationIds = [...new Set(options.map(o => o.shopee_variation_id).filter(Boolean))] as string[]
+  const prodNameMap = new Map<string, string>()
+  const varNameMap = new Map<string, string>()
+  for (let i = 0; i < productIds.length; i += 300) {
+    const { data } = await supabase.from('shopee_product_id_mappings')
+      .select('shopee_product_id, display_name').in('shopee_product_id', productIds.slice(i, i + 300))
+    for (const r of data || []) prodNameMap.set(r.shopee_product_id, r.display_name)
+  }
+  for (let i = 0; i < variationIds.length; i += 300) {
+    const { data } = await supabase.from('shopee_variation_id_mappings')
+      .select('shopee_variation_id, display_name').in('shopee_variation_id', variationIds.slice(i, i + 300))
+    for (const r of data || []) varNameMap.set(r.shopee_variation_id, r.display_name)
+  }
+
   const result = (options || []).map(o => {
     const bc = o.bc_sku_id ? bcMap.get(o.bc_sku_id) : null
     const costCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, o.copies) : 0
@@ -48,6 +64,8 @@ export async function GET(request: Request) {
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
     return {
       ...o,
+      custom_product_name: prodNameMap.get(o.shopee_product_id) || null,
+      custom_variation_name: varNameMap.get(o.shopee_variation_id) || null,
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
       cost_twd: costTwd || null,
