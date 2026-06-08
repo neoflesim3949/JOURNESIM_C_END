@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { computeCostTwd, computePrice, costCnyFromPrices, DEFAULT_RULE, PricingRule } from '@/lib/shopee-pricing'
+import { computeCostTwd, costCnyFromPrices } from '@/lib/shopee-pricing'
 import { isBcChanged, snapshotFor } from '@/lib/bc-snapshot'
 
 // GET ?account_id= — 列表，即時算成本/計算售價/最終售價/毛利
@@ -23,13 +23,6 @@ export async function GET(request: Request) {
     if (data.length < 1000) break
   }
 
-  const { data: ruleRow } = await supabase.from('shopee_pricing_rules')
-    .select('multiplier, add_amount, rounding, round_to').eq('account_id', accountId).maybeSingle()
-  const rule: PricingRule = ruleRow ? {
-    multiplier: Number(ruleRow.multiplier), add_amount: Number(ruleRow.add_amount),
-    rounding: ruleRow.rounding, round_to: Number(ruleRow.round_to),
-  } : DEFAULT_RULE
-
   const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
   const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
 
@@ -44,17 +37,15 @@ export async function GET(request: Request) {
     const bc = o.bc_sku_id ? bcMap.get(o.bc_sku_id) : null
     const costCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, o.copies) : 0
     const costTwd = computeCostTwd(costCny, cnyRate)
-    const calcPrice = costTwd ? computePrice(costTwd, rule) : 0
-    // 售價：覆蓋值 > 原蝦皮價 > 加價規則計算價
+    // 售價：覆蓋值 > 原蝦皮價
     const finalPrice = o.price_override != null ? Number(o.price_override)
-      : (o.original_price != null ? Number(o.original_price) : calcPrice)
+      : (o.original_price != null ? Number(o.original_price) : null)
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
     return {
       ...o,
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
       cost_twd: costTwd || null,
-      calc_price: calcPrice || null,
       final_price: finalPrice || null,
       margin,
       margin_pct: margin != null && finalPrice ? Math.round((margin / finalPrice) * 1000) / 10 : null,
@@ -73,7 +64,7 @@ export async function GET(request: Request) {
     if (data.length < 1000) break
   }
 
-  return NextResponse.json({ options: result, rule, spec_orders: specOrders })
+  return NextResponse.json({ options: result, spec_orders: specOrders })
 }
 
 // PATCH — 更新對應(bc_sku_id+copies) 或 覆蓋售價(price_override，null=清除)

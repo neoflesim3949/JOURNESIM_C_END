@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
-import { Upload, Download, Settings, Link2, ArrowLeft, X, GripVertical, Trash2, LayoutGrid, List } from 'lucide-react'
+import { Upload, Download, Link2, ArrowLeft, GripVertical, Trash2, LayoutGrid, List } from 'lucide-react'
 import { useUrlState } from '@/lib/use-url-state'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
 
@@ -23,14 +23,12 @@ interface OptionRow {
   bc_name: string | null
   cost_cny: number | null
   cost_twd: number | null
-  calc_price: number | null
   final_price: number | null
   margin: number | null
   margin_pct: number | null
   updated_at: string | null
   bc_changed?: boolean
 }
-interface Rule { multiplier: number; add_amount: number; rounding: string; round_to: number }
 interface Account { id: string; name: string; excel_password: string | null }
 
 const KNOWN_COLS = ['商品ID', '商品名稱', '商品選項ID', '商品規格名稱', '主商品貨號', '商品選項貨號', '價格', 'GTIN', '庫存', '最低購買數量']
@@ -52,19 +50,23 @@ export default function ShopeeMappingsV2Page() {
   const [accountId, setAccountId] = useUrlState('account', '')
   const [productId, setProductId] = useUrlState('product', '')
   const [options, setOptions] = useState<OptionRow[]>([])
-  const [rule, setRule] = useState<Rule>({ multiplier: 1, add_amount: 0, rounding: 'ceil', round_to: 1 })
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [importingV1, setImportingV1] = useState(false)
   const [search, setSearch] = useState('')
-  const [showRule, setShowRule] = useState(false)
   const [matching, setMatching] = useState<OptionRow | null>(null) // BC 對應彈窗
   const [specOrders, setSpecOrders] = useState<{ product_id: string; spec_type: string; spec_value: string; sort_index: number }[]>([])
   const [orderOverride, setOrderOverride] = useState<Record<string, string[]>>({})
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [batchPrice, setBatchPrice] = useState('')
+  // 批量定價
+  const [showBatchPrice, setShowBatchPrice] = useState(false)
+  const [bpMode, setBpMode] = useState<'formula' | 'markup' | 'fixed'>('formula')
+  const [bpAdd, setBpAdd] = useState('3')
+  const [bpMult, setBpMult] = useState('1.5')
+  const [bpFixed, setBpFixed] = useState('')
+  const [bpRound, setBpRound] = useState<'ceil' | 'round' | 'floor' | 'none' | 'ceil95' | 'floor95'>('ceil')
+  const [bpRoundTo, setBpRoundTo] = useState('1')
   const [productView, setProductView] = useState<'card' | 'list'>('card')
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
@@ -84,7 +86,6 @@ export default function ShopeeMappingsV2Page() {
       const res = await fetch(`/api/admin/shopee/mappings-v2?account_id=${accountId}`)
       const d = await res.json()
       setOptions(d.options || [])
-      if (d.rule) setRule(d.rule)
       setSpecOrders(d.spec_orders || [])
     } finally { setLoading(false) }
   }
@@ -183,15 +184,6 @@ export default function ShopeeMappingsV2Page() {
     load()
   }
 
-  async function saveRule() {
-    await fetch('/api/admin/shopee/mappings-v2/rules', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: accountId, ...rule }),
-    })
-    setShowRule(false)
-    load()
-  }
-
   // 下載「我們自己的表」（可在 Excel 編輯自設名稱/售價/快速碼，再上傳套回）
   function exportOurs() {
     const list = (selectedProducts.size > 0
@@ -229,7 +221,6 @@ export default function ShopeeMappingsV2Page() {
       '規格自設名稱': o.custom_variation_name || '',
       '對應BC快速碼': o.bc_sku_id ? `${o.bc_sku_id}_${o.copies}` : '',
       '售價(覆蓋)': o.price_override ?? '',
-      '計算售價(參考)': o.calc_price ?? '',
       '原蝦皮價(參考)': o.original_price ?? '',
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -276,22 +267,6 @@ export default function ShopeeMappingsV2Page() {
     } finally {
       if (oursRef.current) oursRef.current.value = ''
     }
-  }
-
-  async function importV1() {
-    if (!accountId) return
-    if (!confirm('從舊版「商品對應」帶入已對應的 BC SKU？\n\n只會補目前「未對應」的選項，不會覆蓋你在 V2 改過的。')) return
-    setImportingV1(true)
-    try {
-      const res = await fetch('/api/admin/shopee/mappings-v2/import-v1', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId }),
-      })
-      const d = await res.json()
-      if (!res.ok) { alert(d.error || '帶入失敗'); return }
-      alert(`已帶入 ${d.count} 筆對應`)
-      load()
-    } finally { setImportingV1(false) }
   }
 
   async function doExport() {
@@ -398,18 +373,64 @@ export default function ShopeeMappingsV2Page() {
     setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n })
     load()
   }
-  async function batchAction(action: 'delete' | 'set_price') {
+  async function batchDelete() {
     const ids = currentIds.filter(id => selectedIds.has(id))
     if (ids.length === 0) return
-    if (action === 'delete' && !confirm(`刪除選取的 ${ids.length} 個選項？`)) return
-    const price = batchPrice.trim() === '' ? null : Number(batchPrice)
+    if (!confirm(`刪除選取的 ${ids.length} 個選項？`)) return
     await fetch('/api/admin/shopee/mappings-v2/batch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: accountId, ids, action, ...(action === 'set_price' ? { price } : {}) }),
+      body: JSON.stringify({ account_id: accountId, ids, action: 'delete' }),
     })
-    if (action === 'delete') setSelectedIds(new Set())
-    if (action === 'set_price') setBatchPrice('')
+    setSelectedIds(new Set())
     load()
+  }
+
+  // 批量定價：依勾選項目的 BC 成本(TWD)，用三模式計算售價 + 進位
+  async function applyBatchPrice() {
+    const ids = currentIds.filter(id => selectedIds.has(id))
+    const opts = options.filter(o => ids.includes(o.id))
+    if (opts.length === 0) return
+    const add = parseFloat(bpAdd) || 0
+    const mult = parseFloat(bpMult) || 1
+    const fixed = parseFloat(bpFixed)
+    const step = parseFloat(bpRoundTo) || 1
+    // 無條件進至95：個位 0→降十位個位9(150→149)、1~5→5、6~9→9
+    const ceil95 = (v: number) => {
+      const n = Math.ceil(v); const u = n % 10; const base = n - u
+      if (u === 0) return Math.max(base - 1, 0)
+      return u <= 5 ? base + 5 : base + 9
+    }
+    // 無條件捨至95：個位 5→5、9→9（已是合法結尾）、0~4→降十位個位9、6~8→5
+    const floor95 = (v: number) => {
+      const n = Math.floor(v); const u = n % 10; const base = n - u
+      if (u === 5 || u === 9) return n
+      if (u <= 4) return Math.max(base - 1, 0)
+      return base + 5
+    }
+    const round = (v: number) => {
+      if (bpRound === 'round') return Math.round(v / step) * step
+      if (bpRound === 'floor') return Math.floor(v / step) * step
+      if (bpRound === 'none') return Math.round(v)
+      if (bpRound === 'ceil95') return ceil95(v)
+      if (bpRound === 'floor95') return floor95(v)
+      return Math.ceil(v / step) * step
+    }
+    const rows: { variation_id: string; set: { price_override: number } }[] = []
+    for (const o of opts) {
+      let price: number | null = null
+      if (bpMode === 'fixed') {
+        if (!isNaN(fixed)) price = fixed
+      } else if (o.cost_twd) {
+        price = round(bpMode === 'formula' ? (o.cost_twd + add) * mult : o.cost_twd * mult)
+      }
+      if (price != null && !isNaN(price)) rows.push({ variation_id: o.shopee_variation_id, set: { price_override: price } })
+    }
+    if (rows.length === 0) { alert('沒有可計算的項目（未對應 BC 的項目沒有成本，固定價格模式可不需成本）'); return }
+    await fetch('/api/admin/shopee/mappings-v2/import-ours', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, rows }),
+    })
+    setShowBatchPrice(false); setSelectedIds(new Set()); load()
   }
 
   // 商品層：勾選 / 刪除 / 更新時間
@@ -457,7 +478,7 @@ export default function ShopeeMappingsV2Page() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold">商品對應 V2</h1>
-          <p className="text-sm text-gray-500 mt-1">匯入蝦皮批量上傳表 → 依商品分組對應億點、設加價規則 → 匯出改價檔回傳蝦皮</p>
+          <p className="text-sm text-gray-500 mt-1">匯入蝦皮批量上傳表 → 依商品分組對應億點、設定售價 → 匯出改價檔回傳蝦皮</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={accountId} onChange={e => { setProductId(''); setSelectedIds(new Set()); setAccountId(e.target.value) }}
@@ -465,14 +486,6 @@ export default function ShopeeMappingsV2Page() {
             <option value="">選擇帳號</option>
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-          <button onClick={() => setShowRule(true)} disabled={!accountId}
-            className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
-            <Settings className="w-4 h-4" /> 加價規則
-          </button>
-          <button onClick={importV1} disabled={!accountId || importingV1}
-            className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
-            <Link2 className="w-4 h-4" /> {importingV1 ? '帶入中…' : '帶入舊版對應'}
-          </button>
           <label className={`flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm rounded-lg ${accountId && !importing ? 'hover:bg-gray-50 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
             <Upload className="w-4 h-4" /> {importing ? '匯入中…' : '匯入蝦皮表'}
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImport} disabled={!accountId || importing} className="hidden" />
@@ -631,10 +644,8 @@ export default function ShopeeMappingsV2Page() {
             <div className="flex items-center gap-2 mb-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm">
               <span className="text-blue-700 font-medium">已選 {selectedCount} 項</span>
               <span className="text-gray-300">|</span>
-              <input type="number" value={batchPrice} onChange={e => setBatchPrice(e.target.value)} placeholder="批量售價(留空=清除覆蓋)"
-                className="w-44 px-2 py-1 border border-gray-300 rounded text-right" />
-              <button onClick={() => batchAction('set_price')} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">套用售價</button>
-              <button onClick={() => batchAction('delete')} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">刪除選取</button>
+              <button onClick={() => setShowBatchPrice(true)} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">批量定價</button>
+              <button onClick={batchDelete} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">刪除選取</button>
               <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1 border border-gray-300 rounded hover:bg-white">清除選取</button>
             </div>
           )}
@@ -734,43 +745,62 @@ export default function ShopeeMappingsV2Page() {
         </>
       )}
 
-      {/* 加價規則 */}
-      {showRule && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowRule(false)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="font-bold">加價規則（此帳號）</h2>
-              <button onClick={() => setShowRule(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+      {/* 批量定價 */}
+      {showBatchPrice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowBatchPrice(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold">批量定價（已選 {selectedCount} 項）</h2>
+            <div className="mt-3 flex items-center gap-4">
+              <label className="flex items-center gap-2"><input type="radio" checked={bpMode === 'formula'} onChange={() => setBpMode('formula')} className="accent-blue-600" /><span className="text-sm">混合公式</span></label>
+              <label className="flex items-center gap-2"><input type="radio" checked={bpMode === 'markup'} onChange={() => setBpMode('markup')} className="accent-blue-600" /><span className="text-sm">倍率加成</span></label>
+              <label className="flex items-center gap-2"><input type="radio" checked={bpMode === 'fixed'} onChange={() => setBpMode('fixed')} className="accent-blue-600" /><span className="text-sm">固定價格</span></label>
             </div>
-            <div className="p-5 space-y-3 text-sm">
-              <p className="text-xs text-gray-500">售價 = 成本(TWD) × 倍率 + 固定金額，再依進位方式處理。個別組合可在表格手動覆蓋。</p>
-              <label className="block">倍率
-                <input type="number" step="0.01" value={rule.multiplier} onChange={e => setRule({ ...rule, multiplier: Number(e.target.value) })}
-                  className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded" />
-              </label>
-              <label className="block">加固定金額 (TWD)
-                <input type="number" value={rule.add_amount} onChange={e => setRule({ ...rule, add_amount: Number(e.target.value) })}
-                  className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded" />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">進位方式
-                  <select value={rule.rounding} onChange={e => setRule({ ...rule, rounding: e.target.value })}
-                    className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded bg-white">
+
+            <div className="mt-4">
+              {bpMode === 'fixed' ? (
+                <input type="number" value={bpFixed} onChange={e => setBpFixed(e.target.value)} placeholder="統一售價 (TWD)" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              ) : (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <div className="text-sm text-blue-700 font-medium">公式：{bpMode === 'formula' ? '（成本TWD + 加價）× 倍率' : '成本TWD × 倍率'}</div>
+                  <div className={`mt-2 grid ${bpMode === 'formula' ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+                    {bpMode === 'formula' && (
+                      <label className="block text-xs text-gray-500">加價 (TWD)
+                        <input type="number" value={bpAdd} onChange={e => setBpAdd(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                      </label>
+                    )}
+                    <label className="block text-xs text-gray-500">倍率
+                      <input type="number" step="0.1" value={bpMult} onChange={e => setBpMult(e.target.value)} placeholder="例：1.5" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {bpMode !== 'fixed' && (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <label className="block text-xs text-gray-500">進位方式
+                  <select value={bpRound} onChange={e => setBpRound(e.target.value as typeof bpRound)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
                     <option value="ceil">無條件進位</option>
                     <option value="round">四捨五入</option>
                     <option value="floor">無條件捨去</option>
                     <option value="none">不進位</option>
+                    <option value="ceil95">無條件進至95</option>
+                    <option value="floor95">無條件捨至95</option>
                   </select>
                 </label>
-                <label className="block">進位單位
-                  <input type="number" value={rule.round_to} onChange={e => setRule({ ...rule, round_to: Number(e.target.value) })}
-                    className="mt-1 w-full px-2 py-1.5 border border-gray-300 rounded" />
-                </label>
+                {bpRound !== 'ceil95' && bpRound !== 'floor95' && (
+                  <label className="block text-xs text-gray-500">進位單位
+                    <input type="number" value={bpRoundTo} onChange={e => setBpRoundTo(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </label>
+                )}
               </div>
-            </div>
-            <div className="p-5 border-t border-gray-200 flex justify-end gap-2">
-              <button onClick={() => setShowRule(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
-              <button onClick={saveRule} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存並重算</button>
+            )}
+
+            <div className="mt-3 text-[11px] text-gray-400">只套用到已對應 BC（有成本）的選項；未對應的略過（固定價格模式不需成本）。寫入「售價(覆蓋)」。</div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={applyBatchPrice} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">套用</button>
+              <button onClick={() => setShowBatchPrice(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
             </div>
           </div>
         </div>
