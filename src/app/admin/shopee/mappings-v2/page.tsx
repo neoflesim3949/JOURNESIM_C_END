@@ -60,6 +60,7 @@ export default function ShopeeMappingsV2Page() {
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   // 批量定價
+  const [batchProdName, setBatchProdName] = useState('')
   const [showBatchPrice, setShowBatchPrice] = useState(false)
   const [bpMode, setBpMode] = useState<'formula' | 'markup' | 'fixed'>('formula')
   const [bpAdd, setBpAdd] = useState('3')
@@ -412,6 +413,20 @@ export default function ShopeeMappingsV2Page() {
     load()
   }
 
+  // 批量設定商品自設名稱（套用到勾選項目；留空＝清除）
+  async function applyBatchName() {
+    const ids = currentIds.filter(id => selectedIds.has(id))
+    const opts = options.filter(o => ids.includes(o.id))
+    if (opts.length === 0) return
+    const name = batchProdName.trim() || null
+    const rows = opts.map(o => ({ variation_id: o.shopee_variation_id, set: { custom_product_name: name } }))
+    await fetch('/api/admin/shopee/mappings-v2/import-ours', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, rows }),
+    })
+    setBatchProdName(''); load()
+  }
+
   // 批量定價：依勾選項目的 BC 成本(TWD)，用三模式計算售價 + 進位
   async function applyBatchPrice() {
     const ids = currentIds.filter(id => selectedIds.has(id))
@@ -579,22 +594,25 @@ export default function ShopeeMappingsV2Page() {
                 const alertMsg = [lowMargin && '有選項毛利率低於 40%', bcChanged && 'BC 商品已變更（品名/成本）'].filter(Boolean).join('；')
                 return (
                   <div key={p.id} onClick={() => openProduct(p.id)}
-                    className={`relative cursor-pointer bg-white border rounded-xl p-4 hover:shadow-sm transition ${showAlert ? 'border-red-300 hover:border-red-400 bg-red-50/30' : 'border-gray-200 hover:border-blue-400'}`}>
+                    className={`group relative cursor-pointer bg-white border rounded-xl p-4 hover:shadow-sm transition ${showAlert ? 'border-red-300 hover:border-red-400 bg-red-50/30' : 'border-gray-200 hover:border-blue-400'}`}>
                     <input type="checkbox" checked={selectedProducts.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => toggleProduct(p.id)}
                       className="absolute top-3 right-3 accent-blue-600" />
                     {showAlert && (
-                      <button onClick={e => { e.stopPropagation(); dismissAlert(p.id, alertFp) }} title="忽略警示（清除紅色；裡面有調整會再出現）"
-                        className="absolute top-2.5 left-2.5 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] leading-none hover:bg-red-600">✕</button>
+                      <>
+                        <button onClick={e => { e.stopPropagation(); dismissAlert(p.id, alertFp) }} title="忽略警示（清除紅色；裡面有調整會再出現）"
+                          className="absolute top-2.5 left-2.5 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] leading-none hover:bg-red-600">✕</button>
+                        <div className="hidden group-hover:block absolute z-30 left-2 top-9 px-2 py-1 bg-gray-900 text-white text-[11px] leading-snug rounded shadow-lg whitespace-nowrap pointer-events-none">{alertMsg}</div>
+                      </>
                     )}
                     <div className={`font-medium line-clamp-2 min-h-[2.5rem] ${showAlert ? 'pl-5 pr-6 text-red-600' : 'pr-6 text-gray-800'}`} title={alertMsg || undefined}>{p.name}</div>
-                    <div className="text-[11px] text-gray-400 font-mono mt-1">商品ID: {p.id.startsWith('__') ? '—' : p.id}</div>
+                    <div className="text-sm text-gray-400 font-mono mt-1">商品ID: {p.id.startsWith('__') ? '—' : p.id}</div>
                     <div className="flex items-center justify-between mt-3 text-sm">
                       <span className="text-gray-500">{p.opts.length} 個選項</span>
                       <button onClick={e => { e.stopPropagation(); deleteProducts(new Set([p.id])) }} title="刪除商品" className="text-gray-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <span className={`text-sm ${mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}`}>已對應 {mapped}/{p.opts.length}</span>
-                      <span className="text-[10px] text-gray-400">更新：{latestUpdate(p.opts)}</span>
+                      <span className="text-sm text-gray-400">更新：{latestUpdate(p.opts)}</span>
                     </div>
                   </div>
                 )
@@ -696,6 +714,10 @@ export default function ShopeeMappingsV2Page() {
               <span className="text-blue-700 font-medium">已選 {selectedCount} 項</span>
               <span className="text-gray-300">|</span>
               <button onClick={() => setShowBatchPrice(true)} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">批量定價</button>
+              <input value={batchProdName} onChange={e => setBatchProdName(e.target.value)} placeholder="商品自設名稱(留空清除)"
+                className="w-44 px-2 py-1 border border-gray-300 rounded" />
+              <button onClick={applyBatchName} className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">套用名稱</button>
+              <span className="text-gray-300">|</span>
               <button onClick={batchDelete} className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700">刪除選取</button>
               <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1 border border-gray-300 rounded hover:bg-white">清除選取</button>
             </div>
@@ -747,7 +769,7 @@ export default function ShopeeMappingsV2Page() {
                           <div>
                             <div className="relative group inline-block max-w-[260px] align-bottom">
                               <div className={`font-medium truncate ${o.bc_changed ? 'text-red-600' : 'text-blue-700'}`}>{o.bc_name || o.bc_sku_id}</div>
-                              <div className="hidden group-hover:block absolute z-30 left-0 top-full mt-1 px-2 py-1 bg-gray-900 text-white text-[11px] leading-snug rounded shadow-lg whitespace-normal break-words w-[340px]">{o.bc_name || o.bc_sku_id}</div>
+                              <div className="hidden group-hover:block absolute z-30 left-0 top-full mt-1 px-2 py-1 bg-gray-900 text-white text-[11px] leading-snug rounded shadow-lg whitespace-normal break-words w-[340px]">{o.bc_name || o.bc_sku_id} × {o.copies} copies</div>
                             </div>
                             <button onClick={() => copyText(`${o.bc_sku_id}_${o.copies}`)} title="點擊複製快速碼"
                               className="text-[10px] text-gray-400 font-mono hover:text-blue-600">{o.bc_sku_id}_{o.copies} 📋</button>
