@@ -133,9 +133,6 @@ export default function ShopeeOrdersPage() {
   const [batchPrintModal, setBatchPrintModal] = useState<'detail' | 'product' | null>(null)
   const [batchPrintData, setBatchPrintData] = useState<{ order: any; items: any[] }[]>([])
   const [batchLoading, setBatchLoading] = useState(false)
-  // 自訂名稱（商品 by SKU code, 規格 by variation ID）
-  const [skuProductNameMap, setSkuProductNameMap] = useState<Map<string, string>>(new Map())
-  const [variationIdMap, setVariationIdMap] = useState<Map<string, string>>(new Map())
   // 批量編輯
   const [batchEditModal, setBatchEditModal] = useState(false)
   const [batchEditData, setBatchEditData] = useState<{ order: any; items: any[] }[]>([])
@@ -157,11 +154,6 @@ export default function ShopeeOrdersPage() {
     const savedSender = localStorage.getItem('shopee_sender_info')
     if (savedSender) { try { setSenderInfo(prev => ({ ...prev, ...JSON.parse(savedSender) })) } catch {} }
     fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
-    // 載入自訂名稱對應
-    fetch('/api/admin/shopee/id-mappings').then(r => r.json()).then(d => {
-      setSkuProductNameMap(new Map((d.products || []).map((p: { shopee_product_id: string; display_name: string }) => [p.shopee_product_id, p.display_name])))
-      setVariationIdMap(new Map((d.variations || []).map((v: { shopee_variation_id: string; display_name: string }) => [v.shopee_variation_id, v.display_name])))
-    })
   }, [])
 
   function saveExpiryDate(date: string) {
@@ -612,10 +604,10 @@ export default function ShopeeOrdersPage() {
                         <div key={`${idx}-${item.id}-${j}`} className="label"
                           style={{ width: labelSettings.orientation === 'portrait' ? '15mm' : '30mm', height: labelSettings.orientation === 'portrait' ? '30mm' : '15mm', border: '1px solid #ccc', padding: '1mm 2mm', fontFamily: 'sans-serif', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', boxSizing: 'border-box', overflow: 'hidden' }}>
                           <div style={{ fontSize: `${labelSettings.line1}px`, fontWeight: 'bold', lineHeight: 1.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                            {skuProductNameMap.get(item.shopee_sku_code || '') || item.shopee_product_name}
+                            {item.custom_product_name || item.shopee_product_name}
                           </div>
                           <div style={{ fontSize: `${labelSettings.line2}px`, lineHeight: 1.1, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                            {variationIdMap.get(item.shopee_variation_id || '') || item.shopee_variation_name}
+                            {item.custom_variation_name || item.shopee_variation_name}
                           </div>
                           {expiryDate && (
                             <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.1, whiteSpace: 'nowrap' }}>使用期限：{expiryDate.replace(/-/g, '/')}</div>
@@ -636,17 +628,9 @@ export default function ShopeeOrdersPage() {
         <BatchEditModal
           data={batchEditData}
           loading={batchEditLoading}
-          skuProductNameMap={skuProductNameMap}
-          variationIdMap={variationIdMap}
           orderIds={[...selectedIds]}
           onClose={() => setBatchEditModal(false)}
-          onSaved={() => {
-            // 重新載入自訂名稱
-            fetch('/api/admin/shopee/id-mappings').then(r => r.json()).then(d => {
-              setSkuProductNameMap(new Map((d.products || []).map((p: { shopee_product_id: string; display_name: string }) => [p.shopee_product_id, p.display_name])))
-              setVariationIdMap(new Map((d.variations || []).map((v: { shopee_variation_id: string; display_name: string }) => [v.shopee_variation_id, v.display_name])))
-            })
-          }}
+          onSaved={() => { load() }}
         />
       )}
 
@@ -808,25 +792,19 @@ interface SkuGroup {
   count: number
 }
 
-function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orderIds, onClose, onSaved }: {
+function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
   data: { order: any; items: any[] }[]
   loading: boolean
-  skuProductNameMap: Map<string, string>
-  variationIdMap: Map<string, string>
   orderIds: string[]
   onClose: () => void
   onSaved: () => void
 }) {
   const [groups, setGroups] = useState<SkuGroup[]>([])
-  // 用 ref 抓最新的 maps，避免 effect 把 maps 列為 dependency 觸發群組重建
-  const nameMapsRef = useRef({ skuProductNameMap, variationIdMap })
-  useEffect(() => { nameMapsRef.current = { skuProductNameMap, variationIdMap } }, [skuProductNameMap, variationIdMap])
 
   // data 是非同步 fetch 進來，用 effect 在資料抵達時重算 groups（避免「要點兩次才有資料」）
   // 故意不把 maps 放進 deps：儲存後父層會 refetch maps，若依賴會把使用者剛儲存的 bcSkuName 覆蓋掉
   useEffect(() => {
     if (!data || data.length === 0) { setGroups([]); return }
-    const { skuProductNameMap: nameMap, variationIdMap: varMap } = nameMapsRef.current
     const skuMap = new Map<string, SkuGroup>()
     for (const d of data) {
       for (const item of d.items) {
@@ -839,8 +817,8 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
           shopee_variation_name: item.shopee_variation_name || '',
           shopee_product_id: item.shopee_product_id || '',
           shopee_variation_id: item.shopee_variation_id || '',
-          customProductName: nameMap.get(sku) || '',
-          customVariationName: varMap.get(item.shopee_variation_id || '') || '',
+          customProductName: item.custom_product_name || '',
+          customVariationName: item.custom_variation_name || '',
           bc_sku_id: item.bc_sku_id,
           bcSkuName: null,
           matched_copies: item.matched_copies,
@@ -957,17 +935,19 @@ function BatchEditModal({ data, loading, skuProductNameMap, variationIdMap, orde
 
   async function handleSave() {
     setSaving(true)
+    // 自設名稱寫進這批訂單的明細快照（本地，不回寫 V2/mapping）
     for (const g of groups) {
-      if (g.customProductName) {
-        await fetch('/api/admin/shopee/id-mappings', {
+      if (g.customProductName || g.customVariationName) {
+        await fetch('/api/admin/shopee/orders/batch-match', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'product', shopee_id: g.shopee_sku_code, display_name: g.customProductName }),
-        })
-      }
-      if (g.customVariationName && g.shopee_variation_id) {
-        await fetch('/api/admin/shopee/id-mappings', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'variation', shopee_id: g.shopee_variation_id, display_name: g.customVariationName }),
+          body: JSON.stringify({
+            order_ids: orderIds,
+            shopee_sku_code: g.shopee_sku_code,
+            bc_sku_id: g.bc_sku_id || null,
+            copies: g.matched_copies || null,
+            custom_product_name: g.customProductName || null,
+            custom_variation_name: g.customVariationName || null,
+          }),
         })
       }
     }

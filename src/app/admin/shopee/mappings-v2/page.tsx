@@ -67,6 +67,7 @@ export default function ShopeeMappingsV2Page() {
   const [productView, setProductView] = useState<'card' | 'list'>('card')
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
+  const oursRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetch('/api/admin/shopee/accounts').then(r => r.json()).then((d: Account[]) => {
@@ -164,7 +165,7 @@ export default function ShopeeMappingsV2Page() {
   async function saveName(type: 'product' | 'variation', key: string, name: string) {
     await fetch('/api/admin/shopee/mappings-v2/names', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, key, display_name: name }),
+      body: JSON.stringify({ account_id: accountId, type, key, display_name: name }),
     })
     await load()
   }
@@ -176,6 +177,70 @@ export default function ShopeeMappingsV2Page() {
     })
     setShowRule(false)
     load()
+  }
+
+  // 下載「我們自己的表」（可在 Excel 編輯自設名稱/售價/快速碼，再上傳套回）
+  function exportOurs() {
+    const list = selectedProducts.size > 0
+      ? options.filter(o => selectedProducts.has(o.shopee_product_id || `__${o.id}`))
+      : options
+    if (list.length === 0) { alert('沒有資料'); return }
+    const rows = list.map(o => ({
+      '蝦皮商品ID': o.shopee_product_id || '',
+      '商品名稱': o.shopee_product_name || '',
+      '蝦皮商品選項ID': o.shopee_variation_id,
+      '規格名稱': o.shopee_variation_name || '',
+      '商品自設名稱': o.custom_product_name || '',
+      '規格自設名稱': o.custom_variation_name || '',
+      '對應BC快速碼': o.bc_sku_id ? `${o.bc_sku_id}_${o.copies}` : '',
+      '售價(覆蓋)': o.price_override ?? '',
+      '計算售價(參考)': o.calc_price ?? '',
+      '原蝦皮價(參考)': o.original_price ?? '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '商品對應V2')
+    XLSX.writeFile(wb, `商品對應V2_我們的表_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  // 上傳「我們自己的表」：依選項ID 套用 商品自設名稱/規格自設名稱/售價(覆蓋)/快速碼
+  async function uploadOurs(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!accountId) { alert('請先選擇蝦皮帳號'); return }
+    try {
+      const wb = XLSX.read(await file.arrayBuffer())
+      const json = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]], { defval: '' })
+      if (!json.length) { alert('檔案沒有資料'); return }
+      const header = Object.keys(json[0])
+      const hasProd = header.includes('商品自設名稱')
+      const hasVar = header.includes('規格自設名稱')
+      const hasPrice = header.includes('售價(覆蓋)')
+      const hasQuick = header.includes('對應BC快速碼')
+      const rows = json.map(r => {
+        const variation_id = String(r['蝦皮商品選項ID'] || '').trim()
+        if (!variation_id) return null
+        const set: Record<string, unknown> = {}
+        if (hasProd) set.custom_product_name = String(r['商品自設名稱'] || '').trim() || null
+        if (hasVar) set.custom_variation_name = String(r['規格自設名稱'] || '').trim() || null
+        if (hasPrice) { const v = String(r['售價(覆蓋)'] || '').trim(); set.price_override = v === '' ? null : Number(v) }
+        if (hasQuick) { const m = String(r['對應BC快速碼'] || '').trim().match(/^(.+)_([0-9]+)$/); if (m) { set.bc_sku_id = m[1]; set.copies = m[2] } }
+        return Object.keys(set).length ? { variation_id, set } : null
+      }).filter(Boolean)
+      if (!rows.length) { alert('沒有可套用的列（需有「蝦皮商品選項ID」欄）'); return }
+      const res = await fetch('/api/admin/shopee/mappings-v2/import-ours', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: accountId, rows }),
+      })
+      const d = await res.json()
+      if (!res.ok) { alert(d.error || '上傳失敗'); return }
+      alert(`已套用 ${d.count} 筆`)
+      load()
+    } catch (err) {
+      alert('解析失敗：' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      if (oursRef.current) oursRef.current.value = ''
+    }
   }
 
   async function importV1() {
@@ -394,6 +459,16 @@ export default function ShopeeMappingsV2Page() {
               <span className="text-xs text-gray-400 whitespace-nowrap">{filteredProducts.length} 件商品</span>
             </div>
             <div className="flex items-center gap-2">
+              <button onClick={toggleAllProducts} disabled={filteredProducts.length === 0}
+                className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                {allProductsSelected ? '取消全選' : '全選'}
+              </button>
+              <button onClick={exportOurs} disabled={!accountId}
+                className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">下載我們的表</button>
+              <label className={`px-3 py-1.5 border border-gray-300 text-sm rounded-lg ${accountId ? 'hover:bg-gray-50 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>上傳我們的表
+                <input ref={oursRef} type="file" accept=".xlsx,.xls,.csv" onChange={uploadOurs} disabled={!accountId} className="hidden" />
+              </label>
+              <span className="text-gray-300">|</span>
               {selectedProducts.size > 0 && (
                 <>
                   <span className="text-sm text-blue-700 font-medium">已選 {selectedProducts.size} 商品</span>

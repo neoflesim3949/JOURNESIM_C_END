@@ -43,6 +43,8 @@ interface ShopeeItem {
   qr_code_url?: string | null
   lpa_code?: string | null
   esim_cards?: { iccid: string | null; lpa_code: string | null; qr_code_url: string | null }[] | null
+  custom_product_name?: string | null
+  custom_variation_name?: string | null
 }
 
 interface IdMapping { shopee_product_id?: string; shopee_variation_id?: string; display_name: string }
@@ -164,16 +166,16 @@ export default function ShopeeOrderDetailPage() {
   const [manualDeliveryType, setManualDeliveryType] = useState<'sim' | 'esim'>('sim')
 
   async function load() {
-    const [orderRes, idRes, accRes] = await Promise.all([
+    const [orderRes, accRes] = await Promise.all([
       fetch(`/api/admin/shopee/orders/${id}`).then(r => r.json()),
-      fetch('/api/admin/shopee/id-mappings').then(r => r.json()),
       fetch('/api/admin/shopee/accounts').then(r => r.json()),
     ])
-    setOrder(orderRes.order); setItems(orderRes.items || []); setSettlements(orderRes.settlements || [])
+    const its: ShopeeItem[] = orderRes.items || []
+    setOrder(orderRes.order); setItems(its); setSettlements(orderRes.settlements || [])
     setAccountMap(new Map((accRes || []).map((a: { id: string; name: string }) => [a.id, a.name])))
-    // 商品名稱 by SKU code（shopee_product_id 欄位現存放 SKU code）
-    setSkuProductNameMap(new Map((idRes.products || []).map((p: IdMapping) => [p.shopee_product_id!, p.display_name])))
-    setVariationIdMap(new Map((idRes.variations || []).map((v: IdMapping) => [v.shopee_variation_id!, v.display_name])))
+    // 自設名稱來自訂單明細快照（匯入時就帶好；標籤/收據讀此，不連 mapping）
+    setSkuProductNameMap(new Map(its.filter(i => i.shopee_sku_code && i.custom_product_name).map(i => [i.shopee_sku_code!, i.custom_product_name!])))
+    setVariationIdMap(new Map(its.filter(i => i.shopee_variation_id && i.custom_variation_name).map(i => [i.shopee_variation_id!, i.custom_variation_name!])))
     // 查 BC SKU 名稱
     const bcSkuIds = [...new Set((orderRes.items || []).map((i: ShopeeItem) => i.bc_sku_id).filter(Boolean))]
     if (bcSkuIds.length > 0) {
@@ -217,14 +219,13 @@ export default function ShopeeOrderDetailPage() {
     router.push('/admin/shopee/orders')
   }
 
-  // 儲存自設名稱（product by SKU code, variation by variation ID）
-  async function saveIdMapping(type: 'product' | 'variation', shopeeId: string, displayName: string) {
-    await fetch('/api/admin/shopee/id-mappings', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, shopee_id: shopeeId, display_name: displayName }),
+  // 儲存自設名稱：只改這筆訂單的快照（本地，不回寫 V2/mapping）
+  async function saveItemName(itemId: string, field: 'custom_product_name' | 'custom_variation_name', name: string) {
+    await fetch(`/api/admin/shopee/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: itemId, [field]: name || null }),
     })
-    if (type === 'product') setSkuProductNameMap(prev => new Map(prev).set(shopeeId, displayName))
-    else setVariationIdMap(prev => new Map(prev).set(shopeeId, displayName))
+    load()
   }
 
 
@@ -768,14 +769,14 @@ export default function ShopeeOrderDetailPage() {
                       <div className="flex items-center gap-1">
                         自訂名稱：
                         {item.shopee_sku_code
-                          ? <EditableIdName value={skuProductNameMap.get(item.shopee_sku_code) || ''} onSave={(name) => saveIdMapping('product', item.shopee_sku_code!, name)} placeholder="設定" />
+                          ? <EditableIdName value={item.custom_product_name || ''} onSave={(name) => saveItemName(item.id, 'custom_product_name', name)} placeholder="設定" />
                           : '-'}
                       </div>
                       <div className="flex items-center gap-1">規格ID：<span className="font-mono">{item.shopee_variation_id || '-'}</span></div>
                       <div className="flex items-center gap-1">
                         自訂規格：
                         {item.shopee_variation_id
-                          ? <EditableIdName value={variationIdMap.get(item.shopee_variation_id) || ''} onSave={(name) => saveIdMapping('variation', item.shopee_variation_id!, name)} placeholder="設定" />
+                          ? <EditableIdName value={item.custom_variation_name || ''} onSave={(name) => saveItemName(item.id, 'custom_variation_name', name)} placeholder="設定" />
                           : '-'}
                       </div>
                     </div>

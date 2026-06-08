@@ -83,6 +83,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.qr_code_url !== undefined) updates.qr_code_url = body.qr_code_url
     if (body.original_price !== undefined) updates.original_price = body.original_price
     if (body.sale_price !== undefined) updates.sale_price = body.sale_price
+    // 自設名稱：只改這筆訂單的快照（本地，不回寫 V2/mapping）
+    if (body.custom_product_name !== undefined) updates.custom_product_name = body.custom_product_name || null
+    if (body.custom_variation_name !== undefined) updates.custom_variation_name = body.custom_variation_name || null
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
     // 訂單端對應回寫 V2 蝦皮表（讓 V2 逐步補齊；只在設定 BC 對應時寫，缺的選項自動建立）

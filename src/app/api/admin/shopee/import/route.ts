@@ -21,10 +21,12 @@ export async function POST(request: Request) {
   const supabase = createAdminClient()
 
   // 對應來源＝V2 蝦皮表（依選項ID；只認 V2，不回退舊表）— 分頁撈全
-  const v2opts: { shopee_variation_id: string; bc_sku_id: string | null; copies: string | null }[] = []
+  // 注意：不過濾 bc_sku_id，因為也要帶自設名稱快照（即使尚未對應 BC）
+  type V2Opt = { shopee_variation_id: string; bc_sku_id: string | null; copies: string | null; custom_product_name: string | null; custom_variation_name: string | null }
+  const v2opts: V2Opt[] = []
   for (let from = 0; ; from += 1000) {
     let q = supabase.from('shopee_product_options_v2')
-      .select('shopee_variation_id, bc_sku_id, copies').not('bc_sku_id', 'is', null)
+      .select('shopee_variation_id, bc_sku_id, copies, custom_product_name, custom_variation_name')
     if (account_id) q = q.eq('account_id', account_id)
     const { data } = await q.range(from, from + 999)
     if (!data || data.length === 0) break
@@ -125,6 +127,9 @@ export async function POST(request: Request) {
         matched_copies: mapping?.copies || null,
         bc_sku_id: mapping?.bc_sku_id || null,
         status: mapping?.bc_sku_id ? 'matched' : 'pending',
+        // 自設名稱快照（標籤/收據讀此；之後改 V2 不影響既有訂單）
+        custom_product_name: mapping?.custom_product_name || null,
+        custom_variation_name: mapping?.custom_variation_name || null,
         raw_data: row,
       }
 
@@ -137,6 +142,8 @@ export async function POST(request: Request) {
             return_quantity: itemData.return_quantity,
             shopee_product_name: itemData.shopee_product_name,
             shopee_variation_name: itemData.shopee_variation_name,
+            custom_product_name: itemData.custom_product_name,
+            custom_variation_name: itemData.custom_variation_name,
           }).eq('id', existingItem.id)
           continue
         }
