@@ -527,7 +527,14 @@ export default function ShopeeOrdersPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayOrders.map((o) => {
-                const s = STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' }
+                const s = (() => {
+                  if (o.internal_status === 'completed') return STATUS_LABELS.completed
+                  // 所有商品的號碼都已回填（ICCID/eSIM）→ 顯示「已回填」
+                  const its = o.shopee_order_items || []
+                  const allFilled = its.length > 0 && its.every(i => ['iccid_filled', 'bc_ordered', 'completed'].includes(i.status))
+                  if (allFilled) return { label: '已回填', color: 'bg-teal-100 text-teal-700' }
+                  return STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' }
+                })()
                 const fs = getFinanceStatus(o)
                 const pendingItems = o.shopee_order_items?.filter(i => i.status === 'pending').length || 0
                 const fmtDate = (d: string | null) => {
