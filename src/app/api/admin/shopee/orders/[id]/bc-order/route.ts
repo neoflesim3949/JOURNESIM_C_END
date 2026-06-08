@@ -109,9 +109,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const bcSub = bcResult.subOrderList?.[0]
       const prices = bcPriceMap.get(item.bc_sku_id) || []
       const matchedPrice = prices?.find(p => p.copies === (item.matched_copies || '1'))
-      // 一筆 eSIM 代表 quantity 張卡，成本 ×quantity（取代過往拆成多筆各算一次）
-      const unitCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
-      const computedCny = unitCny * (item.quantity || 1)
+      // 成本存「單張」價（總成本計算 dashboard/淨利率會再 ×quantity）
+      const computedCny = matchedPrice ? Number(matchedPrice.settlementPrice) || 0 : 0
       // 已在綁定時快照成本 → 沿用，不被 BC 現價覆蓋
       const costCny = item.cost_cny != null ? Number(item.cost_cny) : computedCny
       const costTwd = item.cost_twd != null ? Number(item.cost_twd) : Math.ceil(costCny / cnyRate)

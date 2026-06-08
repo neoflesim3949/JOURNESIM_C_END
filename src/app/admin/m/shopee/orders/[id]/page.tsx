@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { ArrowLeft, Plus, Link2, Trash2, Send, X } from 'lucide-react'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
+import { MobileShopeeNav } from '@/components/admin/mobile-shopee-nav'
 
 interface MItem {
   id: string
@@ -144,6 +145,7 @@ export default function MobileShopeeOrderDetail() {
           </div>
           <div className="text-xs text-gray-500 truncate">{order.buyer_account || '-'} · {items.length} 項</div>
         </div>
+        <MobileShopeeNav current="orders" />
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-28">

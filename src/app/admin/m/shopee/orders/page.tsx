@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Search, X, ChevronRight, RefreshCw } from 'lucide-react'
+import { MobileShopeeNav } from '@/components/admin/mobile-shopee-nav'
 
 interface MOrder {
   id: string
@@ -80,7 +81,10 @@ export default function MobileShopeeOrdersPage() {
       <div className="bg-white border-b border-gray-200 px-4 pt-4 pb-3 shrink-0">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">蝦皮訂單</h1>
-          <button onClick={load} className="p-2 text-gray-500"><RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /></button>
+          <div className="flex items-center">
+            <button onClick={load} className="p-2 text-gray-500"><RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /></button>
+            <MobileShopeeNav current="orders" />
+          </div>
         </div>
         <div className="mt-3 flex items-center gap-2">
           <div className="relative flex-1">

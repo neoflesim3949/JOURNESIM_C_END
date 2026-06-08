@@ -97,9 +97,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const { data: bc } = await supabase.from('bc_products').select('prices').eq('sku_id', body.bc_sku_id).maybeSingle()
       const baseCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, body.matched_copies ?? null) : 0
       if (baseCny > 0) {
-        const { data: it } = await supabase.from('shopee_order_items').select('delivery_type, quantity').eq('id', body.item_id).single()
-        // 與送 BC 訂單一致：SIM +¥3 運費；eSIM 成本 ×數量
-        const costCny = (it?.delivery_type || 'sim') === 'sim' ? baseCny + 3 : baseCny * (it?.quantity || 1)
+        const { data: it } = await supabase.from('shopee_order_items').select('delivery_type').eq('id', body.item_id).single()
+        // 成本存「單張」價（總成本會再 ×quantity）；SIM 實體卡 +¥3 運費
+        const costCny = (it?.delivery_type || 'sim') === 'sim' ? baseCny + 3 : baseCny
         const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
         const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
         updates.cost_cny = costCny

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, RefreshCw } from 'lucide-react'
+import { MobileShopeeNav } from '@/components/admin/mobile-shopee-nav'
 
 interface GroupData {
   order_count: number; card_count: number
@@ -93,7 +94,10 @@ export default function MobileShopeeDashboard() {
       <div className="bg-white border-b border-gray-200 px-4 pt-4 pb-3 shrink-0 space-y-2.5">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-bold">蝦皮儀表板</h1>
-          <button onClick={load} className="p-2 text-gray-500"><RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /></button>
+          <div className="flex items-center">
+            <button onClick={load} className="p-2 text-gray-500"><RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} /></button>
+            <MobileShopeeNav current="dashboard" />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
