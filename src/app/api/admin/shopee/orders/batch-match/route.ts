@@ -29,22 +29,28 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // 訂單端對應回寫 V2 蝦皮表（依各訂單所屬帳號；讓 V2 逐步補齊）
-  if (shopee_variation_id && bc_sku_id) {
+  // 訂單端對應/命名回寫 V2 蝦皮表（依各訂單所屬帳號；讓 V2 逐步補齊）
+  if (shopee_variation_id && (bc_sku_id || hasNames)) {
     const { data: ords } = await supabase.from('shopee_orders').select('shopee_account_id').in('id', order_ids)
     const accts = [...new Set((ords || []).map(o => o.shopee_account_id).filter(Boolean))] as string[]
     if (accts.length) {
-      const { data: bc } = await supabase.from('bc_products').select('name, prices').eq('sku_id', bc_sku_id).maybeSingle()
-      const snap = snapshotFor(bc || undefined, copies || null)
+      // 只有設定 BC 時才更新 bc 欄位與快照（避免清掉 V2 既有對應）
+      const bcPart: Record<string, unknown> = {}
+      if (bc_sku_id) {
+        const { data: bc } = await supabase.from('bc_products').select('name, prices').eq('sku_id', bc_sku_id).maybeSingle()
+        Object.assign(bcPart, { bc_sku_id, copies: copies || null }, snapshotFor(bc || undefined, copies || null))
+      }
+      const namePart: Record<string, unknown> = {}
+      if (custom_product_name !== undefined) namePart.custom_product_name = custom_product_name || null
+      if (custom_variation_name !== undefined) namePart.custom_variation_name = custom_variation_name || null
       const rows = accts.map(acc => ({
         account_id: acc,
         shopee_variation_id: String(shopee_variation_id),
         shopee_product_id: shopee_product_id || null,
         shopee_product_name: shopee_product_name || null,
         shopee_variation_name: shopee_variation_name || null,
-        bc_sku_id,
-        copies: copies || null,
-        ...snap,
+        ...bcPart,
+        ...namePart,
         updated_at: new Date().toISOString(),
       }))
       await supabase.from('shopee_product_options_v2').upsert(rows, { onConflict: 'account_id,shopee_variation_id' })

@@ -296,6 +296,79 @@ export default function ShopeeOrdersPage() {
     setBatchLoading(false)
   }
 
+  // 批次商品標籤改產 PDF（每張一頁，與明細頁一致，避免印表機切割位移）
+  async function printBatchProductLabelsPdf() {
+    const ls = labelSettings
+    const orientation: 'landscape' | 'portrait' = ls.orientation === 'portrait' ? 'portrait' : 'landscape'
+    const wMm = orientation === 'portrait' ? 15 : 30
+    const hMm = orientation === 'portrait' ? 30 : 15
+    const expiry = expiryDate || ''
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cards = batchPrintData.flatMap((d) => (d.items as any[]).flatMap((item) => Array.from({ length: item.quantity || 1 }, () => ({
+      line1: item.custom_product_name || item.shopee_product_name || '',
+      line2: item.custom_variation_name || item.shopee_variation_name || '',
+      line3: expiry ? `使用期限：${expiry.replace(/-/g, '/')}` : '',
+    }))))
+    if (!cards.length) { alert('沒有可列印的標籤'); return }
+
+    const PX_PER_MM = 24
+    const CSS_PX_PER_MM = 96 / 25.4
+    const scale = PX_PER_MM / CSS_PX_PER_MM
+    const FONT = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif'
+    const cw = Math.round(wMm * PX_PER_MM)
+    const ch = Math.round(hMm * PX_PER_MM)
+    const padX = 2 * PX_PER_MM
+    const maxW = cw - padX * 2
+    const fit = (ctx: CanvasRenderingContext2D, text: string) => {
+      if (!text || ctx.measureText(text).width <= maxW) return text
+      let t = text
+      while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1)
+      return t + '…'
+    }
+    const drawCard = (c: { line1: string; line2: string; line3: string }) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = cw; canvas.height = ch
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch)
+      ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const lines = [
+        { text: c.line1, fpx: ls.line1 * scale, bold: true, ellipsis: true },
+        { text: c.line2, fpx: ls.line2 * scale, bold: false, ellipsis: true },
+        ...(c.line3 ? [{ text: c.line3, fpx: ls.line3 * scale, bold: false, ellipsis: false }] : []),
+      ]
+      const heights = lines.map(l => l.fpx * 1.1)
+      const totalH = heights.reduce((a, b) => a + b, 0)
+      let y = (ch - totalH) / 2
+      lines.forEach((l, idx) => {
+        ctx.font = `${l.bold ? 'bold ' : ''}${l.fpx}px ${FONT}`
+        const text = l.ellipsis ? fit(ctx, l.text) : l.text
+        ctx.fillText(text, cw / 2, y + heights[idx] / 2)
+        y += heights[idx]
+      })
+      return canvas.toDataURL('image/png')
+    }
+
+    const win = window.open('', '_blank')
+    if (win) win.document.body.innerHTML = '<p id="msg" style="font-family:sans-serif;padding:16px">PDF 產生中…</p>'
+    const setMsg = (t: string) => { try { const m = win?.document.getElementById('msg'); if (m) m.textContent = t } catch {} }
+    try {
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'mm', format: [wMm, hMm], orientation })
+      for (let i = 0; i < cards.length; i++) {
+        setMsg(`PDF 產生中… ${i + 1}/${cards.length}`)
+        if (i > 0) doc.addPage([wMm, hMm], orientation)
+        doc.addImage(drawCard(cards[i]), 'PNG', 0, 0, wMm, hMm)
+      }
+      const blobUrl = doc.output('bloburl') as unknown as string
+      if (win) win.location.href = blobUrl
+      else window.open(blobUrl, '_blank')
+    } catch (e) {
+      const msg = 'PDF 產生失敗：' + (e instanceof Error ? e.message : String(e))
+      setMsg(msg)
+      alert(msg)
+    }
+  }
+
   async function openBatchEdit() {
     if (selectedIds.size === 0) { alert('請先勾選訂單'); return }
     setBatchEditLoading(true); setBatchEditModal(true)
@@ -527,32 +600,19 @@ export default function ShopeeOrdersPage() {
               <h2 className="font-bold">{batchPrintModal === 'detail' ? `批次明細標籤（${batchPrintData.length} 筆）` : `批次商品標籤（${batchPrintData.length} 筆）`}</h2>
               <div className="flex items-center gap-2">
                 <button onClick={() => {
+                  // 商品標籤改產 PDF（每張一頁，不漂移）
+                  if (batchPrintModal === 'product') { printBatchProductLabelsPdf(); return }
                   const el = document.getElementById('batch-print-area')
                   if (!el) return
-                  let html: string
-                  if (batchPrintModal === 'product') {
-                    const isPortrait = labelSettings.orientation === 'portrait'
-                    const pageW = isPortrait ? '15mm' : '30mm'
-                    const pageH = isPortrait ? '30mm' : '15mm'
-                    html = `<html><head><style>
-                      @page{size:${pageW} ${pageH};margin:0}
-                      html,body{margin:0!important;padding:0!important;font-family:sans-serif;width:${pageW}!important}
-                      .label-grid{display:block!important;gap:0!important;margin:0!important;padding:0!important;width:${pageW}!important}
-                      .label{width:${pageW}!important;height:${pageH}!important;padding:1mm 2mm!important;box-sizing:border-box!important;display:flex!important;flex-direction:column!important;justify-content:center!important;align-items:center!important;text-align:center!important;gap:0!important;overflow:hidden!important;page-break-inside:avoid;border:none!important;margin:0!important}
-                      .label>div{line-height:1.1!important;overflow:hidden!important}
-                    </style></head><body>${el.innerHTML}</body></html>`
-                  } else {
-                    html = `<html><head><style>
+                  const html = `<html><head><style>
                       @page{size:100mm 150mm;margin:0}
                       body{margin:0;font-family:sans-serif}
                       .detail-label{page-break-after:always}
                     </style></head><body>${el.innerHTML}</body></html>`
-                  }
                   const w = window.open('', '', `width=${screen.width},height=${screen.height}`)
                   if (!w) return
                   w.document.write(html)
                   w.document.close()
-                  // 直接呼叫 print；macOS Chrome 預設會跳 Chrome 對話框，按 ⌥⌘P 切到系統對話框
                   setTimeout(() => { w.print() }, 100)
                 }} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 flex items-center gap-2">
                   <Printer className="w-4 h-4" /> 列印
@@ -935,7 +995,7 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
 
   async function handleSave() {
     setSaving(true)
-    // 自設名稱寫進這批訂單的明細快照（本地，不回寫 V2/mapping）
+    // 自設名稱：寫進這批訂單明細快照，並回寫 V2 蝦皮表（依選項ID）
     for (const g of groups) {
       if (g.customProductName || g.customVariationName) {
         await fetch('/api/admin/shopee/orders/batch-match', {
@@ -945,6 +1005,10 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
             shopee_sku_code: g.shopee_sku_code,
             bc_sku_id: g.bc_sku_id || null,
             copies: g.matched_copies || null,
+            shopee_variation_id: g.shopee_variation_id,
+            shopee_product_id: g.shopee_product_id,
+            shopee_product_name: g.shopee_product_name,
+            shopee_variation_name: g.shopee_variation_name,
             custom_product_name: g.customProductName || null,
             custom_variation_name: g.customVariationName || null,
           }),
