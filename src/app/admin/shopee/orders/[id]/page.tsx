@@ -220,7 +220,7 @@ export default function ShopeeOrderDetailPage() {
   }
 
   // 儲存自設名稱：只改這筆訂單的快照（本地，不回寫 V2/mapping）
-  async function saveItemName(itemId: string, field: 'custom_product_name' | 'custom_variation_name', name: string) {
+  async function saveItemName(itemId: string, field: 'custom_product_name' | 'custom_variation_name' | 'shopee_product_name' | 'shopee_variation_name', name: string) {
     await fetch(`/api/admin/shopee/orders/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ item_id: itemId, [field]: name || null }),
@@ -734,8 +734,21 @@ export default function ShopeeOrderDetailPage() {
               <div key={item.id} className="bg-white border border-gray-200 rounded-xl p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <div className="font-medium">{item.shopee_product_name || '-'}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">{item.shopee_variation_name || '-'}</div>
+                    {item.is_manual ? (
+                      <div className="space-y-1">
+                        <input key={`pn-${item.id}-${item.shopee_product_name ?? ''}`} defaultValue={item.shopee_product_name || ''} placeholder="品名"
+                          onBlur={e => { const v = e.target.value.trim(); if (v !== (item.shopee_product_name || '')) saveItemName(item.id, 'shopee_product_name', v) }}
+                          className="font-medium border border-gray-200 rounded px-2 py-0.5 w-56" />
+                        <input key={`vn-${item.id}-${item.shopee_variation_name ?? ''}`} defaultValue={item.shopee_variation_name || ''} placeholder="選項 / 規格"
+                          onBlur={e => { const v = e.target.value.trim(); if (v !== (item.shopee_variation_name || '')) saveItemName(item.id, 'shopee_variation_name', v) }}
+                          className="block text-xs text-gray-600 border border-gray-200 rounded px-2 py-0.5 w-56" />
+                      </div>
+                    ) : (
+                      <>
+                        <div className="font-medium">{item.shopee_product_name || '-'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">{item.shopee_variation_name || '-'}</div>
+                      </>
+                    )}
                     <div className="mt-2 grid grid-cols-3 md:grid-cols-6 gap-x-4 gap-y-1 text-xs text-gray-500">
                       <div>數量：<span className="font-medium text-gray-700">{item.quantity}</span>{item.return_quantity > 0 && <span className="text-red-500">（退{item.return_quantity}）</span>}</div>
                       <div className="flex items-center gap-1">原價：NT${item.is_manual ? (

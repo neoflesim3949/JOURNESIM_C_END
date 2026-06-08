@@ -85,6 +85,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.qr_code_url !== undefined) updates.qr_code_url = body.qr_code_url
     if (body.original_price !== undefined) updates.original_price = body.original_price
     if (body.sale_price !== undefined) updates.sale_price = body.sale_price
+    // 手動品項可改品名 / 選項名
+    if (body.shopee_product_name !== undefined) updates.shopee_product_name = body.shopee_product_name || null
+    if (body.shopee_variation_name !== undefined) updates.shopee_variation_name = body.shopee_variation_name || null
     // 自設名稱：只改這筆訂單的快照（本地，不回寫 V2/mapping）
     if (body.custom_product_name !== undefined) updates.custom_product_name = body.custom_product_name || null
     if (body.custom_variation_name !== undefined) updates.custom_variation_name = body.custom_variation_name || null
@@ -94,8 +97,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const { data: bc } = await supabase.from('bc_products').select('prices').eq('sku_id', body.bc_sku_id).maybeSingle()
       const baseCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, body.matched_copies ?? null) : 0
       if (baseCny > 0) {
-        const { data: it } = await supabase.from('shopee_order_items').select('delivery_type').eq('id', body.item_id).single()
-        const costCny = (it?.delivery_type || 'sim') === 'sim' ? baseCny + 3 : baseCny
+        const { data: it } = await supabase.from('shopee_order_items').select('delivery_type, quantity').eq('id', body.item_id).single()
+        // 與送 BC 訂單一致：SIM +¥3 運費；eSIM 成本 ×數量
+        const costCny = (it?.delivery_type || 'sim') === 'sim' ? baseCny + 3 : baseCny * (it?.quantity || 1)
         const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
         const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
         updates.cost_cny = costCny
