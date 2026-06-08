@@ -69,10 +69,10 @@ export default function ShopeeMappingsV2Page() {
   const [bpRoundTo, setBpRoundTo] = useState('1')
   const [productView, setProductView] = useState<'card' | 'list'>('card')
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
-  // 已忽略警示的商品（紅卡），存這台電腦
-  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set()
-    try { const s = localStorage.getItem('v2_alert_dismissed'); return s ? new Set<string>(JSON.parse(s)) : new Set() } catch { return new Set() }
+  // 已忽略警示的商品：商品ID → 當下警示指紋（毛利率/BC變更）。指紋變了(裡面有調整)就重新顯示。存這台電腦
+  const [dismissedAlerts, setDismissedAlerts] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {}
+    try { const s = localStorage.getItem('v2_alert_dismissed'); return s ? JSON.parse(s) : {} } catch { return {} }
   })
   const fileRef = useRef<HTMLInputElement>(null)
   const oursRef = useRef<HTMLInputElement>(null)
@@ -177,16 +177,25 @@ export default function ShopeeMappingsV2Page() {
     await load()
   }
 
-  // 忽略紅卡警示（低毛利/BC變更皆可，純隱藏，存這台電腦）
-  function dismissAlert(pid: string) {
+  // 警示指紋：各選項的毛利率 + BC變更；裡面調整(毛利/BC變)就會變，紅色自動再現
+  function alertFingerprint(opts: OptionRow[]): string {
+    let h = 5381
+    for (const o of opts) {
+      const s = `${o.shopee_variation_id}:${o.margin_pct ?? ''}:${o.bc_changed ? 1 : 0}`
+      for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+    }
+    return String(h)
+  }
+  // 忽略紅卡警示（外層確認；綁定當下指紋，裡面有調整會重新顯示）。存這台電腦
+  function dismissAlert(pid: string, fp: string) {
     setDismissedAlerts(prev => {
-      const n = new Set(prev); n.add(pid)
-      try { localStorage.setItem('v2_alert_dismissed', JSON.stringify([...n])) } catch {}
+      const n = { ...prev, [pid]: fp }
+      try { localStorage.setItem('v2_alert_dismissed', JSON.stringify(n)) } catch {}
       return n
     })
   }
   function resetAlerts() {
-    setDismissedAlerts(new Set())
+    setDismissedAlerts({})
     try { localStorage.removeItem('v2_alert_dismissed') } catch {}
   }
 
@@ -534,9 +543,9 @@ export default function ShopeeMappingsV2Page() {
               <label className={`px-3 py-1.5 border border-gray-300 text-sm rounded-lg ${accountId ? 'hover:bg-gray-50 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>上傳我們的表
                 <input ref={oursRef} type="file" accept=".xlsx,.xls,.csv" onChange={uploadOurs} disabled={!accountId} className="hidden" />
               </label>
-              {dismissedAlerts.size > 0 && (
+              {Object.keys(dismissedAlerts).length > 0 && (
                 <button onClick={resetAlerts} title="把忽略的紅卡警示全部還原"
-                  className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">重設警示 ({dismissedAlerts.size})</button>
+                  className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">重設警示 ({Object.keys(dismissedAlerts).length})</button>
               )}
               <span className="text-gray-300">|</span>
               {selectedProducts.size > 0 && (
@@ -565,7 +574,8 @@ export default function ShopeeMappingsV2Page() {
                 const mapped = p.opts.filter(o => o.bc_sku_id).length
                 const lowMargin = p.opts.some(o => o.margin_pct != null && o.margin_pct < 40)
                 const bcChanged = p.opts.some(o => o.bc_changed)
-                const showAlert = (lowMargin || bcChanged) && !dismissedAlerts.has(p.id)
+                const alertFp = alertFingerprint(p.opts)
+                const showAlert = (lowMargin || bcChanged) && dismissedAlerts[p.id] !== alertFp
                 const alertMsg = [lowMargin && '有選項毛利率低於 40%', bcChanged && 'BC 商品已變更（品名/成本）'].filter(Boolean).join('；')
                 return (
                   <div key={p.id} onClick={() => openProduct(p.id)}
@@ -573,7 +583,7 @@ export default function ShopeeMappingsV2Page() {
                     <input type="checkbox" checked={selectedProducts.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => toggleProduct(p.id)}
                       className="absolute top-3 right-3 accent-blue-600" />
                     {showAlert && (
-                      <button onClick={e => { e.stopPropagation(); dismissAlert(p.id) }} title="忽略警示（清除紅色）"
+                      <button onClick={e => { e.stopPropagation(); dismissAlert(p.id, alertFp) }} title="忽略警示（清除紅色；裡面有調整會再出現）"
                         className="absolute top-2.5 left-2.5 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] leading-none hover:bg-red-600">✕</button>
                     )}
                     <div className={`font-medium line-clamp-2 min-h-[2.5rem] ${showAlert ? 'pl-5 pr-6 text-red-600' : 'pr-6 text-gray-800'}`} title={alertMsg || undefined}>{p.name}</div>
@@ -615,13 +625,20 @@ export default function ShopeeMappingsV2Page() {
                           <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProduct(p.id)} className="accent-blue-600" />
                         </td>
                         <td className="px-3 py-2">
-                          <div className="flex items-center gap-1.5">
-                            {p.opts.some(o => (o.margin_pct != null && o.margin_pct < 40) || o.bc_changed) && !dismissedAlerts.has(p.id) && (
-                              <button onClick={e => { e.stopPropagation(); dismissAlert(p.id) }} title="忽略警示"
-                                className="w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] leading-none hover:bg-red-600 shrink-0">✕</button>
-                            )}
-                            <div className={`font-medium max-w-[480px] truncate ${p.opts.some(o => (o.margin_pct != null && o.margin_pct < 40) || o.bc_changed) && !dismissedAlerts.has(p.id) ? 'text-red-600' : 'text-gray-800'}`}>{p.name}</div>
-                          </div>
+                          {(() => {
+                            const has = p.opts.some(o => (o.margin_pct != null && o.margin_pct < 40) || o.bc_changed)
+                            const fp = alertFingerprint(p.opts)
+                            const showAlert = has && dismissedAlerts[p.id] !== fp
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                {showAlert && (
+                                  <button onClick={e => { e.stopPropagation(); dismissAlert(p.id, fp) }} title="忽略警示（裡面有調整會再出現）"
+                                    className="w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] leading-none hover:bg-red-600 shrink-0">✕</button>
+                                )}
+                                <div className={`font-medium max-w-[480px] truncate ${showAlert ? 'text-red-600' : 'text-gray-800'}`}>{p.name}</div>
+                              </div>
+                            )
+                          })()}
                         </td>
                         <td className="px-3 py-2 font-mono text-[11px] text-gray-400">{p.id.startsWith('__') ? '—' : p.id}</td>
                         <td className="px-3 py-2 text-right text-gray-500">{p.opts.length}</td>
@@ -728,7 +745,10 @@ export default function ShopeeMappingsV2Page() {
                       <td className="px-3 py-2">
                         {o.bc_sku_id ? (
                           <div>
-                            <div className={`font-medium max-w-[260px] truncate ${o.bc_changed ? 'text-red-600' : 'text-blue-700'}`} title={o.bc_name || o.bc_sku_id || ''}>{o.bc_name || o.bc_sku_id}</div>
+                            <div className="relative group inline-block max-w-[260px] align-bottom">
+                              <div className={`font-medium truncate ${o.bc_changed ? 'text-red-600' : 'text-blue-700'}`}>{o.bc_name || o.bc_sku_id}</div>
+                              <div className="hidden group-hover:block absolute z-30 left-0 top-full mt-1 px-2 py-1 bg-gray-900 text-white text-[11px] leading-snug rounded shadow-lg whitespace-normal break-words w-[340px]">{o.bc_name || o.bc_sku_id}</div>
+                            </div>
                             <button onClick={() => copyText(`${o.bc_sku_id}_${o.copies}`)} title="點擊複製快速碼"
                               className="text-[10px] text-gray-400 font-mono hover:text-blue-600">{o.bc_sku_id}_{o.copies} 📋</button>
                             {o.bc_changed && (
