@@ -755,12 +755,12 @@ export default function ShopeeMappingsV2Page() {
                       <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
                       <td className="px-3 py-2 font-mono text-[10px] text-gray-500">{o.shopee_variation_id}</td>
                       <td className="px-3 py-2">
-                        <input defaultValue={o.custom_product_name ?? ''} placeholder="自設名稱"
+                        <input key={`n-${o.custom_product_name ?? ''}`} defaultValue={o.custom_product_name ?? ''} placeholder="自設名稱"
                           onBlur={e => { const v = e.target.value.trim(); if (v !== (o.custom_product_name ?? '')) saveName('product', o.shopee_variation_id, v) }}
                           className="w-28 px-2 py-1 border border-gray-200 rounded text-xs" />
                       </td>
                       <td className="px-3 py-2">
-                        <input defaultValue={o.custom_variation_name ?? ''} placeholder="自設規格名稱"
+                        <input key={`v-${o.custom_variation_name ?? ''}`} defaultValue={o.custom_variation_name ?? ''} placeholder="自設規格名稱"
                           onBlur={e => { const v = e.target.value.trim(); if (v !== (o.custom_variation_name ?? '')) saveName('variation', o.shopee_variation_id, v) }}
                           className="w-28 px-2 py-1 border border-gray-200 rounded text-xs" />
                       </td>
@@ -796,7 +796,7 @@ export default function ShopeeMappingsV2Page() {
                       <td className="px-3 py-2 text-right text-gray-600">{o.cost_cny != null ? `¥${o.cost_cny}` : '—'}</td>
                       <td className="px-3 py-2 text-right">{o.cost_twd ? `NT$ ${o.cost_twd}` : '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <input type="number" defaultValue={o.price_override ?? o.original_price ?? ''} placeholder={o.cost_twd ? String(o.cost_twd) : ''}
+                        <input type="number" key={`p-${o.price_override ?? ''}`} defaultValue={o.price_override ?? o.original_price ?? ''} placeholder={o.cost_twd ? String(o.cost_twd) : ''}
                           onBlur={e => {
                             const v = e.target.value.trim()
                             const displayed = o.price_override != null ? o.price_override : (o.original_price ?? null)
