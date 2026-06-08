@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { snapshotFor } from '@/lib/bc-snapshot'
+import { costCnyFromPrices } from '@/lib/shopee-pricing'
 
 // GET — 蝦皮訂單詳情
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -87,6 +88,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     // 自設名稱：只改這筆訂單的快照（本地，不回寫 V2/mapping）
     if (body.custom_product_name !== undefined) updates.custom_product_name = body.custom_product_name || null
     if (body.custom_variation_name !== undefined) updates.custom_variation_name = body.custom_variation_name || null
+
+    // 對應 BC 時立即帶入成本（依 copies 結算價換算；SIM +3 運費），不用等送出
+    if (body.bc_sku_id && body.cost_cny === undefined) {
+      const { data: bc } = await supabase.from('bc_products').select('prices').eq('sku_id', body.bc_sku_id).maybeSingle()
+      const baseCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, body.matched_copies ?? null) : 0
+      if (baseCny > 0) {
+        const { data: it } = await supabase.from('shopee_order_items').select('delivery_type').eq('id', body.item_id).single()
+        const costCny = (it?.delivery_type || 'sim') === 'sim' ? baseCny + 3 : baseCny
+        const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
+        const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
+        updates.cost_cny = costCny
+        updates.cost_twd = Math.ceil(costCny / cnyRate)
+      }
+    }
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
     // 訂單端對應回寫 V2 蝦皮表（讓 V2 逐步補齊；只在設定 BC 對應時寫，缺的選項自動建立）
