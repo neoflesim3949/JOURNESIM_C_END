@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { snapshotFor } from '@/lib/bc-snapshot'
 
 // GET — 蝦皮訂單詳情
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -93,6 +94,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.bc_sku_id && body.shopee_variation_id) {
       const { data: ord } = await supabase.from('shopee_orders').select('shopee_account_id').eq('id', id).single()
       if (ord?.shopee_account_id) {
+        const { data: bc } = await supabase.from('bc_products').select('name, prices').eq('sku_id', body.bc_sku_id).maybeSingle()
         await supabase.from('shopee_product_options_v2').upsert({
           account_id: ord.shopee_account_id,
           shopee_variation_id: String(body.shopee_variation_id),
@@ -101,6 +103,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           shopee_variation_name: body.shopee_variation_name || null,
           bc_sku_id: body.bc_sku_id,
           copies: body.matched_copies || null,
+          ...snapshotFor(bc || undefined, body.matched_copies),
           updated_at: new Date().toISOString(),
         }, { onConflict: 'account_id,shopee_variation_id' })
       }

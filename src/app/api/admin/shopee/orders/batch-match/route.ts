@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { snapshotFor } from '@/lib/bc-snapshot'
 
 // POST — 批次對應：將指定 SKU code 的所有未對應商品對應到 BC SKU
 export async function POST(request: Request) {
@@ -33,6 +34,8 @@ export async function POST(request: Request) {
     const { data: ords } = await supabase.from('shopee_orders').select('shopee_account_id').in('id', order_ids)
     const accts = [...new Set((ords || []).map(o => o.shopee_account_id).filter(Boolean))] as string[]
     if (accts.length) {
+      const { data: bc } = await supabase.from('bc_products').select('name, prices').eq('sku_id', bc_sku_id).maybeSingle()
+      const snap = snapshotFor(bc || undefined, copies || null)
       const rows = accts.map(acc => ({
         account_id: acc,
         shopee_variation_id: String(shopee_variation_id),
@@ -41,6 +44,7 @@ export async function POST(request: Request) {
         shopee_variation_name: shopee_variation_name || null,
         bc_sku_id,
         copies: copies || null,
+        ...snap,
         updated_at: new Date().toISOString(),
       }))
       await supabase.from('shopee_product_options_v2').upsert(rows, { onConflict: 'account_id,shopee_variation_id' })

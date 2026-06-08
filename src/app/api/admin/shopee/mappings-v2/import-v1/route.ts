@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchBcMap, snapshotFor } from '@/lib/bc-snapshot'
 
 // POST — 從舊版「商品對應」(shopee_product_mappings) 帶入已對應的 bc_sku_id+copies
 // body: { account_id, overwrite? }（overwrite=true 連已對應的也覆蓋；預設只補未對應）
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
   }
 
   // 逐選項配對：先用 商品ID_選項ID，再退回 選項ID
-  const updates: { account_id: string; shopee_variation_id: string; bc_sku_id: string; copies: string | null; updated_at: string }[] = []
+  const updates: { account_id: string; shopee_variation_id: string; bc_sku_id: string; copies: string | null; updated_at: string; bc_name_snapshot?: string | null; bc_cost_snapshot?: number | null }[] = []
   const now = new Date().toISOString()
   for (const o of options) {
     if (o.bc_sku_id && !overwrite) continue
@@ -49,6 +50,10 @@ export async function POST(request: Request) {
   }
 
   if (updates.length === 0) return NextResponse.json({ ok: true, count: 0 })
+
+  // 加上 BC 品名/成本快照
+  const bcMap = await fetchBcMap(supabase, updates.map(u => u.bc_sku_id))
+  for (const u of updates) Object.assign(u, snapshotFor(bcMap.get(u.bc_sku_id), u.copies))
 
   // upsert（onConflict 帳號+選項ID，只更新對應欄位）
   for (let i = 0; i < updates.length; i += 500) {

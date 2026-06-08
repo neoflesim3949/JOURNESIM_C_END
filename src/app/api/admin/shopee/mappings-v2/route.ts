@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { computeCostTwd, computePrice, costCnyFromPrices, DEFAULT_RULE, PricingRule } from '@/lib/shopee-pricing'
+import { isBcChanged, snapshotFor } from '@/lib/bc-snapshot'
 
 // GET ?account_id= — 列表，即時算成本/計算售價/最終售價/毛利
 export async function GET(request: Request) {
@@ -57,6 +58,8 @@ export async function GET(request: Request) {
       final_price: finalPrice || null,
       margin,
       margin_pct: margin != null && finalPrice ? Math.round((margin / finalPrice) * 1000) / 10 : null,
+      // BC 同步後品名/成本是否與對應當下不同
+      bc_changed: isBcChanged(o.bc_sku_id, o.bc_name_snapshot, o.bc_cost_snapshot, bc?.name, costCny),
     }
   })
 
@@ -89,6 +92,20 @@ export async function PATCH(request: Request) {
   }
 
   const supabase = createAdminClient()
+
+  // 設定/重新確認對應 → 更新 BC 品名/成本快照（取消對應 → 清空）
+  if ('bc_sku_id' in body) {
+    if (body.bc_sku_id) {
+      const { data: bc } = await supabase.from('bc_products').select('name, prices').eq('sku_id', body.bc_sku_id).maybeSingle()
+      const snap = snapshotFor(bc || undefined, body.copies)
+      updates.bc_name_snapshot = snap.bc_name_snapshot
+      updates.bc_cost_snapshot = snap.bc_cost_snapshot
+    } else {
+      updates.bc_name_snapshot = null
+      updates.bc_cost_snapshot = null
+    }
+  }
+
   const { error } = await supabase.from('shopee_product_options_v2').update(updates).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

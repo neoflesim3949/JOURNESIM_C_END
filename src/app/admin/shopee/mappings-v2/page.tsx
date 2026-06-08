@@ -28,6 +28,7 @@ interface OptionRow {
   margin: number | null
   margin_pct: number | null
   updated_at: string | null
+  bc_changed?: boolean
 }
 interface Rule { multiplier: number; add_amount: number; rounding: string; round_to: number }
 interface Account { id: string; name: string; excel_password: string | null }
@@ -170,6 +171,18 @@ export default function ShopeeMappingsV2Page() {
     await load()
   }
 
+  // 確認 BC 變更：把該商品所有已變更選項的快照更新成現況，清除紅色警示
+  async function resnapshotProduct() {
+    if (!current || !accountId) return
+    const ids = current.opts.filter(o => o.bc_changed).map(o => o.id)
+    if (!ids.length) return
+    await fetch('/api/admin/shopee/mappings-v2/resnapshot', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, ids }),
+    })
+    load()
+  }
+
   async function saveRule() {
     await fetch('/api/admin/shopee/mappings-v2/rules', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -181,10 +194,32 @@ export default function ShopeeMappingsV2Page() {
 
   // 下載「我們自己的表」（可在 Excel 編輯自設名稱/售價/快速碼，再上傳套回）
   function exportOurs() {
-    const list = selectedProducts.size > 0
+    const list = (selectedProducts.size > 0
       ? options.filter(o => selectedProducts.has(o.shopee_product_id || `__${o.id}`))
-      : options
+      : options).slice()
     if (list.length === 0) { alert('沒有資料'); return }
+    // 排序：商品 → 數據量(自訂拖曳順序) → 天數(小到大)
+    const pidOf = (o: OptionRow) => o.shopee_product_id || `__${o.id}`
+    const prodIndex = new Map(products.map((p, i) => [p.id, i]))
+    const dataIdxByProd = new Map<string, Map<string, number>>()
+    for (const s of specOrders) {
+      if (s.spec_type !== 'data') continue
+      if (!dataIdxByProd.has(s.product_id)) dataIdxByProd.set(s.product_id, new Map())
+      dataIdxByProd.get(s.product_id)!.set(s.spec_value, s.sort_index)
+    }
+    const dataRank = (o: OptionRow) => {
+      const pid = pidOf(o); const s1 = splitSpec(o.shopee_variation_name)[0]
+      const ov = orderOverride[pid]
+      if (ov) { const i = ov.indexOf(s1); return i === -1 ? 9999 : i }
+      return dataIdxByProd.get(pid)?.get(s1) ?? 9999
+    }
+    list.sort((a, b) => {
+      const pa = prodIndex.get(pidOf(a)) ?? 9999, pb = prodIndex.get(pidOf(b)) ?? 9999
+      if (pa !== pb) return pa - pb
+      const da = dataRank(a), db = dataRank(b)
+      if (da !== db) return da - db
+      return dayNum(splitSpec(a.shopee_variation_name)[1]) - dayNum(splitSpec(b.shopee_variation_name)[1])
+    })
     const rows = list.map(o => ({
       '蝦皮商品ID': o.shopee_product_id || '',
       '商品名稱': o.shopee_product_name || '',
@@ -493,22 +528,25 @@ export default function ShopeeMappingsV2Page() {
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
               {filteredProducts.map(p => {
                 const mapped = p.opts.filter(o => o.bc_sku_id).length
+                const lowMargin = p.opts.some(o => o.margin_pct != null && o.margin_pct < 40)
+                const bcChanged = p.opts.some(o => o.bc_changed)
+                const hasAlert = lowMargin || bcChanged
+                const alertMsg = [lowMargin && '有選項毛利率低於 40%', bcChanged && 'BC 商品已變更（品名/成本）'].filter(Boolean).join('；')
                 return (
                   <div key={p.id} onClick={() => openProduct(p.id)}
-                    className="relative cursor-pointer bg-white border border-gray-200 rounded-xl p-4 hover:border-blue-400 hover:shadow-sm transition">
+                    className={`relative cursor-pointer bg-white border rounded-xl p-4 hover:shadow-sm transition ${hasAlert ? 'border-red-300 hover:border-red-400 bg-red-50/30' : 'border-gray-200 hover:border-blue-400'}`}>
                     <input type="checkbox" checked={selectedProducts.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => toggleProduct(p.id)}
                       className="absolute top-3 right-3 accent-blue-600" />
-                    <div className="font-medium text-gray-800 line-clamp-2 min-h-[2.5rem] pr-6">{p.name}</div>
+                    <div className={`font-medium line-clamp-2 min-h-[2.5rem] pr-6 ${hasAlert ? 'text-red-600' : 'text-gray-800'}`} title={alertMsg || undefined}>{p.name}</div>
                     <div className="text-[11px] text-gray-400 font-mono mt-1">商品ID: {p.id.startsWith('__') ? '—' : p.id}</div>
                     <div className="flex items-center justify-between mt-3 text-sm">
                       <span className="text-gray-500">{p.opts.length} 個選項</span>
-                      <span className={mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}>已對應 {mapped}/{p.opts.length}</span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-sm font-medium text-blue-600">{rangeStr(p.opts)}</span>
                       <button onClick={e => { e.stopPropagation(); deleteProducts(new Set([p.id])) }} title="刪除商品" className="text-gray-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                     </div>
-                    <div className="text-[10px] text-gray-400 text-right mt-1">更新：{latestUpdate(p.opts)}</div>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className={`text-sm ${mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}`}>已對應 {mapped}/{p.opts.length}</span>
+                      <span className="text-[10px] text-gray-400">更新：{latestUpdate(p.opts)}</span>
+                    </div>
                   </div>
                 )
               })}
@@ -537,7 +575,7 @@ export default function ShopeeMappingsV2Page() {
                         <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
                           <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProduct(p.id)} className="accent-blue-600" />
                         </td>
-                        <td className="px-3 py-2"><div className="font-medium text-gray-800 max-w-[520px] truncate">{p.name}</div></td>
+                        <td className="px-3 py-2"><div className={`font-medium max-w-[520px] truncate ${p.opts.some(o => (o.margin_pct != null && o.margin_pct < 40) || o.bc_changed) ? 'text-red-600' : 'text-gray-800'}`}>{p.name}</div></td>
                         <td className="px-3 py-2 font-mono text-[11px] text-gray-400">{p.id.startsWith('__') ? '—' : p.id}</td>
                         <td className="px-3 py-2 text-right text-gray-500">{p.opts.length}</td>
                         <td className={`px-3 py-2 text-right ${mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}`}>{mapped}/{p.opts.length}</td>
@@ -563,14 +601,9 @@ export default function ShopeeMappingsV2Page() {
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
             <div className="font-bold text-gray-800">{current.name}</div>
             <div className="text-[11px] text-gray-400 font-mono mt-0.5">商品ID: {current.id.startsWith('__') ? '—' : current.id} · {current.opts.length} 個選項</div>
-            {!current.id.startsWith('__') && (
-              <div className="mt-2 flex items-center gap-2">
-                <label className="text-xs text-gray-500 whitespace-nowrap">商品自設名稱</label>
-                <input key={current.id} defaultValue={current.opts.find(o => o.custom_product_name)?.custom_product_name || ''}
-                  onBlur={e => { const v = e.target.value.trim(); const cur = current.opts.find(o => o.custom_product_name)?.custom_product_name || ''; if (v !== cur) saveName('product', current.id, v) }}
-                  placeholder="例：中國（整個商品共用，標籤/收據同步）"
-                  className="px-2 py-1 border border-gray-300 rounded text-sm w-72" />
-              </div>
+            {current.opts.some(o => o.bc_changed) && (
+              <button onClick={resnapshotProduct}
+                className="mt-2 px-3 py-1.5 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700">確認 BC 變更（清除紅色警示）</button>
             )}
           </div>
 
@@ -631,13 +664,17 @@ export default function ShopeeMappingsV2Page() {
                 {orderedGroups.map((g, gi) => g.rows.map((o, ri) => {
                   const s2 = splitSpec(o.shopee_variation_name)[1]
                   return (
-                    <tr key={o.id} className={`hover:bg-gray-50/40 ${ri === 0 && gi > 0 ? 'border-t-2 border-gray-200' : 'border-t border-gray-100'}`}>
+                    <tr key={o.id} className={`hover:bg-gray-50/40 ${o.bc_changed ? 'bg-red-50' : ''} ${ri === 0 && gi > 0 ? 'border-t-2 border-gray-200' : 'border-t border-gray-100'}`}>
                       {ri === 0 && (
-                        <td rowSpan={g.rows.length} className="px-3 py-2 align-top font-medium text-gray-700 border-r border-gray-200 bg-gray-50/40">{g.spec1}</td>
+                        <td rowSpan={g.rows.length} className="px-3 py-2 align-middle text-center font-medium text-gray-700 border-r border-gray-200 bg-gray-50/40">{g.spec1}</td>
                       )}
                       <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
                       <td className="px-3 py-2 font-mono text-[10px] text-gray-500">{o.shopee_variation_id}</td>
-                      <td className="px-3 py-2 text-gray-600">{o.custom_product_name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2">
+                        <input defaultValue={o.custom_product_name ?? ''} placeholder="自設名稱"
+                          onBlur={e => { const v = e.target.value.trim(); if (v !== (o.custom_product_name ?? '')) saveName('product', o.shopee_variation_id, v) }}
+                          className="w-28 px-2 py-1 border border-gray-200 rounded text-xs" />
+                      </td>
                       <td className="px-3 py-2">
                         <input defaultValue={o.custom_variation_name ?? ''} placeholder="自設規格名稱"
                           onBlur={e => { const v = e.target.value.trim(); if (v !== (o.custom_variation_name ?? '')) saveName('variation', o.shopee_variation_id, v) }}
@@ -646,9 +683,14 @@ export default function ShopeeMappingsV2Page() {
                       <td className="px-3 py-2">
                         {o.bc_sku_id ? (
                           <div>
-                            <div className="text-blue-700 font-medium max-w-[260px] truncate">{o.bc_name || o.bc_sku_id}</div>
+                            <div className={`font-medium max-w-[260px] truncate ${o.bc_changed ? 'text-red-600' : 'text-blue-700'}`} title={o.bc_name || o.bc_sku_id || ''}>{o.bc_name || o.bc_sku_id}</div>
                             <button onClick={() => copyText(`${o.bc_sku_id}_${o.copies}`)} title="點擊複製快速碼"
                               className="text-[10px] text-gray-400 font-mono hover:text-blue-600">{o.bc_sku_id}_{o.copies} 📋</button>
+                            {o.bc_changed && (
+                              <div className="text-[10px] text-red-600 mt-0.5">⚠ BC 已變更
+                                <button onClick={() => patch(o.id, { bc_sku_id: o.bc_sku_id, copies: o.copies })} className="ml-1 underline hover:text-red-700">確認</button>
+                              </div>
+                            )}
                           </div>
                         ) : <span className="text-gray-300 text-[11px]">未對應</span>}
                         <div className="mt-1 flex items-center gap-1">
@@ -677,7 +719,7 @@ export default function ShopeeMappingsV2Page() {
                           className="w-20 px-2 py-1 border border-gray-300 rounded text-right" />
                       </td>
                       <td className="px-3 py-2 text-right">{o.margin != null ? <span className={o.margin >= 0 ? 'text-green-600' : 'text-red-500'}>NT$ {o.margin}</span> : '—'}</td>
-                      <td className="px-3 py-2 text-right">{o.margin_pct != null ? <span className={o.margin_pct >= 0 ? 'text-green-600' : 'text-red-500'}>{o.margin_pct}%</span> : '—'}</td>
+                      <td className="px-3 py-2 text-right">{o.margin_pct != null ? <span className={o.margin_pct >= 40 ? 'text-green-600' : 'text-red-500'}>{o.margin_pct}%</span> : '—'}</td>
                       <td className="px-3 py-2 text-right text-gray-400">{o.original_price != null ? `NT$ ${o.original_price}` : '—'}</td>
                       <td className="px-2 py-2 text-center whitespace-nowrap">
                         <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} className="accent-blue-600 align-middle" />
