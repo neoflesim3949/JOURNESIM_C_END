@@ -102,6 +102,13 @@ export default function MobileShopeeOrderDetail() {
     if (!confirm('刪除此品項？')) return
     await fetch(`/api/admin/shopee/orders/${id}/items/${item.id}`, { method: 'DELETE' }); load()
   }
+  async function savePrice(item: MItem, v: string) {
+    const n = v.trim() === '' ? 0 : Number(v)
+    await fetch(`/api/admin/shopee/orders/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: item.id, original_price: n, sale_price: n }),
+    }); load()
+  }
   async function addItem() {
     if (!aName.trim()) { alert('請輸入品名'); return }
     setAdding(true)
@@ -161,9 +168,17 @@ export default function MobileShopeeOrderDetail() {
                 </div>
                 <span className={`px-2 py-0.5 text-[11px] rounded-full shrink-0 ${st.color}`}>{st.label}</span>
               </div>
-              <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
                 <span>數量 {item.quantity}</span>
-                <span>NT$ {item.sale_price ?? item.original_price ?? 0}</span>
+                {item.is_manual ? (
+                  <span className="flex items-center gap-0.5">售價 NT$
+                    <input type="number" key={`pr-${item.id}-${item.sale_price ?? item.original_price ?? ''}`} defaultValue={item.sale_price ?? item.original_price ?? 0}
+                      onBlur={e => { const cur = item.sale_price ?? item.original_price ?? 0; if (Number(e.target.value) !== cur) savePrice(item, e.target.value) }}
+                      className="w-16 px-1.5 py-0.5 border border-gray-300 rounded text-xs" />
+                  </span>
+                ) : (
+                  <span>NT$ {item.sale_price ?? item.original_price ?? 0}</span>
+                )}
                 <span className={`px-1.5 py-0.5 rounded ${isSim ? 'bg-orange-50 text-orange-600' : 'bg-indigo-50 text-indigo-600'}`}>{isSim ? 'SIM' : 'eSIM'}</span>
                 {!item.bc_order_id && (
                   <button onClick={() => deleteItem(item)} className="ml-auto text-gray-300 active:text-red-500"><Trash2 className="w-4 h-4" /></button>

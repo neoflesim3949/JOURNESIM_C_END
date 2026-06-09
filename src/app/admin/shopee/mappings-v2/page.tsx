@@ -66,7 +66,7 @@ export default function ShopeeMappingsV2Page() {
   const [bpAdd, setBpAdd] = useState('3')
   const [bpMult, setBpMult] = useState('1.5')
   const [bpFixed, setBpFixed] = useState('')
-  const [bpRound, setBpRound] = useState<'ceil' | 'round' | 'floor' | 'none' | 'ceil95' | 'floor95'>('ceil')
+  const [bpRound, setBpRound] = useState<'ceil' | 'round' | 'floor' | 'none' | 'ceil95' | 'floor95' | 'round9'>('ceil')
   const [bpRoundTo, setBpRoundTo] = useState('1')
   const [productView, setProductView] = useState<'card' | 'list'>('card')
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
@@ -449,12 +449,18 @@ export default function ShopeeMappingsV2Page() {
       if (u <= 4) return Math.max(base - 1, 0)
       return base + 5
     }
+    // 四捨五入至9：個位 0~3 往下到前一個9(base-1)；4~9 往上到 base+9（4 為臨界往上進）
+    const round9 = (v: number) => {
+      const n = Math.round(v); const u = n % 10; const base = n - u
+      return u < 4 ? Math.max(base - 1, 0) : base + 9
+    }
     const round = (v: number) => {
       if (bpRound === 'round') return Math.round(v / step) * step
       if (bpRound === 'floor') return Math.floor(v / step) * step
       if (bpRound === 'none') return Math.round(v)
       if (bpRound === 'ceil95') return ceil95(v)
       if (bpRound === 'floor95') return floor95(v)
+      if (bpRound === 'round9') return round9(v)
       return Math.ceil(v / step) * step
     }
     const rows: { variation_id: string; set: { price_override: number } }[] = []
@@ -862,9 +868,10 @@ export default function ShopeeMappingsV2Page() {
                     <option value="none">不進位</option>
                     <option value="ceil95">無條件進至95</option>
                     <option value="floor95">無條件捨至95</option>
+                    <option value="round9">四捨五入至9</option>
                   </select>
                 </label>
-                {bpRound !== 'ceil95' && bpRound !== 'floor95' && (
+                {bpRound !== 'ceil95' && bpRound !== 'floor95' && bpRound !== 'round9' && (
                   <label className="block text-xs text-gray-500">進位單位
                     <input type="number" value={bpRoundTo} onChange={e => setBpRoundTo(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
                   </label>
