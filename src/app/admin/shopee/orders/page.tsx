@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
-import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3, Plus } from 'lucide-react'
+import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3, Plus, Send } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
@@ -89,6 +89,13 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
 }
 
+// 已回填：未完成、且所有商品號碼都已填（可批次送 BC）
+function orderIsBackfilled(o: ShopeeOrder): boolean {
+  if (o.internal_status === 'completed') return false
+  const its = o.shopee_order_items || []
+  return its.length > 0 && its.every(i => ['iccid_filled', 'bc_ordered', 'completed'].includes(i.status))
+}
+
 export default function ShopeeOrdersPage() {
   const [orders, setOrders] = useState<ShopeeOrder[]>([])
   const [total, setTotal] = useState(0)
@@ -137,6 +144,7 @@ export default function ShopeeOrdersPage() {
   const [batchEditModal, setBatchEditModal] = useState(false)
   const [batchEditData, setBatchEditData] = useState<{ order: any; items: any[] }[]>([])
   const [batchEditLoading, setBatchEditLoading] = useState(false)
+  const [batchSubmitting, setBatchSubmitting] = useState(false)
 
   // 從 localStorage 載入設定 + 載入帳號
   useEffect(() => {
@@ -285,6 +293,41 @@ export default function ShopeeOrdersPage() {
     if (selectedIds.size === displayOrders.length) setSelectedIds(new Set())
     else setSelectedIds(new Set(displayOrders.map(o => o.id)))
   }
+  // 批次送出 BC 訂單（對勾選的每筆送單；沒可下單品項的自動略過）
+  async function batchSubmitBc() {
+    if (selectedIds.size === 0) { alert('請先勾選訂單'); return }
+    // 只允許全部都是「已回填」才送；夾到已完成/待處理就整批擋下
+    const sel = displayOrders.filter(o => selectedIds.has(o.id))
+    if (sel.some(o => !orderIsBackfilled(o))) { alert('你有無法下單的訂單，請重新勾選批次'); return }
+    if (!confirm(`對勾選的 ${selectedIds.size} 筆訂單批次送出 BC 訂單？`)) return
+    setBatchSubmitting(true)
+    let ok = 0, skipped = 0, failed = 0
+    const errMsgs: string[] = []
+    try {
+      for (const oid of selectedIds) {
+        try {
+          const res = await fetch(`/api/admin/shopee/orders/${oid}/bc-order`, { method: 'POST' })
+          const d = await res.json()
+          if (!res.ok) {
+            if ((d.error || '').includes('無可下單')) skipped++
+            else { failed++; if (d.error) errMsgs.push(d.error) }
+            continue
+          }
+          const results = d.results || []
+          const errs = results.filter((r: { error?: string }) => r.error)
+          if (results.length === 0) skipped++
+          else if (errs.length) { failed++; errMsgs.push(...errs.map((e: { error: string }) => e.error)) }
+          else ok++
+        } catch { failed++ }
+      }
+      let msg = `批次送出完成：成功 ${ok}、略過 ${skipped}、失敗 ${failed}`
+      if (errMsgs.length) msg += '\n\n' + [...new Set(errMsgs)].slice(0, 8).join('\n')
+      alert(msg)
+      setSelectedIds(new Set())
+      load()
+    } finally { setBatchSubmitting(false) }
+  }
+
   async function openBatchPrint(type: 'detail' | 'product') {
     if (selectedIds.size === 0) { alert('請先勾選訂單'); return }
     setBatchLoading(true); setBatchPrintModal(type)
@@ -406,6 +449,9 @@ export default function ShopeeOrdersPage() {
           {selectedIds.size > 0 && (
             <>
               <span className="text-xs text-gray-500">已選 {selectedIds.size} 筆</span>
+              <button onClick={batchSubmitBc} disabled={batchSubmitting} className="flex items-center gap-1 px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+                <Send className="w-4 h-4" /> {batchSubmitting ? '送出中…' : '批次送出 BC'}
+              </button>
               <button onClick={() => openBatchPrint('detail')} className="flex items-center gap-1 px-3 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700">
                 <Printer className="w-4 h-4" /> 批次商品明細
               </button>
@@ -527,14 +573,11 @@ export default function ShopeeOrdersPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayOrders.map((o) => {
-                const s = (() => {
-                  if (o.internal_status === 'completed') return STATUS_LABELS.completed
-                  // 所有商品的號碼都已回填（ICCID/eSIM）→ 顯示「已回填」
-                  const its = o.shopee_order_items || []
-                  const allFilled = its.length > 0 && its.every(i => ['iccid_filled', 'bc_ordered', 'completed'].includes(i.status))
-                  if (allFilled) return { label: '已回填', color: 'bg-indigo-100 text-indigo-700' }
-                  return STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' }
-                })()
+                const s = o.internal_status === 'completed'
+                  ? STATUS_LABELS.completed
+                  : orderIsBackfilled(o)
+                    ? { label: '已回填', color: 'bg-indigo-100 text-indigo-700' }
+                    : (STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' })
                 const fs = getFinanceStatus(o)
                 const pendingItems = o.shopee_order_items?.filter(i => i.status === 'pending').length || 0
                 const fmtDate = (d: string | null) => {
