@@ -14,6 +14,7 @@ interface OptionRow {
   shopee_variation_name: string | null
   main_sku_code: string | null
   variation_sku_code: string | null
+  variation_sku_auto: string | null
   original_price: number | null
   bc_sku_id: string | null
   copies: string | null
@@ -177,6 +178,14 @@ export default function ShopeeMappingsV2Page() {
     })
     await load()
   }
+  // 主商品貨號（手填，套用該商品所有選項）
+  async function saveMainSku(productId: string, val: string) {
+    await fetch('/api/admin/shopee/mappings-v2/names', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, type: 'main_sku', key: productId, display_name: val }),
+    })
+    await load()
+  }
 
   // 警示指紋：各選項的毛利率 + BC變更；裡面調整(毛利/BC變)就會變，紅色自動再現
   function alertFingerprint(opts: OptionRow[]): string {
@@ -213,12 +222,11 @@ export default function ShopeeMappingsV2Page() {
   }
 
   // 下載「我們自己的表」（可在 Excel 編輯自設名稱/售價/快速碼，再上傳套回）
-  function exportOurs() {
+  // 取目前選取（或全部）商品的選項，依 商品→數據量(拖曳)→天數 排序
+  function buildSortedList(): OptionRow[] {
     const list = (selectedProducts.size > 0
       ? options.filter(o => selectedProducts.has(o.shopee_product_id || `__${o.id}`))
       : options).slice()
-    if (list.length === 0) { alert('沒有資料'); return }
-    // 排序：商品 → 數據量(自訂拖曳順序) → 天數(小到大)
     const pidOf = (o: OptionRow) => o.shopee_product_id || `__${o.id}`
     const prodIndex = new Map(products.map((p, i) => [p.id, i]))
     const dataIdxByProd = new Map<string, Map<string, number>>()
@@ -240,6 +248,12 @@ export default function ShopeeMappingsV2Page() {
       if (da !== db) return da - db
       return dayNum(splitSpec(a.shopee_variation_name)[1]) - dayNum(splitSpec(b.shopee_variation_name)[1])
     })
+    return list
+  }
+
+  function exportOurs() {
+    const list = buildSortedList()
+    if (list.length === 0) { alert('沒有資料'); return }
     const rows = list.map(o => ({
       '蝦皮商品ID': o.shopee_product_id || '',
       '商品名稱': o.shopee_product_name || '',
@@ -257,6 +271,28 @@ export default function ShopeeMappingsV2Page() {
     XLSX.writeFile(wb, `商品對應V2_我們的表_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
+  // 下載「BC 對應表」：可改「對應BC SKU / copies」後用「上傳我們的表」回填（填「-」＝取消對應）
+  function downloadBcTable() {
+    const list = buildSortedList()
+    if (list.length === 0) { alert('沒有資料'); return }
+    const rows = list.map(o => ({
+      '蝦皮商品選項ID': o.shopee_variation_id,
+      '商品名稱': o.shopee_product_name || '',
+      '規格名稱': o.shopee_variation_name || '',
+      '主商品貨號': o.main_sku_code || '',
+      '對應BC SKU': o.bc_sku_id || '',
+      'copies': o.copies || '',
+      'BC品名(參考)': o.bc_name || '',
+      '商品選項貨號(自動,參考)': o.variation_sku_auto || '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows, {
+      header: ['蝦皮商品選項ID', '商品名稱', '規格名稱', '主商品貨號', '對應BC SKU', 'copies', 'BC品名(參考)', '商品選項貨號(自動,參考)'],
+    })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'BC對應')
+    XLSX.writeFile(wb, `商品對應V2_BC對應表_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
   // 上傳「我們自己的表」：依選項ID 套用 商品自設名稱/規格自設名稱/售價(覆蓋)/快速碼
   async function uploadOurs(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -271,6 +307,8 @@ export default function ShopeeMappingsV2Page() {
       const hasVar = header.includes('規格自設名稱')
       const hasPrice = header.includes('售價(覆蓋)')
       const hasQuick = header.includes('對應BC快速碼')
+      const hasBcSku = header.includes('對應BC SKU')   // BC 對應表的欄位
+      const hasCopies = header.includes('copies')
       const rows = json.map(r => {
         const variation_id = String(r['蝦皮商品選項ID'] || '').trim()
         if (!variation_id) return null
@@ -279,6 +317,12 @@ export default function ShopeeMappingsV2Page() {
         if (hasVar) set.custom_variation_name = String(r['規格自設名稱'] || '').trim() || null
         if (hasPrice) { const v = String(r['售價(覆蓋)'] || '').trim(); set.price_override = v === '' ? null : Number(v) }
         if (hasQuick) { const m = String(r['對應BC快速碼'] || '').trim().match(/^(.+)_([0-9]+)$/); if (m) { set.bc_sku_id = m[1]; set.copies = m[2] } }
+        // BC 對應表：對應BC SKU + copies（填「-」＝取消對應，空白＝不動）
+        if (hasBcSku) {
+          const sku = String(r['對應BC SKU'] ?? '').trim()
+          if (sku === '-') { set.bc_sku_id = null; set.copies = null }
+          else if (sku) { set.bc_sku_id = sku; if (hasCopies) { const c = String(r['copies'] ?? '').trim(); set.copies = c || null } }
+        }
         return Object.keys(set).length ? { variation_id, set } : null
       }).filter(Boolean)
       if (!rows.length) { alert('沒有可套用的列（需有「蝦皮商品選項ID」欄）'); return }
@@ -561,6 +605,8 @@ export default function ShopeeMappingsV2Page() {
               </button>
               <button onClick={exportOurs} disabled={!accountId}
                 className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">下載我們的表</button>
+              <button onClick={downloadBcTable} disabled={!accountId}
+                className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">下載BC對應表</button>
               <label className={`px-3 py-1.5 border border-gray-300 text-sm rounded-lg ${accountId ? 'hover:bg-gray-50 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>上傳我們的表
                 <input ref={oursRef} type="file" accept=".xlsx,.xls,.csv" onChange={uploadOurs} disabled={!accountId} className="hidden" />
               </label>
@@ -689,6 +735,16 @@ export default function ShopeeMappingsV2Page() {
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
             <div className="font-bold text-gray-800">{current.name}</div>
             <div className="text-[11px] text-gray-400 font-mono mt-0.5">商品ID: {current.id.startsWith('__') ? '—' : current.id} · {current.opts.length} 個選項</div>
+            {!current.id.startsWith('__') && (
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs text-gray-500 whitespace-nowrap">主商品貨號</label>
+                <input key={`msku-${current.id}-${current.opts.find(o => o.main_sku_code)?.main_sku_code || ''}`}
+                  defaultValue={current.opts.find(o => o.main_sku_code)?.main_sku_code || ''}
+                  onBlur={e => { const v = e.target.value.trim(); const cur = current.opts.find(o => o.main_sku_code)?.main_sku_code || ''; if (v !== cur) saveMainSku(current.id, v) }}
+                  placeholder="自行填寫（例：CN）。選項貨號＝主貨號_BC_copies"
+                  className="px-2 py-1 border border-gray-300 rounded text-sm w-72 font-mono" />
+              </div>
+            )}
             {current.opts.some(o => o.bc_changed) && (
               <button onClick={resnapshotProduct}
                 className="mt-2 px-3 py-1.5 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700">確認 BC 變更（清除紅色警示）</button>
@@ -736,6 +792,7 @@ export default function ShopeeMappingsV2Page() {
                   <th className="text-left px-3 py-2.5 font-medium border-r border-gray-200 min-w-[140px]">數據量</th>
                   <th className="text-left px-3 py-2.5 font-medium w-16">天數</th>
                   <th className="text-left px-3 py-2.5 font-medium w-32">蝦皮商品選項ID</th>
+                  <th className="text-left px-3 py-2.5 font-medium min-w-[150px]">商品選項貨號</th>
                   <th className="text-left px-3 py-2.5 font-medium min-w-[120px]">商品自設名稱</th>
                   <th className="text-left px-3 py-2.5 font-medium min-w-[120px]">規格自設名稱</th>
                   <th className="text-left px-3 py-2.5 font-medium min-w-[220px]">對應億點 BC</th>
@@ -760,6 +817,11 @@ export default function ShopeeMappingsV2Page() {
                       )}
                       <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
                       <td className="px-3 py-2 font-mono text-[10px] text-gray-500">{o.shopee_variation_id}</td>
+                      <td className="px-3 py-2">
+                        {o.variation_sku_auto
+                          ? <button onClick={() => copyText(o.variation_sku_auto!)} title="點擊複製" className="font-mono text-[11px] text-gray-700 hover:text-blue-600 break-all text-left">{o.variation_sku_auto} 📋</button>
+                          : <span className="text-gray-300 text-[10px]">需填主貨號＋對應BC</span>}
+                      </td>
                       <td className="px-3 py-2">
                         <input key={`n-${o.custom_product_name ?? ''}`} defaultValue={o.custom_product_name ?? ''} placeholder="自設名稱"
                           onBlur={e => { const v = e.target.value.trim(); if (v !== (o.custom_product_name ?? '')) saveName('product', o.shopee_variation_id, v) }}

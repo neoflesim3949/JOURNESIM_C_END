@@ -750,7 +750,18 @@ export default function ShopeeOrderDetailPage() {
                       </>
                     )}
                     <div className="mt-2 grid grid-cols-3 md:grid-cols-6 gap-x-4 gap-y-1 text-xs text-gray-500">
-                      <div>數量：<span className="font-medium text-gray-700">{item.quantity}</span>{item.return_quantity > 0 && <span className="text-red-500">（退{item.return_quantity}）</span>}</div>
+                      <div className="flex items-center gap-1">數量：{!item.bc_order_id ? (
+                        <input type="number" min="1" step="1" key={`q-${item.id}-${item.quantity}`} defaultValue={item.quantity}
+                          onBlur={async e => {
+                            const v = Math.max(1, Math.floor(Number(e.target.value) || 1))
+                            if (v === item.quantity) return
+                            await fetch(`/api/admin/shopee/orders/${id}`, {
+                              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ item_id: item.id, quantity: v }),
+                            }); load()
+                          }}
+                          className="w-14 px-1.5 py-0.5 border border-gray-200 rounded text-xs font-medium text-gray-700" />
+                      ) : <span className="font-medium text-gray-700">{item.quantity}</span>}{item.return_quantity > 0 && <span className="text-red-500">（退{item.return_quantity}）</span>}</div>
                       <div className="flex items-center gap-1">原價：NT${item.is_manual ? (
                         <input type="number" step="1" defaultValue={item.original_price ?? ''} placeholder="-"
                           onBlur={async e => {

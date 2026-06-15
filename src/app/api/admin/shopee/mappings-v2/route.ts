@@ -41,8 +41,13 @@ export async function GET(request: Request) {
     const finalPrice = o.price_override != null ? Number(o.price_override)
       : (o.original_price != null ? Number(o.original_price) : null)
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
+    // 商品選項貨號自動生成：主商品貨號_BC SKU_copies（需有主貨號＋已對應）
+    const variationSkuAuto = (o.main_sku_code && o.bc_sku_id)
+      ? `${o.main_sku_code}_${o.bc_sku_id}_${o.copies ?? ''}`
+      : (o.variation_sku_code || null)
     return {
       ...o,
+      variation_sku_auto: variationSkuAuto,
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
       cost_twd: costTwd || null,

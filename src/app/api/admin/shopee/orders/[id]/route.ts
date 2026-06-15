@@ -85,6 +85,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.qr_code_url !== undefined) updates.qr_code_url = body.qr_code_url
     if (body.original_price !== undefined) updates.original_price = body.original_price
     if (body.sale_price !== undefined) updates.sale_price = body.sale_price
+    // 數量：尚未送出 BC 才可改（成本存單張，總成本會再 ×數量）
+    if (body.quantity !== undefined) {
+      const { data: it } = await supabase.from('shopee_order_items').select('bc_order_id').eq('id', body.item_id).single()
+      if (it?.bc_order_id) return NextResponse.json({ error: '已送出 BC 訂單，無法修改數量' }, { status: 400 })
+      updates.quantity = Math.max(1, Math.floor(Number(body.quantity) || 1))
+    }
     // 手動品項可改品名 / 選項名
     if (body.shopee_product_name !== undefined) updates.shopee_product_name = body.shopee_product_name || null
     if (body.shopee_variation_name !== undefined) updates.shopee_variation_name = body.shopee_variation_name || null

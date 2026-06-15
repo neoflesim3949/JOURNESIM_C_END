@@ -22,6 +22,8 @@ export async function POST(request: Request) {
   const ci = batch.col_index as Record<string, number>
   const priceCol = ci['價格']
   const varCol = ci['商品選項ID']
+  const mainSkuCol = ci['主商品貨號']     // 可能不存在（舊匯入）
+  const varSkuCol = ci['商品選項貨號']
   if (priceCol === undefined || varCol === undefined) {
     return NextResponse.json({ error: '批次缺少價格或商品選項ID 欄位索引' }, { status: 500 })
   }
@@ -31,7 +33,7 @@ export async function POST(request: Request) {
   const options: any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase.from('shopee_product_options_v2')
-      .select('shopee_variation_id, shopee_product_id, bc_sku_id, copies, price_override, original_price').eq('account_id', accountId)
+      .select('shopee_variation_id, shopee_product_id, main_sku_code, bc_sku_id, copies, price_override, original_price').eq('account_id', accountId)
       .range(from, from + 999)
     if (!data || data.length === 0) break
     options.push(...data)
@@ -44,11 +46,19 @@ export async function POST(request: Request) {
     : null
 
   const priceByVar = new Map<string, number>()
+  const mainSkuByVar = new Map<string, string>()
+  const varSkuByVar = new Map<string, string>()
   for (const o of options || []) {
+    const vid = String(o.shopee_variation_id)
     // 售價：覆蓋值 > 原蝦皮價
     const finalPrice = o.price_override != null ? Number(o.price_override)
       : (o.original_price != null ? Number(o.original_price) : null)
-    if (finalPrice && finalPrice > 0) priceByVar.set(String(o.shopee_variation_id), finalPrice)
+    if (finalPrice && finalPrice > 0) priceByVar.set(vid, finalPrice)
+    // 貨號：主商品貨號（手填）＋ 商品選項貨號（主貨號_BC_copies，需有主貨號＋已對應）
+    if (o.main_sku_code) {
+      mainSkuByVar.set(vid, String(o.main_sku_code))
+      if (o.bc_sku_id) varSkuByVar.set(vid, `${o.main_sku_code}_${o.bc_sku_id}_${o.copies ?? ''}`)
+    }
   }
 
   // 就地覆蓋價格欄（其餘 cell 一律不動），未設定售價的列保留原價
@@ -63,7 +73,11 @@ export async function POST(request: Request) {
     if (!Array.isArray(row)) { if (!keepVar) body.push(row as unknown[]); continue }
     const vid = row[varCol] === undefined || row[varCol] === null ? '' : String(row[varCol]).trim()
     if (keepVar && (!vid || !keepVar.has(vid))) continue
-    if (vid) { const p = priceByVar.get(vid); if (p != null) { row[priceCol] = p; changed++ } }
+    if (vid) {
+      const p = priceByVar.get(vid); if (p != null) { row[priceCol] = p; changed++ }
+      if (mainSkuCol !== undefined) { const ms = mainSkuByVar.get(vid); if (ms) row[mainSkuCol] = ms }
+      if (varSkuCol !== undefined) { const vs = varSkuByVar.get(vid); if (vs) row[varSkuCol] = vs }
+    }
     body.push(row)
   }
   const aoa = [...head, ...body]

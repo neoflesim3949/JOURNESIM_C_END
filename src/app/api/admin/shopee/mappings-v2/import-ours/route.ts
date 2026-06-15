@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
       for (const k of ALLOWED) if (k in r.set) updates[k] = r.set[k]
       if (r.set.bc_sku_id) Object.assign(updates, snapshotFor(bcMap.get(r.set.bc_sku_id as string), (r.set.copies as string) ?? null))
+      else if ('bc_sku_id' in r.set) { updates.bc_name_snapshot = null; updates.bc_cost_snapshot = null } // 取消對應 → 清快照
       const { error } = await supabase.from('shopee_product_options_v2')
         .update(updates).eq('account_id', account_id).eq('shopee_variation_id', String(r.variation_id))
       return error ? 0 : 1

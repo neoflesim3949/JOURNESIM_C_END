@@ -29,9 +29,15 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // 訂單端對應/命名回寫 V2 蝦皮表（依各訂單所屬帳號；讓 V2 逐步補齊）
+  // 訂單端對應/命名回寫 V2 蝦皮表（讓 V2 逐步補齊）
+  // 帳號只取「實際含此 sku_code 的訂單」所屬帳號，避免跨帳號批次把對應寫到別人的庫
   if (shopee_variation_id && (bc_sku_id || hasNames)) {
-    const { data: ords } = await supabase.from('shopee_orders').select('shopee_account_id').in('id', order_ids)
+    const { data: itemRows } = await supabase.from('shopee_order_items')
+      .select('shopee_order_id').eq('shopee_sku_code', shopee_sku_code).in('shopee_order_id', order_ids)
+    const relevantOrderIds = [...new Set((itemRows || []).map(r => r.shopee_order_id))]
+    const { data: ords } = relevantOrderIds.length
+      ? await supabase.from('shopee_orders').select('shopee_account_id').in('id', relevantOrderIds)
+      : { data: [] }
     const accts = [...new Set((ords || []).map(o => o.shopee_account_id).filter(Boolean))] as string[]
     if (accts.length) {
       // 只有設定 BC 時才更新 bc 欄位與快照（避免清掉 V2 既有對應）
