@@ -16,17 +16,17 @@ function applyTypeFilter(query: any, type: string) {
   return query.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
 }
 
-// 掃出含指定 MCC 的 sku_id 清單（country_data 為 JSONB 陣列，需 JS 過濾）
+// 掃出 country_data 含「任一」指定 MCC 的 sku_id 清單（JSONB 陣列，需 JS 過濾）
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function skusWithCountry(supabase: any, mcc: string): Promise<string[]> {
-  const target = mcc.toUpperCase()
+async function skusWithCountries(supabase: any, mccs: string[]): Promise<string[]> {
+  const targets = new Set(mccs.map(m => m.toUpperCase()))
   const skus: string[] = []
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase.from('bc_products').select('sku_id, country_data').range(from, from + 999)
     if (!data || data.length === 0) break
     for (const p of data) {
       const cs = p.country_data as { mcc: string }[] | null
-      if (cs?.some((c) => (c.mcc || '').toUpperCase() === target)) skus.push(p.sku_id)
+      if (cs?.some((c) => targets.has((c.mcc || '').toUpperCase()))) skus.push(p.sku_id)
     }
     if (data.length < 1000) break
   }
@@ -49,7 +49,9 @@ export async function GET(request: Request) {
   const productType = searchParams.get('productType') || ''
   const salesMethod = searchParams.get('salesMethod') || ''
   const rechargeable = searchParams.get('rechargeable') || ''
-  const country = searchParams.get('country') || ''
+  // 國家篩選：countries=逗號分隔 MCC（多選，OR）；相容舊的單一 country
+  const countriesParam = (searchParams.get('countries') || searchParams.get('country') || '')
+    .split(',').map(s => s.trim()).filter(Boolean)
   const countriesOnly = searchParams.get('countriesOnly') === '1'
 
   const supabase = createAdminClient()
@@ -72,9 +74,9 @@ export async function GET(request: Request) {
 
   let query = applyTypeFilter(supabase.from('bc_products').select('*', { count: 'exact' }), type)
 
-  // 篩選：國家（country_data 含該 MCC）
-  if (country) {
-    const skus = await skusWithCountry(supabase, country)
+  // 篩選：國家（country_data 含任一選取的 MCC）
+  if (countriesParam.length > 0) {
+    const skus = await skusWithCountries(supabase, countriesParam)
     query = query.in('sku_id', skus.length ? skus : ['__none__'])
   }
 

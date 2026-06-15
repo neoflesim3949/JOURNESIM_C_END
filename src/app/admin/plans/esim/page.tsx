@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Search, RefreshCw, Info, FileSpreadsheet } f
 import { formatCapacity, formatSpeed } from '@/lib/format'
 import { getProductTypeLabel, getPlanTypeLabel, getSalesMethodLabel, PLAN_TYPE, SALES_METHOD, ESIM_TYPE_OPTIONS } from '@/lib/bc-enums'
 import SkuCompareModal from '@/components/admin/sku-compare-modal'
+import CountryMultiSelect from '@/components/admin/country-multi-select'
 
 interface PriceItem { copies: string; retailPrice: string; settlementPrice: string }
 interface CountryItem { mcc: string; name: string }
@@ -33,7 +34,7 @@ export default function AdminEsimPlansPage() {
   const [filterProductType, setFilterProductType] = useState('')
   const [filterSalesMethod, setFilterSalesMethod] = useState('')
   const [filterRechargeable, setFilterRechargeable] = useState('')
-  const [filterCountry, setFilterCountry] = useState('')
+  const [filterCountries, setFilterCountries] = useState<string[]>([])
   const [countryOptions, setCountryOptions] = useState<{ mcc: string; name: string }[]>([])
   const [showCompare, setShowCompare] = useState(false)
 
@@ -45,7 +46,7 @@ export default function AdminEsimPlansPage() {
     if (filterProductType) params.set('productType', filterProductType)
     if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
     if (filterRechargeable) params.set('rechargeable', filterRechargeable)
-    if (filterCountry) params.set('country', filterCountry)
+    if (filterCountries.length) params.set('countries', filterCountries.join(','))
     const res = await fetch(`/api/admin/plans?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -55,7 +56,7 @@ export default function AdminEsimPlansPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterRechargeable, filterCountry])
+  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterRechargeable, filterCountries])
 
   // 載入 eSIM 涵蓋的國家清單（篩選下拉用）
   useEffect(() => {
@@ -72,10 +73,10 @@ export default function AdminEsimPlansPage() {
   }
 
   function clearFilters() {
-    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterRechargeable(''); setFilterCountry(''); setSearch(''); setPage(1)
+    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterRechargeable(''); setFilterCountries([]); setSearch(''); setPage(1)
   }
 
-  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterRechargeable || filterCountry || search
+  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterRechargeable || filterCountries.length > 0 || search
 
   async function handleSync() {
     setSyncing(true)
@@ -132,11 +133,8 @@ export default function AdminEsimPlansPage() {
           <option value="1">可複充</option>
           <option value="0">不可複充</option>
         </select>
-        <select value={filterCountry} onChange={handleFilterChange(setFilterCountry)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white max-w-[180px]">
-          <option value="">國家</option>
-          {countryOptions.map(c => <option key={c.mcc} value={c.mcc}>{c.name}</option>)}
-        </select>
+        <CountryMultiSelect options={countryOptions} value={filterCountries}
+          onChange={(v) => { setFilterCountries(v); setPage(1) }} className="w-56" />
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="搜尋套餐名稱或 SKU" value={search}
