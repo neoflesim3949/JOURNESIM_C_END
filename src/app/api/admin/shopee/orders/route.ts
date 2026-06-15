@@ -17,6 +17,7 @@ export async function GET(request: Request) {
   const createdFrom = searchParams.get('created_from') || ''
   const createdTo = searchParams.get('created_to') || ''
   const accountId = searchParams.get('account_id') || ''
+  const orderStatus = searchParams.get('order_status') || ''
   const sortBy = searchParams.get('sort_by') || 'created_at'
   const sortDir = searchParams.get('sort_dir') === 'asc' ? true : false
 
@@ -69,12 +70,24 @@ export async function GET(request: Request) {
   if (createdFrom) query = query.gte('created_at', createdFrom)
   if (createdTo) query = query.lte('created_at', createdTo + 'T23:59:59')
   if (accountId) query = query.eq('shopee_account_id', accountId)
+  if (orderStatus) query = query.eq('order_status', orderStatus)
 
   const from = (page - 1) * pageSize
   query = query.order(sortBy, { ascending: sortDir }).range(from, from + pageSize - 1)
 
   const { data, count } = await query
-  return NextResponse.json({ data: data || [], total: count || 0 })
+
+  // 蝦皮狀態下拉選項（distinct，不受目前篩選影響）
+  const statusSet = new Set<string>()
+  for (let f = 0; ; f += 1000) {
+    const { data: rows } = await supabase.from('shopee_orders').select('order_status').range(f, f + 999)
+    if (!rows || rows.length === 0) break
+    for (const r of rows) { const s = (r.order_status || '').trim(); if (s) statusSet.add(s) }
+    if (rows.length < 1000) break
+  }
+  const statusOptions = [...statusSet].sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+
+  return NextResponse.json({ data: data || [], total: count || 0, status_options: statusOptions })
 }
 
 // POST — 手動新增蝦皮訂單

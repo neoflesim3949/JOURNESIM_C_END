@@ -111,6 +111,7 @@ export default function ShopeeOrdersPage() {
   const [filterReturnStatus] = useUrlState('return_status', '')
   const [filterFinanceStatus] = useUrlState('finance_status', '')
   const [filterStatus] = useUrlState('status', '')
+  const [filterShopeeStatus] = useUrlState('order_status', '')
   const [sortBy] = useUrlState('sort_by', 'order_date')
   const [sortDirRaw] = useUrlState('sort_dir', 'desc')
   const sortDir: 'asc' | 'desc' = sortDirRaw === 'asc' ? 'asc' : 'desc'
@@ -131,6 +132,8 @@ export default function ShopeeOrdersPage() {
   const [labelSettings, setLabelSettings] = useState<{ line1: number; line2: number; line3: number; orientation: 'landscape' | 'portrait' }>({ line1: 12, line2: 12, line3: 10, orientation: 'landscape' })
   // 寄件單預設寄件人（存 localStorage shopee_sender_info）
   const [senderInfo, setSenderInfo] = useState({ name: '', tax_id: '', phone: '', zip_city: '', address: '', contents: '文件', undeliverable: '退回寄件人' })
+  // 蝦皮狀態選項（來自後端 distinct）
+  const [statusOptions, setStatusOptions] = useState<string[]>([])
   // 帳號
   const [accounts, setAccounts] = useState<{ id: string; name: string; excel_password: string | null }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
@@ -186,8 +189,9 @@ export default function ShopeeOrdersPage() {
     if (filterCreatedFrom) params.set('created_from', filterCreatedFrom)
     if (filterCreatedTo) params.set('created_to', filterCreatedTo)
     if (filterAccount) params.set('account_id', filterAccount)
+    if (filterShopeeStatus) params.set('order_status', filterShopeeStatus)
     const res = await fetch(`/api/admin/shopee/orders?${params}`)
-    if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0) }
+    if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0); if (d.status_options) setStatusOptions(d.status_options) }
     setLoading(false)
   }
 
@@ -202,7 +206,16 @@ export default function ShopeeOrdersPage() {
     ? orders.filter(o => getFinanceStatus(o).label === filterFinanceStatus)
     : orders
 
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, sortBy, sortDir, search, filterStatus, filterReturnStatus, filterOrderDateFrom, filterOrderDateTo, filterCreatedFrom, filterCreatedTo, filterAccount])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, sortBy, sortDir, search, filterStatus, filterReturnStatus, filterOrderDateFrom, filterOrderDateTo, filterCreatedFrom, filterCreatedTo, filterAccount, filterShopeeStatus])
+
+  // 月份快捷：本期=本月、上期=上月（offset 0/-1）。回傳該月 1 號~月底
+  function monthRange(offset: number) {
+    const now = new Date()
+    const from = new Date(now.getFullYear(), now.getMonth() + offset, 1)
+    const to = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0)
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return { from: fmt(from), to: fmt(to) }
+  }
 
   // 解析 Excel（server 端解密密碼保護）
   async function parseExcel(file: File, manualPassword?: string): Promise<Record<string, string>[]> {
@@ -500,12 +513,20 @@ export default function ShopeeOrdersPage() {
           <span className="text-gray-400">~</span>
           <input type="date" value={filterOrderDateTo} onChange={e => setUrl({ order_date_to: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <button onClick={() => { const r = monthRange(0); setUrl({ order_date_from: r.from, order_date_to: r.to, page: 1 }) }}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">本期</button>
+          <button onClick={() => { const r = monthRange(-1); setUrl({ order_date_from: r.from, order_date_to: r.to, page: 1 }) }}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">上期</button>
           <span className="text-gray-500 ml-2">匯入日期：</span>
           <input type="date" value={filterCreatedFrom} onChange={e => setUrl({ created_from: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
           <span className="text-gray-400">~</span>
           <input type="date" value={filterCreatedTo} onChange={e => setUrl({ created_to: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <button onClick={() => { const r = monthRange(0); setUrl({ created_from: r.from, created_to: r.to, page: 1 }) }}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">本期</button>
+          <button onClick={() => { const r = monthRange(-1); setUrl({ created_from: r.from, created_to: r.to, page: 1 }) }}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">上期</button>
           <select value={filterReturnStatus} onChange={e => setUrl({ return_status: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs ml-2">
             <option value="">退貨/退款</option>
@@ -518,6 +539,11 @@ export default function ShopeeOrdersPage() {
             <option value="未匯入">未匯入</option>
             <option value="已匯入">已匯入</option>
             <option value="金流異常">金流異常</option>
+          </select>
+          <select value={filterShopeeStatus} onChange={e => setUrl({ order_status: e.target.value, page: 1 })}
+            className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+            <option value="">蝦皮狀態</option>
+            {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           <select value={filterStatus} onChange={e => setUrl({ status: e.target.value, page: 1 })}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs">
@@ -532,7 +558,7 @@ export default function ShopeeOrdersPage() {
             {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <button onClick={load} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">重新整理</button>
-          <button onClick={() => { setSearchInput(''); setUrl({ order_date_from: '', order_date_to: '', created_from: '', created_to: '', return_status: '', finance_status: '', status: '', account_id: '', search: '', page: 1 }) }}
+          <button onClick={() => { setSearchInput(''); setUrl({ order_date_from: '', order_date_to: '', created_from: '', created_to: '', return_status: '', finance_status: '', status: '', order_status: '', account_id: '', search: '', page: 1 }) }}
             className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
         </div>
       </div>
