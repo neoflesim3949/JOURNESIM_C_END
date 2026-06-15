@@ -3,9 +3,39 @@ import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ESIM_TYPES, SIM_TYPES, ESIM_SIM_ALL_TYPES } from '@/lib/bc-enums'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyTypeFilter(query: any, type: string) {
+  // rechargeable_product='1' → eSIM 複充商品（不管 type）；同商品可能同時在 SIM 與 eSIM
+  if (type === 'sim') return query.in('type', SIM_TYPES)
+  if (type === 'acceleration') {
+    // 加速包：(type 不在 eSIM+SIM 或 IS NULL) 且 非複充商品
+    return query.or(`type.is.null,type.not.in.(${ESIM_SIM_ALL_TYPES.join(',')})`)
+      .or('rechargeable_product.is.null,rechargeable_product.neq.1')
+  }
+  // eSIM：type 在 eSIM 列表 或 rechargeable_product='1'
+  return query.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
+}
+
+// 掃出含指定 MCC 的 sku_id 清單（country_data 為 JSONB 陣列，需 JS 過濾）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function skusWithCountry(supabase: any, mcc: string): Promise<string[]> {
+  const target = mcc.toUpperCase()
+  const skus: string[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase.from('bc_products').select('sku_id, country_data').range(from, from + 999)
+    if (!data || data.length === 0) break
+    for (const p of data) {
+      const cs = p.country_data as { mcc: string }[] | null
+      if (cs?.some((c) => (c.mcc || '').toUpperCase() === target)) skus.push(p.sku_id)
+    }
+    if (data.length < 1000) break
+  }
+  return skus
+}
+
 export async function GET(request: Request) {
-  
-  
+
+
   if (!(await checkAdminAuth())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -19,23 +49,33 @@ export async function GET(request: Request) {
   const productType = searchParams.get('productType') || ''
   const salesMethod = searchParams.get('salesMethod') || ''
   const rechargeable = searchParams.get('rechargeable') || ''
+  const country = searchParams.get('country') || ''
+  const countriesOnly = searchParams.get('countriesOnly') === '1'
 
   const supabase = createAdminClient()
 
-  let query = supabase.from('bc_products').select('*', { count: 'exact' })
+  // 只回傳此類型涵蓋的國家清單（給篩選下拉用）
+  if (countriesOnly) {
+    const map = new Map<string, string>()
+    for (let from = 0; ; from += 1000) {
+      const { data } = await applyTypeFilter(supabase.from('bc_products').select('country_data'), type).range(from, from + 999)
+      if (!data || data.length === 0) break
+      for (const p of data) for (const c of (p.country_data || []) as { mcc: string; name: string }[]) {
+        if (c?.mcc && !map.has(c.mcc)) map.set(c.mcc, c.name)
+      }
+      if (data.length < 1000) break
+    }
+    const countries = [...map].map(([mcc, name]) => ({ mcc, name }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'))
+    return NextResponse.json({ countries })
+  }
 
-  // 類型過濾
-  // rechargeable_product='1' → eSIM 複充商品（不管 type 是什麼）
-  // 同一商品可能同時出現在 SIM 和 eSIM 列表
-  if (type === 'sim') {
-    query = query.in('type', SIM_TYPES)
-  } else if (type === 'acceleration') {
-    // 加速包：(type 不在 eSIM+SIM 或 type IS NULL) 且 非複充商品
-    query = query.or(`type.is.null,type.not.in.(${ESIM_SIM_ALL_TYPES.join(',')})`)
-    query = query.or('rechargeable_product.is.null,rechargeable_product.neq.1')
-  } else {
-    // eSIM：type 在 eSIM 列表 或 rechargeable_product='1'（不管 type）
-    query = query.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
+  let query = applyTypeFilter(supabase.from('bc_products').select('*', { count: 'exact' }), type)
+
+  // 篩選：國家（country_data 含該 MCC）
+  if (country) {
+    const skus = await skusWithCountry(supabase, country)
+    query = query.in('sku_id', skus.length ? skus : ['__none__'])
   }
 
   // 篩選：套餐類型

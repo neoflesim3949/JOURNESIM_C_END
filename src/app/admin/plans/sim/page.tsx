@@ -44,6 +44,8 @@ export default function AdminSimPlansPage() {
   const [filterPlanType, setFilterPlanType] = useState('')
   const [filterProductType, setFilterProductType] = useState('')
   const [filterSalesMethod, setFilterSalesMethod] = useState('')
+  const [filterCountry, setFilterCountry] = useState('')
+  const [countryOptions, setCountryOptions] = useState<{ mcc: string; name: string }[]>([])
   const [showCompare, setShowCompare] = useState(false)
 
   async function load() {
@@ -53,6 +55,7 @@ export default function AdminSimPlansPage() {
     if (filterPlanType) params.set('planType', filterPlanType)
     if (filterProductType) params.set('productType', filterProductType)
     if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
+    if (filterCountry) params.set('country', filterCountry)
     const res = await fetch(`/api/admin/plans?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -62,7 +65,15 @@ export default function AdminSimPlansPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod])
+  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterCountry])
+
+  // 載入 SIM 涵蓋的國家清單（篩選下拉用）
+  useEffect(() => {
+    fetch('/api/admin/plans?type=sim&countriesOnly=1')
+      .then(r => r.ok ? r.json() : { countries: [] })
+      .then(d => setCountryOptions(d.countries || []))
+      .catch(() => {})
+  }, [])
 
   function handleSearch() { setPage(1); load() }
 
@@ -71,10 +82,10 @@ export default function AdminSimPlansPage() {
   }
 
   function clearFilters() {
-    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setSearch(''); setPage(1)
+    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterCountry(''); setSearch(''); setPage(1)
   }
 
-  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || search
+  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterCountry || search
 
   async function handleSync() {
     setSyncing(true)
@@ -124,6 +135,11 @@ export default function AdminSimPlansPage() {
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
           <option value="">銷售方式</option>
           {Object.entries(SALES_METHOD).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select value={filterCountry} onChange={handleFilterChange(setFilterCountry)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white max-w-[180px]">
+          <option value="">國家</option>
+          {countryOptions.map(c => <option key={c.mcc} value={c.mcc}>{c.name}</option>)}
         </select>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />

@@ -33,6 +33,8 @@ export default function AdminEsimPlansPage() {
   const [filterProductType, setFilterProductType] = useState('')
   const [filterSalesMethod, setFilterSalesMethod] = useState('')
   const [filterRechargeable, setFilterRechargeable] = useState('')
+  const [filterCountry, setFilterCountry] = useState('')
+  const [countryOptions, setCountryOptions] = useState<{ mcc: string; name: string }[]>([])
   const [showCompare, setShowCompare] = useState(false)
 
   async function load() {
@@ -43,6 +45,7 @@ export default function AdminEsimPlansPage() {
     if (filterProductType) params.set('productType', filterProductType)
     if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
     if (filterRechargeable) params.set('rechargeable', filterRechargeable)
+    if (filterCountry) params.set('country', filterCountry)
     const res = await fetch(`/api/admin/plans?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -52,7 +55,15 @@ export default function AdminEsimPlansPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterRechargeable])
+  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterRechargeable, filterCountry])
+
+  // 載入 eSIM 涵蓋的國家清單（篩選下拉用）
+  useEffect(() => {
+    fetch('/api/admin/plans?type=esim&countriesOnly=1')
+      .then(r => r.ok ? r.json() : { countries: [] })
+      .then(d => setCountryOptions(d.countries || []))
+      .catch(() => {})
+  }, [])
 
   function handleSearch() { setPage(1); load() }
 
@@ -61,10 +72,10 @@ export default function AdminEsimPlansPage() {
   }
 
   function clearFilters() {
-    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterRechargeable(''); setSearch(''); setPage(1)
+    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterRechargeable(''); setFilterCountry(''); setSearch(''); setPage(1)
   }
 
-  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterRechargeable || search
+  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterRechargeable || filterCountry || search
 
   async function handleSync() {
     setSyncing(true)
@@ -120,6 +131,11 @@ export default function AdminEsimPlansPage() {
           <option value="">複充</option>
           <option value="1">可複充</option>
           <option value="0">不可複充</option>
+        </select>
+        <select value={filterCountry} onChange={handleFilterChange(setFilterCountry)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white max-w-[180px]">
+          <option value="">國家</option>
+          {countryOptions.map(c => <option key={c.mcc} value={c.mcc}>{c.name}</option>)}
         </select>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
