@@ -1,14 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil, Download, Upload } from 'lucide-react'
 
 import { getTypeLabels } from '@/lib/bc-enums'
 
 interface Pkg {
   id: string; name: string; description: string | null; product_type: string; scope?: string
   is_active: boolean; _plan_count: number; _product_count: number; _has_price_changes?: boolean
+  category?: string | null; tags?: string[] | null; sort_order?: number
 }
 
 interface BcProduct {
@@ -21,7 +23,8 @@ export default function AdminPackagesPage() {
   const [packages, setPackages] = useState<Pkg[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', product_type: 'esim' })
+  const [form, setForm] = useState({ name: '', description: '', product_type: 'esim', category: '', tagsText: '' })
+  const [filterCategory, setFilterCategory] = useState('')
 
   // 未加入列表
   const [showUnassigned, setShowUnassigned] = useState(false)
@@ -48,7 +51,8 @@ export default function AdminPackagesPage() {
 
   // 編輯套餐
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', description: '', product_type: 'esim' })
+  const [editForm, setEditForm] = useState({ name: '', description: '', product_type: 'esim', category: '', tagsText: '' })
+  const parseTags = (s: string) => s.split(/[,，]/).map(t => t.trim()).filter(Boolean)
 
   async function load() {
     const res = await fetch('/api/admin/packages')
@@ -66,10 +70,10 @@ export default function AdminPackagesPage() {
     await fetch('/api/admin/packages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ name: form.name, description: form.description, product_type: form.product_type, category: form.category, tags: parseTags(form.tagsText) }),
     })
     setShowCreate(false)
-    setForm({ name: '', description: '', product_type: 'esim' })
+    setForm({ name: '', description: '', product_type: 'esim', category: '', tagsText: '' })
     load()
   }
 
@@ -88,9 +92,83 @@ export default function AdminPackagesPage() {
     await fetch('/api/admin/packages', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: editingId, ...editForm }),
+      body: JSON.stringify({ id: editingId, name: editForm.name, description: editForm.description, product_type: editForm.product_type, category: editForm.category, tags: parseTags(editForm.tagsText) }),
     })
     setEditingId(null)
+    load()
+  }
+
+  const importRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+
+  function handleExport() { window.location.href = '/api/admin/packages/export' }
+
+  // 匯入 Excel：依「套餐名稱」分組，建立/沿用套餐後把 BC SKU 加入
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setImporting(true)
+    try {
+      const wb = XLSX.read(await file.arrayBuffer())
+      const json = XLSX.utils.sheet_to_json<Record<string, string>>(wb.Sheets[wb.SheetNames[0]], { defval: '' })
+      // 依套餐名稱分組
+      const groups = new Map<string, { category: string; tags: string[]; product_type: string; skus: string[] }>()
+      for (const r of json) {
+        const name = String(r['套餐名稱'] || '').trim()
+        if (!name) continue
+        if (!groups.has(name)) groups.set(name, {
+          category: String(r['分類'] || '').trim(),
+          tags: parseTags(String(r['標籤'] || '')),
+          product_type: String(r['類型'] || 'esim').trim() === 'sim' ? 'sim' : 'esim',
+          skus: [],
+        })
+        const sku = String(r['BC SKU'] || '').trim()
+        if (sku) groups.get(name)!.skus.push(sku)
+      }
+      if (groups.size === 0) { alert('檔案沒有可匯入的資料（需有「套餐名稱」欄）'); return }
+
+      // 重新抓一次目前套餐，依名稱比對
+      const cur = await (await fetch('/api/admin/packages')).json() as Pkg[]
+      const byName = new Map(cur.map(p => [p.name, p]))
+      let createdPkg = 0, addedSku = 0
+      for (const [name, g] of groups) {
+        let pkgId = byName.get(name)?.id
+        if (!pkgId) {
+          const res = await fetch('/api/admin/packages', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, category: g.category, tags: g.tags, product_type: g.product_type }),
+          })
+          const d = await res.json(); pkgId = d.id; createdPkg++
+        }
+        if (pkgId && g.skus.length) {
+          const res = await fetch(`/api/admin/packages/${pkgId}/import`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sku_ids: [...new Set(g.skus)], product_type: g.product_type }),
+          })
+          if (res.ok) addedSku += new Set(g.skus).size
+        }
+      }
+      alert(`匯入完成：新建 ${createdPkg} 個套餐，加入 ${addedSku} 個 SKU`)
+      load()
+    } catch (err) {
+      alert('解析失敗：' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setImporting(false)
+      if (importRef.current) importRef.current.value = ''
+    }
+  }
+
+  // 排序：與相鄰套餐交換 sort_order
+  async function move(idx: number, dir: -1 | 1) {
+    const list = filteredPackages
+    const j = idx + dir
+    if (j < 0 || j >= list.length) return
+    const a = list[idx], b = list[j]
+    const ao = a.sort_order ?? 0, bo = b.sort_order ?? 0
+    await Promise.all([
+      fetch('/api/admin/packages', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id, sort_order: bo === ao ? bo + dir : bo }) }),
+      fetch('/api/admin/packages', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.id, sort_order: ao }) }),
+    ])
     load()
   }
 
@@ -206,6 +284,9 @@ export default function AdminPackagesPage() {
 
   const unassignedTotalPages = Math.ceil(unassignedTotal / unassignedPageSize)
 
+  const categories = [...new Set(packages.map(p => p.category).filter(Boolean))] as string[]
+  const filteredPackages = filterCategory ? packages.filter(p => p.category === filterCategory) : packages
+
   if (loading) return <div className="text-gray-500">載入中...</div>
 
   return (
@@ -216,6 +297,14 @@ export default function AdminPackagesPage() {
           <p className="mt-1 text-sm text-gray-500">建立套餐並組合 BC 商品，套餐可被多個方案共用</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
+            <Download className="w-4 h-4" /> 匯出 Excel
+          </button>
+          <label className={`flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg ${importing ? 'opacity-50' : 'hover:bg-gray-50 cursor-pointer'}`}>
+            <Upload className="w-4 h-4" /> {importing ? '匯入中…' : '匯入 Excel'}
+            <input ref={importRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImport} disabled={importing} className="hidden" />
+          </label>
           <button onClick={openUnassigned}
             className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
             <ListFilter className="w-4 h-4" /> 未加入列表
@@ -248,6 +337,19 @@ export default function AdminPackagesPage() {
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">分類（選填）</label>
+              <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} list="pkg-categories"
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="例：東南亞" />
+              <datalist id="pkg-categories">{categories.map(c => <option key={c} value={c} />)}</datalist>
+            </div>
+            <div>
+              <label className="text-sm font-medium">標籤（選填，逗號分隔）</label>
+              <input value={form.tagsText} onChange={(e) => setForm({ ...form, tagsText: e.target.value })}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="例：熱門, 促銷" />
+            </div>
+          </div>
           <div>
             <label className="text-sm font-medium">描述（選填）</label>
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -268,7 +370,18 @@ export default function AdminPackagesPage() {
         </div>
       ) : (
         <div className="mt-6 space-y-3">
-          {packages.map((pkg) => {
+          {categories.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap pb-1">
+              <span className="text-xs text-gray-400">分類：</span>
+              <button onClick={() => setFilterCategory('')}
+                className={`px-2.5 py-1 text-xs rounded-lg border ${filterCategory === '' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>全部</button>
+              {categories.map(c => (
+                <button key={c} onClick={() => setFilterCategory(c)}
+                  className={`px-2.5 py-1 text-xs rounded-lg border ${filterCategory === c ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{c}</button>
+              ))}
+            </div>
+          )}
+          {filteredPackages.map((pkg, idx) => {
             const isEditing = editingId === pkg.id
             return isEditing ? (
               <div key={pkg.id} className="bg-white border border-blue-300 rounded-xl p-5 space-y-3">
@@ -286,6 +399,18 @@ export default function AdminPackagesPage() {
                     </select>
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">分類</label>
+                    <input value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} list="pkg-categories"
+                      placeholder="例：東南亞" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">標籤（逗號分隔）</label>
+                    <input value={editForm.tagsText} onChange={(e) => setEditForm({ ...editForm, tagsText: e.target.value })}
+                      placeholder="例：熱門, 促銷" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                  </div>
+                </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500">描述（選填）</label>
                   <input value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
@@ -300,13 +425,15 @@ export default function AdminPackagesPage() {
               <div key={pkg.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition-all">
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-semibold">{pkg.name}</h3>
                       <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{pkg.product_type}</span>
+                      {pkg.category && <span className="px-2 py-0.5 text-xs rounded-full bg-purple-50 text-purple-600">{pkg.category}</span>}
                       <button onClick={() => handleToggle(pkg.id, pkg.is_active)}
                         className={`px-2 py-0.5 text-xs rounded-full ${pkg.is_active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
                         {pkg.is_active ? '上架中' : '已下架'}
                       </button>
+                      {(pkg.tags || []).map(t => <span key={t} className="px-1.5 py-0.5 text-[11px] rounded bg-gray-100 text-gray-500">{t}</span>)}
                     </div>
                     {pkg.description && <p className="mt-1 text-sm text-gray-500">{pkg.description}</p>}
                     <p className="mt-1 text-xs text-gray-400">
@@ -315,7 +442,13 @@ export default function AdminPackagesPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => { setEditingId(pkg.id); setEditForm({ name: pkg.name, description: pkg.description || '', product_type: pkg.product_type }) }}
+                    <div className="flex flex-col mr-1">
+                      <button onClick={() => move(idx, -1)} disabled={idx === 0} title="上移"
+                        className="text-gray-300 hover:text-gray-600 disabled:opacity-30 leading-none">▲</button>
+                      <button onClick={() => move(idx, 1)} disabled={idx === filteredPackages.length - 1} title="下移"
+                        className="text-gray-300 hover:text-gray-600 disabled:opacity-30 leading-none">▼</button>
+                    </div>
+                    <button onClick={() => { setEditingId(pkg.id); setEditForm({ name: pkg.name, description: pkg.description || '', product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', ') }) }}
                       className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Pencil className="w-4 h-4" /></button>
                     <Link href={`/admin/packages/${pkg.id}`}
                       className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">管理內容</Link>

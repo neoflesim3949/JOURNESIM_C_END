@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ESIM_TYPES, SIM_TYPES, ESIM_SIM_ALL_TYPES } from '@/lib/bc-enums'
+import { formatCapacity } from '@/lib/format'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyTypeFilter(query: any, type: string) {
@@ -54,24 +55,48 @@ export async function GET(request: Request) {
   // 國家篩選：countries=逗號分隔 MCC（多選，OR）；相容舊的單一 country
   const countriesParam = (searchParams.get('countries') || searchParams.get('country') || '')
     .split(',').map(s => s.trim()).filter(Boolean)
+  const daysParam = searchParams.get('days') || ''           // 天數（bc_products.days）
+  const capacityParam = searchParams.get('capacity') || ''   // 流量（high_flow_size 或 capacity 的原始 KB 值）
   const countriesOnly = searchParams.get('countriesOnly') === '1'
 
   const supabase = createAdminClient()
 
-  // 只回傳此類型涵蓋的國家清單（給篩選下拉用）
+  // 回傳此類型的篩選選項（國家 / 天數 / 流量）給下拉用
   if (countriesOnly) {
     const map = new Map<string, string>()
+    const daysSet = new Set<number>()
+    const capMap = new Map<string, string>() // 原始KB → 顯示label
     for (let from = 0; ; from += 1000) {
-      const { data } = await applyTypeFilter(supabase.from('bc_products').select('country_data'), type).range(from, from + 999)
+      const { data } = await applyTypeFilter(
+        supabase.from('bc_products').select('country_data, days, high_flow_size, capacity, plan_type'), type
+      ).range(from, from + 999)
       if (!data || data.length === 0) break
-      for (const p of data) for (const c of (p.country_data || []) as { mcc: string; name: string }[]) {
-        if (c?.mcc && !map.has(c.mcc)) map.set(c.mcc, c.name)
+      for (const p of data) {
+        for (const c of (p.country_data || []) as { mcc: string; name: string }[]) {
+          if (c?.mcc && !map.has(c.mcc)) map.set(c.mcc, c.name)
+        }
+        if (p.days != null && !isNaN(Number(p.days))) daysSet.add(Number(p.days))
+        // 流量選項拆「每日(單日型 plan_type=1)」與「總量」；value 編碼 kind:KB
+        const cap = p.high_flow_size ?? p.capacity
+        if (cap != null && String(cap) !== '') {
+          const isDaily = p.plan_type === '1'
+          const key = `${isDaily ? 'd' : 't'}:${cap}`
+          if (!capMap.has(key)) capMap.set(key, `${isDaily ? '每日' : '總量'}${formatCapacity(String(cap), false)}`)
+        }
       }
       if (data.length < 1000) break
     }
     const countries = [...map].map(([mcc, name]) => ({ mcc, name }))
       .sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant'))
-    return NextResponse.json({ countries })
+    const days = [...daysSet].sort((a, b) => a - b)
+    // 每日群組在前、總量在後，各自依容量大小排序
+    const capacities = [...capMap].map(([value, label]) => ({ value, label }))
+      .sort((a, b) => {
+        const [ka, va] = a.value.split(':'); const [kb2, vb] = b.value.split(':')
+        if (ka !== kb2) return ka === 'd' ? -1 : 1
+        return Number(va) - Number(vb)
+      })
+    return NextResponse.json({ countries, days, capacities })
   }
 
   let query = applyTypeFilter(supabase.from('bc_products').select('*', { count: 'exact' }), type)
@@ -80,6 +105,21 @@ export async function GET(request: Request) {
   if (countriesParam.length > 0) {
     const skus = await skusWithCountries(supabase, countriesParam)
     query = query.in('sku_id', skus.length ? skus : ['__none__'])
+  }
+
+  // 篩選：天數（bc_products.days，單位天數）
+  if (daysParam) {
+    query = query.eq('days', Number(daysParam))
+  }
+
+  // 篩選：流量（value 為 kind:KB；kind=d 每日 / t 總量；相容無前綴的純 KB）
+  if (capacityParam) {
+    const idx = capacityParam.indexOf(':')
+    const kind = idx >= 0 ? capacityParam.slice(0, idx) : ''
+    const kb = idx >= 0 ? capacityParam.slice(idx + 1) : capacityParam
+    query = query.or(`high_flow_size.eq.${kb},and(high_flow_size.is.null,capacity.eq.${kb})`)
+    if (kind === 'd') query = query.eq('plan_type', '1')
+    else if (kind === 't') query = query.or('plan_type.is.null,plan_type.neq.1')
   }
 
   // 篩選：套餐類型

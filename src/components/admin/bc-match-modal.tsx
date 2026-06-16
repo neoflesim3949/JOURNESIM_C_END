@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
+import PlanCompareModal from './plan-compare-modal'
+import type { ComparePlan } from './plan-compare-table'
 
 interface CopiesOption {
   copies: string; days: number; costCny: number; costTwd: number
@@ -13,19 +15,36 @@ interface CountryDetail {
 }
 export interface BcResult {
   sku_id: string; name: string; unit_days: number
-  capacity: string; speed: string
+  capacity: string; capacity_kb?: number; speed: string
   cost_cny: number; cost_twd: number
   copies_options: CopiesOption[]
   countries: string[]; country_total: number
   country_details?: CountryDetail[]
 }
 
-// ── BC 商品對應彈窗（蝦皮訂單明細 / 商品對應V2 共用）─────────────
-export function BcMatchModal({ subtitle, onMatch, onClose }: {
+// ── BC 商品對應彈窗（蝦皮訂單明細 / 商品對應V2 / 套餐管理 共用）──────
+// mode='match'：單選對應（onMatch）；mode='add'：勾選多個批量加入（onAdd）
+export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title, existingSkus, onAdd, adding }: {
   subtitle?: string
-  onMatch: (skuId: string, copies: string) => void
+  onMatch?: (skuId: string, copies: string) => void
   onClose: () => void
+  mode?: 'match' | 'add'
+  title?: string
+  existingSkus?: Set<string>
+  onAdd?: (skuIds: string[]) => void
+  adding?: boolean
 }) {
+  const isAdd = mode === 'add'
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  function toggleSel(sku: string) { setSelected(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n }) }
+  // 比較選取
+  const [comparePlans, setComparePlans] = useState<ComparePlan[] | null>(null)
+  async function openCompare() {
+    if (selected.size === 0) return
+    const res = await fetch(`/api/admin/plans/compare?skus=${[...selected].join(',')}`)
+    const d = await res.json()
+    setComparePlans(d.items || [])
+  }
   const [countries, setCountries] = useState<{ mcc: string; name: string }[]>([])
   const [daysOpts, setDaysOpts] = useState<string[]>([])
   const [capacityOpts, setCapacityOpts] = useState<string[]>([])
@@ -39,6 +58,9 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
   const [searching, setSearching] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [sortPrice, setSortPrice] = useState<'asc' | 'desc' | null>(null)
+  const [sortFlow, setSortFlow] = useState<'asc' | 'desc' | null>(null)
+  function cycleFlow() { setSortPrice(null); setSortFlow(p => p === 'asc' ? 'desc' : p === 'desc' ? null : 'asc') }
+  function cyclePrice() { setSortFlow(null); setSortPrice(p => p === 'asc' ? 'desc' : p === 'desc' ? null : 'asc') }
 
   // 國家下拉
   const [countryOpen, setCountryOpen] = useState(false)
@@ -91,10 +113,25 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
         {/* 標題 */}
         <div className="p-5 border-b border-gray-200 flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-lg">對應 BC 商品</h2>
+            <h2 className="font-bold text-lg">{title || (isAdd ? '新增 BC 商品' : '對應 BC 商品')}</h2>
             {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+          <div className="flex items-center gap-2">
+            {isAdd && selected.size > 0 && (
+              <>
+                <button onClick={openCompare} disabled={selected.size < 2}
+                  className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+                  title={selected.size < 2 ? '至少選 2 個' : ''}>
+                  比較（{selected.size}）
+                </button>
+                <button onClick={() => onAdd?.([...selected])} disabled={adding}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {adding ? '加入中…' : `加入選取（${selected.size}）`}
+                </button>
+              </>
+            )}
+            <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
+          </div>
         </div>
 
         {/* 篩選列 */}
@@ -165,7 +202,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
           <div className="flex items-center gap-3">
             <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && doSearch()}
               placeholder="搜索套餐名稱或 SKU ID" className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            <span className="text-xs text-gray-400 whitespace-nowrap">符合：{results.length} 個</span>
+            <span className="text-xs text-gray-400 whitespace-nowrap">符合：{results.filter(r => r.copies_options.length > 0).length} 個</span>
             <button onClick={doSearch} disabled={searching}
               className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {searching ? '搜尋中...' : '查 詢'}
@@ -182,11 +219,13 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
               <thead className="text-gray-500 bg-gray-50 sticky top-0">
                 <tr>
                   <th className="text-left px-4 py-2.5 font-medium">套餐名稱</th>
-                  <th className="text-left px-4 py-2.5 font-medium w-16">流量</th>
+                  <th className="text-left px-4 py-2.5 font-medium w-16 cursor-pointer select-none hover:text-blue-600" onClick={cycleFlow}>
+                    流量 {sortFlow === 'asc' ? '↑' : sortFlow === 'desc' ? '↓' : '⇅'}
+                  </th>
                   <th className="text-left px-4 py-2.5 font-medium w-16">限速</th>
                   <th className="text-left px-4 py-2.5 font-medium w-36">適用國家</th>
                   <th className="text-right px-4 py-2.5 font-medium w-20">天數</th>
-                  <th className="text-right px-4 py-2.5 font-medium w-24 cursor-pointer select-none hover:text-blue-600" onClick={() => setSortPrice(prev => prev === 'asc' ? 'desc' : prev === 'desc' ? null : 'asc')}>
+                  <th className="text-right px-4 py-2.5 font-medium w-24 cursor-pointer select-none hover:text-blue-600" onClick={cyclePrice}>
                     結算價 {sortPrice === 'asc' ? '↑' : sortPrice === 'desc' ? '↓' : ''}
                   </th>
                   <th className="text-center px-4 py-2.5 font-medium w-14">詳情</th>
@@ -194,10 +233,13 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {(() => {
-                  let sorted = results
-                  if (sortPrice && selDays) {
+                  // 0 規格（無價格規格）= 沒有可賣商品，不顯示
+                  let sorted = results.filter(r => r.copies_options.length > 0)
+                  if (sortFlow) {
+                    sorted = [...sorted].sort((a, b) => sortFlow === 'asc' ? (a.capacity_kb ?? 0) - (b.capacity_kb ?? 0) : (b.capacity_kb ?? 0) - (a.capacity_kb ?? 0))
+                  } else if (sortPrice && selDays) {
                     const target = parseInt(selDays)
-                    sorted = [...results].sort((a, b) => {
+                    sorted = [...sorted].sort((a, b) => {
                       const aP = a.copies_options.find(o => o.days === target)?.costCny ?? Infinity
                       const bP = b.copies_options.find(o => o.days === target)?.costCny ?? Infinity
                       return sortPrice === 'asc' ? aP - bP : bP - aP
@@ -218,6 +260,9 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
                       <tr className={`hover:bg-blue-50/50 cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`} onClick={toggleExpand}>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-1.5">
+                            {isAdd && (existingSkus?.has(bc.sku_id)
+                              ? <span className="text-[10px] text-gray-400 w-4 shrink-0">已加</span>
+                              : <input type="checkbox" checked={selected.has(bc.sku_id)} onClick={e => e.stopPropagation()} onChange={() => toggleSel(bc.sku_id)} className="accent-blue-600 shrink-0" />)}
                             <span className="text-gray-400 flex-shrink-0 w-3">{isExpanded ? '▾' : '▸'}</span>
                             <div>
                               <div className={`font-medium text-sm ${isExpanded ? 'text-blue-700' : 'truncate max-w-[350px]'}`}>{bc.name}</div>
@@ -245,8 +290,8 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
                               className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-[10px] text-gray-700">
                               {isExpanded ? '收合' : '詳情'}
                             </button>
-                            {matchedOpt && (
-                              <button onClick={(e) => { e.stopPropagation(); onMatch(bc.sku_id, matchedOpt.copies) }}
+                            {!isAdd && matchedOpt && (
+                              <button onClick={(e) => { e.stopPropagation(); onMatch?.(bc.sku_id, matchedOpt.copies) }}
                                 className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
                                 選取
                               </button>
@@ -292,7 +337,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
                                 <tr>
                                   <th className="px-2 py-1 text-left border-b">天數</th>
                                   <th className="px-2 py-1 text-right border-b">結算價</th>
-                                  <th className="px-2 py-1 text-center border-b w-16">操作</th>
+                                  {!isAdd && <th className="px-2 py-1 text-center border-b w-16">操作</th>}
                                 </tr>
                               </thead>
                               <tbody>
@@ -300,12 +345,14 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
                                   <tr key={oi} className="border-b last:border-0">
                                     <td className="px-2 py-1 font-medium">{opt.days} 天</td>
                                     <td className="px-2 py-1 text-right font-medium text-blue-600">¥{opt.costCny.toFixed(2)}</td>
-                                    <td className="px-2 py-1 text-center">
-                                      <button onClick={(e) => { e.stopPropagation(); onMatch(bc.sku_id, opt.copies) }}
-                                        className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
-                                        選取
-                                      </button>
-                                    </td>
+                                    {!isAdd && (
+                                      <td className="px-2 py-1 text-center">
+                                        <button onClick={(e) => { e.stopPropagation(); onMatch?.(bc.sku_id, opt.copies) }}
+                                          className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[10px] font-medium">
+                                          選取
+                                        </button>
+                                      </td>
+                                    )}
                                   </tr>
                                 ))}
                               </tbody>
@@ -321,6 +368,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose }: {
           )}
         </div>
       </div>
+      {comparePlans && <PlanCompareModal plans={comparePlans} onClose={() => setComparePlans(null)} />}
     </div>
   )
 }

@@ -6,6 +6,7 @@ import { formatCapacity, formatSpeed } from '@/lib/format'
 import { getProductTypeLabel, getPlanTypeLabel, getSalesMethodLabel, PLAN_TYPE, SALES_METHOD, SIM_TYPE_OPTIONS } from '@/lib/bc-enums'
 import SkuCompareModal from '@/components/admin/sku-compare-modal'
 import CountryMultiSelect from '@/components/admin/country-multi-select'
+import PlanCompareModal from '@/components/admin/plan-compare-modal'
 
 interface PriceItem { copies: string; retailPrice: string; settlementPrice: string }
 interface CountryItem { mcc: string; name: string }
@@ -47,7 +48,18 @@ export default function AdminSimPlansPage() {
   const [filterSalesMethod, setFilterSalesMethod] = useState('')
   const [filterCountries, setFilterCountries] = useState<string[]>([])
   const [countryOptions, setCountryOptions] = useState<{ mcc: string; name: string }[]>([])
+  const [filterDays, setFilterDays] = useState('')
+  const [filterCapacity, setFilterCapacity] = useState('')
+  const [daysOptions, setDaysOptions] = useState<number[]>([])
+  const [capacityOptions, setCapacityOptions] = useState<{ value: string; label: string }[]>([])
   const [showCompare, setShowCompare] = useState(false)
+  // 勾選比較
+  const [compareSel, setCompareSel] = useState<BCProduct[]>([])
+  const [showCompareModal, setShowCompareModal] = useState(false)
+  const compareIds = new Set(compareSel.map(p => p.sku_id))
+  function toggleCompare(p: BCProduct) {
+    setCompareSel(prev => prev.some(x => x.sku_id === p.sku_id) ? prev.filter(x => x.sku_id !== p.sku_id) : [...prev, p])
+  }
 
   async function load() {
     setLoading(true)
@@ -58,6 +70,8 @@ export default function AdminSimPlansPage() {
       if (filterProductType) params.set('productType', filterProductType)
       if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
       if (filterCountries.length) params.set('countries', filterCountries.join(','))
+      if (filterDays) params.set('days', filterDays)
+      if (filterCapacity) params.set('capacity', filterCapacity)
       const res = await fetch(`/api/admin/plans?${params}`)
       if (res.ok) {
         const data = await res.json()
@@ -68,13 +82,13 @@ export default function AdminSimPlansPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterCountries])
+  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterCountries, filterDays, filterCapacity])
 
-  // 載入 SIM 涵蓋的國家清單（篩選下拉用）
+  // 載入 SIM 的篩選選項（國家 / 天數 / 流量）
   useEffect(() => {
     fetch('/api/admin/plans?type=sim&countriesOnly=1')
-      .then(r => r.ok ? r.json() : { countries: [] })
-      .then(d => setCountryOptions(d.countries || []))
+      .then(r => r.ok ? r.json() : Promise.resolve({ countries: [], days: [], capacities: [] }))
+      .then(d => { setCountryOptions(d.countries || []); setDaysOptions(d.days || []); setCapacityOptions(d.capacities || []) })
       .catch(() => {})
   }, [])
 
@@ -85,10 +99,10 @@ export default function AdminSimPlansPage() {
   }
 
   function clearFilters() {
-    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterCountries([]); setSearch(''); setPage(1)
+    setFilterPlanType(''); setFilterProductType(''); setFilterSalesMethod(''); setFilterCountries([]); setFilterDays(''); setFilterCapacity(''); setSearch(''); setPage(1)
   }
 
-  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterCountries.length > 0 || search
+  const hasFilters = filterPlanType || filterProductType || filterSalesMethod || filterCountries.length > 0 || filterDays || filterCapacity || search
 
   async function handleSync() {
     setSyncing(true)
@@ -111,6 +125,13 @@ export default function AdminSimPlansPage() {
           <p className="mt-1 text-sm text-gray-500">共 {total} 筆</p>
         </div>
         <div className="flex items-center gap-2">
+          {compareSel.length > 0 && (
+            <button onClick={() => setShowCompareModal(true)} disabled={compareSel.length < 2}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50"
+              title={compareSel.length < 2 ? '至少勾選 2 個套餐' : ''}>
+              比較（{compareSel.length}）
+            </button>
+          )}
           <button onClick={() => setShowCompare(true)}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50">
             <FileSpreadsheet className="w-4 h-4" /> Excel 比對
@@ -141,6 +162,16 @@ export default function AdminSimPlansPage() {
         </select>
         <CountryMultiSelect options={countryOptions} value={filterCountries}
           onChange={(v) => { setFilterCountries(v); setPage(1) }} className="w-56" />
+        <select value={filterDays} onChange={handleFilterChange(setFilterDays)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+          <option value="">天數</option>
+          {daysOptions.map(d => <option key={d} value={d}>{d} 天</option>)}
+        </select>
+        <select value={filterCapacity} onChange={handleFilterChange(setFilterCapacity)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+          <option value="">流量</option>
+          {capacityOptions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="搜尋套餐名稱或 SKU" value={search}
@@ -161,6 +192,7 @@ export default function AdminSimPlansPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 sticky top-0 z-10">
                 <tr>
+                  <th className="px-3 py-3 w-10"></th>
                   <th className="text-left px-4 py-3 font-medium min-w-[280px]">套餐名稱</th>
                   <th className="text-left px-4 py-3 font-medium w-24">商品類型</th>
                   <th className="text-left px-4 py-3 font-medium w-20">套餐類型</th>
@@ -184,6 +216,10 @@ export default function AdminSimPlansPage() {
                     <Fragment key={product.id}>
                       <tr className={`hover:bg-gray-50 ${hasPrices ? 'cursor-pointer' : ''} ${isExpanded ? 'bg-blue-50/30' : ''}`}
                         onClick={() => hasPrices && toggleExpand(product.id)}>
+                        <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={compareIds.has(product.sku_id)} onChange={() => toggleCompare(product)}
+                            className="accent-emerald-600" title="加入比較" />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-start gap-2">
                             {hasPrices && <span className="mt-0.5 text-gray-400 flex-shrink-0">{isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>}
@@ -209,7 +245,7 @@ export default function AdminSimPlansPage() {
                       </tr>
                       {isExpanded && prices.sort((a, b) => parseInt(a.copies) - parseInt(b.copies)).map((price, idx) => (
                         <tr key={`${product.id}-${idx}`} className="bg-gray-50/50 hover:bg-gray-100/50">
-                          <td colSpan={6} className="px-4 py-2"></td>
+                          <td colSpan={7} className="px-4 py-2"></td>
                           <td className="px-4 py-2 text-xs text-gray-700"><span className="text-gray-400">└ </span>{unitDays * parseInt(price.copies)} 天</td>
                           <td className="px-4 py-2 text-right text-xs font-medium">¥{price.settlementPrice}</td>
                           <td></td>
@@ -374,6 +410,7 @@ export default function AdminSimPlansPage() {
       )}
 
       <SkuCompareModal open={showCompare} onClose={() => setShowCompare(false)} planType="sim" title="SIM 套餐" />
+      {showCompareModal && <PlanCompareModal plans={compareSel} onClose={() => setShowCompareModal(false)} />}
     </div>
   )
 }

@@ -31,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/plans/esim', label: 'eSIM 套餐' },
       { href: '/admin/plans/sim', label: 'SIM 套餐' },
       { href: '/admin/plans/acceleration', label: '加速包套餐' },
+      { href: '/admin/plans/compare', label: '套餐比較' },
     ],
   },
   {

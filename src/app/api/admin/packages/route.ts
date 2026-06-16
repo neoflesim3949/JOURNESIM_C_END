@@ -69,6 +69,8 @@ export async function POST(request: Request) {
     name: body.name,
     description: body.description || null,
     product_type: body.product_type || 'esim',
+    category: body.category || null,
+    tags: Array.isArray(body.tags) && body.tags.length ? body.tags : null,
   }).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -87,6 +89,9 @@ export async function PATCH(request: Request) {
   if (body.description !== undefined) updates.description = body.description
   if (body.is_active !== undefined) updates.is_active = body.is_active
   if (body.product_type !== undefined) updates.product_type = body.product_type
+  if (body.category !== undefined) updates.category = body.category || null
+  if (body.tags !== undefined) updates.tags = Array.isArray(body.tags) && body.tags.length ? body.tags : null
+  if (body.sort_order !== undefined) updates.sort_order = body.sort_order
 
   await supabase.from('packages').update(updates).eq('id', body.id)
   return NextResponse.json({ ok: true })

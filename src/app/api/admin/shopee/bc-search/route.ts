@@ -181,6 +181,7 @@ export async function GET(request: Request) {
       sku_id: p.sku_id,
       name: p.name,
       capacity: formatCapacity(p.high_flow_size || p.capacity, p.plan_type === '1'),
+      capacity_kb: Number(p.high_flow_size || p.capacity) || 0,
       speed: formatSpeed(p.limit_flow_speed),
       plan_type: p.plan_type,
       unit_days: unitDays,

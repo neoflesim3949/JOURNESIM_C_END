@@ -34,28 +34,30 @@ export async function POST(
     matched = data || []
   } else if (country_code) {
     const { data: country } = await supabase.from('bc_countries').select('name').eq('mcc', country_code).single()
-    const countryName = country?.name || ''
+    const countryName = (country?.name || '').toLowerCase()
     const code = country_code.toUpperCase()
 
-    let byName, byMcc
-    if (isSim) {
-      ;({ data: byName } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
-        .ilike('name', `%${countryName}%`).in('type', SIM_TYPES))
-      ;({ data: byMcc } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
-        .ilike('country_data::text', `%"mcc":"${code}"%`).in('type', SIM_TYPES))
-    } else {
-      ;({ data: byName } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
-        .ilike('name', `%${countryName}%`)
-        .or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`))
-      ;({ data: byMcc } = await supabase.from('bc_products').select('sku_id, name, plan_type, prices')
-        .ilike('country_data::text', `%"mcc":"${code}"%`)
-        .or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`))
-    }
-
-    const skuMap = new Map<string, typeof matched[0]>()
-    for (const p of [...(byName || []), ...(byMcc || [])]) {
-      const n = (p.name || '').toLowerCase()
-      if (!n.includes('加速') && !n.includes('accel')) skuMap.set(p.sku_id, p)
+    // 掃描該類型「上架中」商品，JS 過濾：名稱含國名 或 country_data 含該 MCC（含多國/區域方案）
+    // 不用 country_data::text ILIKE，因 JSONB 序列化會在冒號後加空白，pattern 容易對不上
+    const skuMap = new Map<string, { sku_id: string; plan_type: string | null; prices: unknown }>()
+    for (let from = 0; ; from += 1000) {
+      let q = supabase.from('bc_products')
+        .select('sku_id, name, plan_type, prices, country_data, type, rechargeable_product')
+        .or('is_active.is.null,is_active.eq.true')
+      q = isSim
+        ? q.in('type', SIM_TYPES)
+        : q.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
+      const { data } = await q.range(from, from + 999)
+      if (!data || data.length === 0) break
+      for (const p of data) {
+        const n = (p.name || '').toLowerCase()
+        if (n.includes('加速') || n.includes('accel')) continue
+        const cs = p.country_data as { mcc?: string }[] | null
+        const hasMcc = Array.isArray(cs) && cs.some((c) => (c.mcc || '').toUpperCase() === code)
+        const nameMatch = countryName.length > 0 && n.includes(countryName)
+        if (hasMcc || nameMatch) skuMap.set(p.sku_id, { sku_id: p.sku_id, plan_type: p.plan_type, prices: p.prices })
+      }
+      if (data.length < 1000) break
     }
     matched = Array.from(skuMap.values())
   } else {

@@ -3,10 +3,14 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, Search, X, Trash2, DollarSign, Eye } from 'lucide-react'
+import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, X, Trash2, DollarSign, Eye } from 'lucide-react'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 
 import { getTypeLabels } from '@/lib/bc-enums'
+import PlanCompareModal from '@/components/admin/plan-compare-modal'
+import type { ComparePlan } from '@/components/admin/plan-compare-table'
+import BcDetailModal from '@/components/admin/bc-detail-modal'
+import { BcMatchModal } from '@/components/admin/bc-match-modal'
 
 interface CopyPrice { id: string; copies: string; cost_price: number; original_cost_price: number | null; sell_price: number; price_changed: boolean }
 interface BoundPlan {
@@ -37,13 +41,21 @@ export default function PackageDetailPage() {
   const [batchAdd, setBatchAdd] = useState('3')
   const [showPreview, setShowPreview] = useState(false)
   const [showManual, setShowManual] = useState(false)
-  const [bcSearch, setBcSearch] = useState('')
-  const [bcResults, setBcResults] = useState<{ sku_id: string; name: string; type: string; plan_type: string | null; high_flow_size: string | null; rechargeable_product: string | null }[]>([])
-  const [bcLoading, setBcLoading] = useState(false)
-  const [bcSelectedSkus, setBcSelectedSkus] = useState<Set<string>>(new Set())
   const [batchImporting, setBatchImporting] = useState(false)
   const [importCountry, setImportCountry] = useState('')
   const [exchangeRate, setExchangeRate] = useState(0)
+  // 商品詳情彈窗
+  const [detailSku, setDetailSku] = useState<string | null>(null)
+  // 流量排序
+  const [flowSort, setFlowSort] = useState<'' | 'asc' | 'desc'>('')
+  // 比價彈窗（用 BC 原始結算/零售價比同 copies）
+  const [comparePlans, setComparePlans] = useState<ComparePlan[] | null>(null)
+  async function openCompare(skuIds: string[]) {
+    if (skuIds.length === 0) return
+    const res = await fetch(`/api/admin/plans/compare?skus=${skuIds.join(',')}`)
+    const d = await res.json()
+    setComparePlans(d.items || [])
+  }
 
   async function loadData() {
     const [pkgRes, rateRes] = await Promise.all([
@@ -86,7 +98,6 @@ export default function PackageDetailPage() {
       body: JSON.stringify({ sku_ids: skus }),
     })
     setBatchImporting(false)
-    setBcSelectedSkus(new Set())
     await loadData()
   }
 
@@ -166,20 +177,15 @@ export default function PackageDetailPage() {
   function toggleSelect(planId: string) { setSelectedPlanIds((p) => { const n = new Set(p); n.has(planId) ? n.delete(planId) : n.add(planId); return n }) }
   function toggleSelectAll(group: BoundPlan[]) { const all = group.every((p) => selectedPlanIds.has(p.id)); setSelectedPlanIds((prev) => { const n = new Set(prev); group.forEach((p) => all ? n.delete(p.id) : n.add(p.id)); return n }) }
 
-  async function searchBc(query: string) {
-    setBcSearch(query)
-    if (query.length < 2) { setBcResults([]); return }
-    setBcLoading(true)
-    const res = await fetch(`/api/admin/plans/search?q=${encodeURIComponent(query)}&type=${pkg?.product_type || 'esim'}`)
-    if (res.ok) setBcResults(await res.json())
-    setBcLoading(false)
-  }
 
   if (loading) return <div className="text-gray-500">載入中...</div>
   if (!pkg) return <div>找不到套餐</div>
 
-  const dailyPlans = plans.filter((p) => p.plan_category === 'daily')
-  const fixedPlans = plans.filter((p) => p.plan_category === 'fixed')
+  const flowVal = (p: BoundPlan) => Number(p.high_flow_size ?? p.capacity) || 0
+  const sortFlow = (arr: BoundPlan[]) => flowSort ? [...arr].sort((a, b) => flowSort === 'asc' ? flowVal(a) - flowVal(b) : flowVal(b) - flowVal(a)) : arr
+  const toggleFlowSort = () => setFlowSort(s => s === 'asc' ? 'desc' : s === 'desc' ? '' : 'asc')
+  const dailyPlans = sortFlow(plans.filter((p) => p.plan_category === 'daily'))
+  const fixedPlans = sortFlow(plans.filter((p) => p.plan_category === 'fixed'))
   const hasChanges = editedPrices.size > 0
 
   return (
@@ -219,6 +225,12 @@ export default function PackageDetailPage() {
         <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
           <input type="checkbox" checked={plans.length > 0 && selectedPlanIds.size === plans.length} onChange={() => { if (selectedPlanIds.size === plans.length) setSelectedPlanIds(new Set()); else setSelectedPlanIds(new Set(plans.map(p => p.id))) }} className="accent-blue-600" /> 全選（{plans.length}）
         </label>
+        {plans.length > 1 && (
+          <button onClick={() => openCompare([...new Set(plans.map(p => p.bc_sku_id))])}
+            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
+            比價（全部 {plans.length}）
+          </button>
+        )}
       </div>
 
       {(selectedPlanIds.size > 0 || hasChanges) && (
@@ -231,6 +243,10 @@ export default function PackageDetailPage() {
               </button>
               <button onClick={handleBatchDelete} className="flex items-center gap-1 px-3 py-1.5 bg-white border border-red-300 text-red-600 text-xs font-medium rounded-lg">
                 <Trash2 className="w-3.5 h-3.5" /> 批量刪除
+              </button>
+              <button onClick={() => openCompare([...new Set(plans.filter(p => selectedPlanIds.has(p.id)).map(p => p.bc_sku_id))])}
+                className="flex items-center gap-1 px-3 py-1.5 bg-white border border-emerald-300 text-emerald-700 text-xs font-medium rounded-lg">
+                比價（選取）
               </button>
               <button onClick={() => setSelectedPlanIds(new Set())} className="text-xs text-gray-500">取消選取</button>
             </>
@@ -262,7 +278,8 @@ export default function PackageDetailPage() {
               </div>
               <PlanTable plans={dailyPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
-                selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate} />
+                selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
+                onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} />
             </div>
           )}
           {fixedPlans.length > 0 && (
@@ -275,7 +292,8 @@ export default function PackageDetailPage() {
               </div>
               <PlanTable plans={fixedPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
-                selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate} />
+                selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
+                onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} />
             </div>
           )}
         </>
@@ -336,62 +354,15 @@ export default function PackageDetailPage() {
         </div>
       )}
 
-      {/* Manual Add Modal */}
+      {/* Manual Add Modal — 重用 BC 對應彈窗（add 模式：多選 + 詳情 + 價格） */}
       {showManual && (
-        <div className="fixed inset-0 bg-black/50 flex items-start justify-center pt-16 z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-lg font-bold">手動新增 BC 商品</h2>
-              <button onClick={() => setShowManual(false)} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-5 border-b border-gray-100">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input type="text" value={bcSearch} onChange={(e) => searchBc(e.target.value)}
-                  placeholder="輸入商品名稱、SKU 或國家代碼..." autoFocus
-                  className="w-full pl-9 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm" />
-              </div>
-            </div>
-            {bcResults.length > 0 && (
-              <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
-                  <input type="checkbox"
-                    checked={bcResults.filter((p) => !plans.some((pl) => pl.bc_sku_id === p.sku_id)).every((p) => bcSelectedSkus.has(p.sku_id))}
-                    onChange={() => {
-                      const avail = bcResults.filter((p) => !plans.some((pl) => pl.bc_sku_id === p.sku_id))
-                      const allSel = avail.every((p) => bcSelectedSkus.has(p.sku_id))
-                      setBcSelectedSkus((prev) => { const n = new Set(prev); avail.forEach((p) => allSel ? n.delete(p.sku_id) : n.add(p.sku_id)); return n })
-                    }}
-                    className="accent-blue-600" /> 全選
-                </label>
-                {bcSelectedSkus.size > 0 && (
-                  <button onClick={() => handleImportSkus(Array.from(bcSelectedSkus))} disabled={batchImporting}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg disabled:opacity-50">
-                    <Download className="w-3.5 h-3.5" /> {batchImporting ? '匯入中...' : `批量匯入（${bcSelectedSkus.size}）`}
-                  </button>
-                )}
-              </div>
-            )}
-            <div className="flex-1 overflow-y-auto px-5 py-3">
-              {bcLoading ? <p className="text-sm text-gray-500 text-center py-4">搜尋中...</p>
-                : bcResults.length === 0 && bcSearch.length >= 2 ? <p className="text-sm text-gray-500 text-center py-4">找不到</p>
-                  : bcResults.map((p) => {
-                    const added = plans.some((pl) => pl.bc_sku_id === p.sku_id)
-                    return (
-                      <div key={p.sku_id} className={`flex items-center gap-3 p-3 rounded-lg border mb-1 ${added ? 'opacity-60 border-gray-100' : bcSelectedSkus.has(p.sku_id) ? 'border-blue-300 bg-blue-50/50' : 'border-gray-200'}`}>
-                        {!added && <input type="checkbox" checked={bcSelectedSkus.has(p.sku_id)} onChange={() => setBcSelectedSkus((prev) => { const n = new Set(prev); n.has(p.sku_id) ? n.delete(p.sku_id) : n.add(p.sku_id); return n })} className="accent-blue-600" />}
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate">{p.name}</div>
-                          <div className="text-xs text-gray-400 flex items-center gap-1.5">{p.sku_id} · {p.plan_type === '1' ? '單日型' : '總量型'} {getTypeLabels(p.type, p.rechargeable_product).map((t) => <span key={t.label} className={`px-1.5 py-0.5 rounded text-xs font-medium ${t.color}`}>{t.label}</span>)}</div>
-                        </div>
-                        {added && <span className="text-xs text-gray-400">已匯入</span>}
-                      </div>
-                    )
-                  })}
-            </div>
-          </div>
-        </div>
+        <BcMatchModal mode="add" subtitle={pkg.name} adding={batchImporting}
+          existingSkus={new Set(plans.map((p) => p.bc_sku_id))}
+          onAdd={async (skus) => { await handleImportSkus(skus); setShowManual(false) }}
+          onClose={() => setShowManual(false)} />
       )}
+      {comparePlans && <PlanCompareModal plans={comparePlans} onClose={() => setComparePlans(null)} />}
+      {detailSku && <BcDetailModal skuId={detailSku} onClose={() => setDetailSku(null)} />}
     </div>
   )
 }
@@ -631,10 +602,11 @@ function PreviewModal({ pkg, plans, editedPrices, packageId, onClose, onSaved }:
   )
 }
 
-function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate }: {
+function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort }: {
   plans: BoundPlan[]; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
   expandedIds: Set<string>; onToggleExpand: (id: string) => void; onRemove: (id: string) => void
   selectedIds: Set<string>; onToggleSelect: (id: string) => void; exchangeRate: number
+  onDetail: (skuId: string) => void; flowSort: '' | 'asc' | 'desc'; onToggleFlowSort: () => void
 }) {
   return (
     <div className="mt-3 bg-white rounded-xl border border-gray-200 overflow-x-auto">
@@ -644,7 +616,11 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
             <th className="w-10 px-3 py-3"></th>
             <th className="text-left px-3 py-3 font-medium min-w-[180px]">BC 商品名稱</th>
             <th className="text-left px-3 py-3 font-medium w-18">類型</th>
-            <th className="text-left px-3 py-3 font-medium w-24">流量</th>
+            <th className="text-left px-3 py-3 font-medium w-24">
+              <button onClick={onToggleFlowSort} className="inline-flex items-center gap-1 hover:text-gray-700">
+                流量 <span className="text-[10px]">{flowSort === 'asc' ? '▲' : flowSort === 'desc' ? '▼' : '⇅'}</span>
+              </button>
+            </th>
             <th className="text-left px-3 py-3 font-medium w-20">限速</th>
             <th className="text-left px-3 py-3 font-medium w-18">天數</th>
             <th className="text-right px-3 py-3 font-medium w-20">原始成本<br /><span className="text-xs font-normal">(CNY)</span></th>
@@ -673,7 +649,8 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
                       <span className="mt-0.5 text-gray-400">{isExp ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
                       <div className="min-w-0">
                         <div className="font-medium truncate flex items-center gap-1.5">
-                          {plan.bc_name}
+                          <button onClick={(e) => { e.stopPropagation(); onDetail(plan.bc_sku_id) }} className="text-left hover:text-blue-600 hover:underline">{plan.bc_name}</button>
+                          <button onClick={(e) => { e.stopPropagation(); onDetail(plan.bc_sku_id) }} title="查看詳情" className="text-gray-300 hover:text-blue-600 shrink-0"><Eye className="w-3.5 h-3.5" /></button>
                           {hasChanges && <span className="px-1 py-0.5 text-xs bg-red-100 text-red-600 rounded">異動</span>}
                         </div>
                         <div className="text-xs text-gray-400 font-mono">{plan.bc_sku_id}</div>
