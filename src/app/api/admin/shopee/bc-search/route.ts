@@ -83,6 +83,7 @@ export async function GET(request: Request) {
   while (true) {
     let query = supabase.from('bc_products')
       .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, prices, country_data')
+      .or('is_active.is.null,is_active.eq.true') // 只對應上架中的 BC 商品
       .range(from, from + 999)
     // 名稱或 SKU 搜尋（如果不是國家名搜尋）
     if (search && searchMccs.length === 0) {

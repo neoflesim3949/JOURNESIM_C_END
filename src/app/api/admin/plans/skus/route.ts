@@ -24,6 +24,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from('bc_products')
       .select('sku_id, name')
+      .or('is_active.is.null,is_active.eq.true') // 只取上架中
 
     if (type === 'sim') {
       query = query.in('type', SIM_TYPES)

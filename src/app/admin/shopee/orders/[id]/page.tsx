@@ -1114,13 +1114,15 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
     }
   }
 
+  // BC 流量單位為 KB（F023 usedAmount、F046 totalTraffic/remainingTraffic 皆為 KB）
   function fmtTraffic(s?: string | null) {
     if (s == null || s === '') return '—'
-    const n = Number(s)
-    if (isNaN(n)) return s
-    if (n < 0) return '不限'
-    if (n >= 1024) return (n / 1024).toFixed(2) + ' GB'
-    return n + ' MB'
+    const kb = Number(s)
+    if (isNaN(kb)) return s
+    if (kb < 0) return '不限'
+    if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(2) + ' GB'
+    if (kb >= 1024) return (kb / 1024).toFixed(2) + ' MB'
+    return Math.round(kb) + ' KB'
   }
 
   return (

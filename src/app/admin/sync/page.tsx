@@ -31,12 +31,30 @@ interface BCProductRow {
   limit_flow_speed: string | null
   plan_type: string | null
   updated_at: string
+  delisted_at?: string | null
+}
+
+interface SkuRef { sku_id: string; name: string | null }
+interface SyncDiff {
+  id: string; synced_at: string; bc_count: number | null; db_count: number | null
+  added_count: number; removed_count: number; added: SkuRef[] | null; removed: SkuRef[] | null
+  applied_removal: boolean; note: string | null
 }
 
 export default function AdminSyncPage() {
   const [results, setResults] = useState<SyncResult[]>([])
   const [syncing, setSyncing] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'countries' | 'products'>('countries')
+  const [activeTab, setActiveTab] = useState<'countries' | 'products' | 'delisted'>('countries')
+  const [diffs, setDiffs] = useState<SyncDiff[]>([])
+  const [showDiffLists, setShowDiffLists] = useState(false)
+
+  // 下架商品 state
+  const [delisted, setDelisted] = useState<BCProductRow[]>([])
+  const [delistedTotal, setDelistedTotal] = useState(0)
+  const [delistedPage, setDelistedPage] = useState(1)
+  const [delistedPageSize, setDelistedPageSize] = useState(50)
+  const [delistedSearch, setDelistedSearch] = useState('')
+  const [delistedLoading, setDelistedLoading] = useState(true)
 
   // Countries state
   const [countries, setCountries] = useState<BCCountryRow[]>([])
@@ -80,28 +98,55 @@ export default function AdminSyncPage() {
     setProductLoading(false)
   }
 
+  async function loadDelisted() {
+    setDelistedLoading(true)
+    const params = new URLSearchParams({ tab: 'delisted', page: String(delistedPage), pageSize: String(delistedPageSize) })
+    if (delistedSearch) params.set('search', delistedSearch)
+    const res = await fetch(`/api/admin/sync/data?${params}`)
+    if (res.ok) {
+      const data = await res.json()
+      setDelisted(data.data || [])
+      setDelistedTotal(data.total || 0)
+    }
+    setDelistedLoading(false)
+  }
+
   useEffect(() => { loadCountries() }, [countryPage, countryPageSize])
   useEffect(() => { loadProducts() }, [productPage, productPageSize])
+  useEffect(() => { loadDelisted() }, [delistedPage, delistedPageSize])
+  useEffect(() => { loadDiffs() }, [])
+
+  async function loadDiffs() {
+    try {
+      const res = await fetch('/api/admin/sync/diffs?limit=5')
+      if (res.ok) { const d = await res.json(); setDiffs(d.diffs || []) }
+    } catch { /* 忽略 */ }
+  }
 
   function handleCountrySearch() { setCountryPage(1); loadCountries() }
   function handleProductSearch() { setProductPage(1); loadProducts() }
+  function handleDelistedSearch() { setDelistedPage(1); loadDelisted() }
 
-  async function sync(type: 'countries' | 'products') {
+  async function sync(type: 'countries' | 'products' | 'prices') {
     setSyncing(type)
     try {
-      const res = await fetch(`/api/sync/${type}`, { method: 'POST' })
+      const url = type === 'countries' ? '/api/sync/countries'
+        : type === 'prices' ? '/api/sync/products?parts=prices'
+        : '/api/sync/products?parts=products'
+      const label = type === 'countries' ? '國家' : type === 'prices' ? '價格' : '商品'
+      const res = await fetch(url, { method: 'POST' })
       const data = await res.json()
 
       if (res.ok) {
         setResults((prev) => [
-          { type, success: true, message: `同步完成，共 ${data.synced} 筆` },
+          { type, success: true, message: `${label}同步完成，共 ${data.synced} 筆` },
           ...prev,
         ])
         if (type === 'countries') loadCountries()
-        else loadProducts()
+        else { loadProducts(); loadDelisted(); loadDiffs() }
       } else {
         setResults((prev) => [
-          { type, success: false, message: data.error || '同步失敗' },
+          { type, success: false, message: `${label}：${data.error || '同步失敗'}` },
           ...prev,
         ])
       }
@@ -115,9 +160,11 @@ export default function AdminSyncPage() {
     }
   }
 
+  // 全部同步：國家 → 商品 → 價格（分開呼叫，降低單次資料庫壓力）
   async function syncAll() {
     await sync('countries')
     await sync('products')
+    await sync('prices')
   }
 
   const countryTotalPages = Math.ceil(countryTotal / countryPageSize)
@@ -129,7 +176,7 @@ export default function AdminSyncPage() {
       <p className="mt-1 text-sm text-gray-500">從 BillionConnect API 同步國家和商品資料到本地資料庫</p>
 
       {/* Sync Actions */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
         <button
           onClick={() => sync('countries')}
           disabled={syncing !== null}
@@ -155,9 +202,24 @@ export default function AdminSyncPage() {
           </div>
           <div className="text-left">
             <div className="font-medium">同步商品</div>
-            <div className="text-xs text-gray-500">BC F002 + F003</div>
+            <div className="text-xs text-gray-500">BC F002（不含價格）</div>
           </div>
           {syncing === 'products' && <RefreshCw className="w-4 h-4 text-green-600 animate-spin ml-auto" />}
+        </button>
+
+        <button
+          onClick={() => sync('prices')}
+          disabled={syncing !== null}
+          className="flex items-center gap-3 p-5 bg-white border border-gray-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all disabled:opacity-50"
+        >
+          <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+            <Database className="w-5 h-5 text-amber-600" />
+          </div>
+          <div className="text-left">
+            <div className="font-medium">同步價格</div>
+            <div className="text-xs text-gray-500">BC F003（更新既有商品）</div>
+          </div>
+          {syncing === 'prices' && <RefreshCw className="w-4 h-4 text-amber-600 animate-spin ml-auto" />}
         </button>
 
         <button
@@ -170,7 +232,7 @@ export default function AdminSyncPage() {
           </div>
           <div className="text-left">
             <div className="font-medium">全部同步</div>
-            <div className="text-xs text-blue-200">國家 + 商品</div>
+            <div className="text-xs text-blue-200">國家 + 商品 + 價格</div>
           </div>
         </button>
       </div>
@@ -193,6 +255,61 @@ export default function AdminSyncPage() {
         </div>
       )}
 
+      {/* 上下架比對 */}
+      {diffs.length === 0 ? (
+        <div className="mt-6 bg-white border border-gray-200 rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-gray-800">上下架比對</span>
+            <span className="text-xs text-gray-400">尚無比對紀錄</span>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">執行一次「同步商品」或「全部同步」後，這裡會顯示本次新上架／下架的商品比對。</p>
+        </div>
+      ) : (() => {
+        const latest = diffs[0]
+        return (
+          <div className="mt-6 bg-white border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3">
+                <span className="font-medium text-gray-800">上下架比對</span>
+                <span className="text-xs text-gray-400">最近同步 {new Date(latest.synced_at).toLocaleString('zh-TW')}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700">新上架 {latest.added_count}</span>
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700">下架 {latest.removed_count}</span>
+                <span className="text-xs text-gray-400">BC {latest.bc_count ?? '—'} · 本地(同步前) {latest.db_count ?? '—'}</span>
+                {(latest.added_count > 0 || latest.removed_count > 0) && (
+                  <button onClick={() => setShowDiffLists(v => !v)} className="text-xs text-blue-600 hover:underline">
+                    {showDiffLists ? '收合明細' : '查看明細'}
+                  </button>
+                )}
+              </div>
+            </div>
+            {latest.note && <div className="mt-2 text-xs text-amber-600">⚠ {latest.note}</div>}
+            {showDiffLists && (
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DiffList title="新上架" color="green" items={latest.added || []} />
+                <DiffList title="已下架（已標記停用，資料保留）" color="red" items={latest.removed || []} />
+              </div>
+            )}
+            {diffs.length > 1 && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <div className="text-xs text-gray-400 mb-1">歷史</div>
+                <div className="space-y-1">
+                  {diffs.slice(1).map(d => (
+                    <div key={d.id} className="flex items-center gap-3 text-xs text-gray-500">
+                      <span>{new Date(d.synced_at).toLocaleString('zh-TW')}</span>
+                      <span className="text-green-600">+{d.added_count}</span>
+                      <span className="text-red-600">-{d.removed_count}</span>
+                      {d.note && <span className="text-amber-600">略過下架</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Data Tabs */}
       <div className="mt-8 flex border-b border-gray-200">
         <button
@@ -210,6 +327,14 @@ export default function AdminSyncPage() {
           }`}
         >
           BC 商品（{productTotal}）
+        </button>
+        <button
+          onClick={() => setActiveTab('delisted')}
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === 'delisted' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          下架 BC 商品（{delistedTotal}）
         </button>
       </div>
 
@@ -346,6 +471,102 @@ export default function AdminSyncPage() {
           )}
         </>
       )}
+
+      {/* Delisted Tab */}
+      {activeTab === 'delisted' && (
+        <>
+          <div className="mt-4 flex items-center gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input type="text" placeholder="搜尋套餐名稱或 SKU" value={delistedSearch}
+                onChange={(e) => setDelistedSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleDelistedSearch()}
+                className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
+            </div>
+            <button onClick={handleDelistedSearch} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+            <span className="text-xs text-gray-400">BC 已不再回傳、被標記下架的商品（資料保留；下次同步若再出現會自動復活）</span>
+          </div>
+
+          {delistedLoading ? <p className="mt-4 text-sm text-gray-500">載入中...</p> : (
+            <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-500 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium min-w-[280px]">套餐名稱</th>
+                      <th className="text-left px-4 py-3 font-medium">商品類型</th>
+                      <th className="text-left px-4 py-3 font-medium">套餐類型</th>
+                      <th className="text-left px-4 py-3 font-medium">銷售方式</th>
+                      <th className="text-left px-4 py-3 font-medium">流量 / 限速</th>
+                      <th className="text-left px-4 py-3 font-medium">下架時間</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {delisted.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">目前沒有下架商品</td></tr>
+                    ) : delisted.map((p) => {
+                      const isDaily = p.plan_type === '1'
+                      const capacity = formatCapacity(p.high_flow_size ?? p.capacity, isDaily)
+                      const speed = formatSpeed(p.limit_flow_speed)
+                      return (
+                        <tr key={p.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">
+                            <div className="font-medium max-w-[280px] truncate text-gray-600">{p.name}</div>
+                            <div className="text-xs text-gray-400 font-mono mt-0.5">{p.sku_id}</div>
+                          </td>
+                          <td className="px-4 py-2 text-xs">{p.type ? getProductTypeLabel(p.type) : '-'}</td>
+                          <td className="px-4 py-2 text-xs">{getPlanTypeLabel(p.plan_type)}</td>
+                          <td className="px-4 py-2 text-xs">{getSalesMethodLabel(p.sales_method)}</td>
+                          <td className="px-4 py-2 text-xs">
+                            {capacity !== '-' ? capacity : ''}{capacity !== '-' && speed !== '-' ? ' / ' : ''}{speed !== '-' ? speed : ''}{capacity === '-' && speed === '-' ? '-' : ''}
+                          </td>
+                          <td className="px-4 py-2 text-red-500 text-xs">{p.delisted_at ? new Date(p.delisted_at).toLocaleString('zh-TW') : '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  每頁
+                  <select value={delistedPageSize} onChange={(e) => { setDelistedPageSize(Number(e.target.value)); setDelistedPage(1) }}
+                    className="px-2 py-1 border border-gray-300 rounded text-sm">
+                    {[10, 20, 30, 50, 100, 200, 500].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  筆 · 共 {delistedTotal} 筆
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setDelistedPage(Math.max(1, delistedPage - 1))} disabled={delistedPage <= 1}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
+                  <span className="px-3 py-1 text-sm">{delistedPage} / {Math.max(1, Math.ceil(delistedTotal / delistedPageSize))}</span>
+                  <button onClick={() => setDelistedPage(delistedPage + 1)} disabled={delistedPage >= Math.ceil(delistedTotal / delistedPageSize)}
+                    className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function DiffList({ title, color, items }: { title: string; color: 'green' | 'red'; items: SkuRef[] }) {
+  const head = color === 'green' ? 'text-green-700' : 'text-red-700'
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className={`px-3 py-1.5 text-xs font-medium bg-gray-50 ${head}`}>{title}（{items.length}）</div>
+      <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+        {items.length === 0 ? (
+          <div className="px-3 py-3 text-xs text-gray-400">無</div>
+        ) : items.map((it) => (
+          <div key={it.sku_id} className="px-3 py-1.5 text-xs">
+            <div className="text-gray-700 truncate">{it.name || '—'}</div>
+            <div className="text-gray-400 font-mono">{it.sku_id}</div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

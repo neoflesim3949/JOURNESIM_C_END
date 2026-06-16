@@ -40,20 +40,22 @@ export default function AdminEsimPlansPage() {
 
   async function load() {
     setLoading(true)
-    const params = new URLSearchParams({ type: 'esim', page: String(page), pageSize: String(pageSize) })
-    if (search) params.set('search', search)
-    if (filterPlanType) params.set('planType', filterPlanType)
-    if (filterProductType) params.set('productType', filterProductType)
-    if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
-    if (filterRechargeable) params.set('rechargeable', filterRechargeable)
-    if (filterCountries.length) params.set('countries', filterCountries.join(','))
-    const res = await fetch(`/api/admin/plans?${params}`)
-    if (res.ok) {
-      const data = await res.json()
-      setProducts(data.data || [])
-      setTotal(data.total || 0)
-    }
-    setLoading(false)
+    try {
+      const params = new URLSearchParams({ type: 'esim', page: String(page), pageSize: String(pageSize) })
+      if (search) params.set('search', search)
+      if (filterPlanType) params.set('planType', filterPlanType)
+      if (filterProductType) params.set('productType', filterProductType)
+      if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
+      if (filterRechargeable) params.set('rechargeable', filterRechargeable)
+      if (filterCountries.length) params.set('countries', filterCountries.join(','))
+      const res = await fetch(`/api/admin/plans?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        setProducts(data.data || [])
+        setTotal(data.total || 0)
+      }
+    } catch { /* 網路錯誤：保留現有資料，不卡在載入中 */ }
+    finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterRechargeable, filterCountries])

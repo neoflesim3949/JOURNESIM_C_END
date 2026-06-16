@@ -5,6 +5,8 @@ import { ESIM_TYPES, SIM_TYPES, ESIM_SIM_ALL_TYPES } from '@/lib/bc-enums'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyTypeFilter(query: any, type: string) {
+  // 只顯示上架中（排除已下架 is_active=false；true/null 視為上架）
+  query = query.or('is_active.is.null,is_active.eq.true')
   // rechargeable_product='1' → eSIM 複充商品（不管 type）；同商品可能同時在 SIM 與 eSIM
   if (type === 'sim') return query.in('type', SIM_TYPES)
   if (type === 'acceleration') {

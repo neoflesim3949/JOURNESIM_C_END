@@ -46,6 +46,7 @@ export async function GET(request: Request) {
   while (true) {
     let query = supabase.from('bc_products')
       .select('sku_id, name, type, plan_type, high_flow_size, rechargeable_product, country_data')
+      .or('is_active.is.null,is_active.eq.true') // 只取上架中
       .order('name')
       .range(from, from + 999)
 

@@ -5,14 +5,37 @@ const BC_URL = process.env.BILLIONCONNECT_URL!
 const APP_KEY = process.env.BILLIONCONNECT_APP_KEY!
 const APP_SECRET = process.env.BILLIONCONNECT_APP_SECRET!
 
-// 記錄 BC API log 到資料庫
+// 大量讀取端點（國家/商品/價格清單）成功時回應可達數 MB，不存巨大 body，避免 bc_api_logs 膨脹拖垮寫入
+const BULK_TRADE_TYPES = new Set(['F001', 'F002', 'F003'])
+const MAX_BODY_CHARS = 12_000
+
+function trimBody(body: object | null): object | null {
+  if (body == null) return null
+  try {
+    const s = JSON.stringify(body)
+    if (s.length <= MAX_BODY_CHARS) return body
+    return { _truncated: true, _bytes: s.length, preview: s.slice(0, MAX_BODY_CHARS) }
+  } catch {
+    return null
+  }
+}
+
+// 記錄 BC API log 到資料庫（fire-and-forget；絕不阻塞或影響主流程）
 async function logBcApi(entry: {
   trade_type: string; direction: string; request_body: object | null
   response_body: object | null; status: string; error_message?: string; duration_ms?: number
 }) {
   try {
     const supabase = createAdminClient()
-    await supabase.from('bc_api_logs').insert(entry)
+    const isBulkOk = BULK_TRADE_TYPES.has(entry.trade_type) && entry.status === 'success'
+    const row = {
+      ...entry,
+      request_body: trimBody(entry.request_body),
+      // 大量端點成功 → 只留摘要；其餘（含錯誤）照存但截斷上限
+      response_body: isBulkOk ? { _summary: 'bulk response omitted' } : trimBody(entry.response_body),
+    }
+    // 限時 8 秒，避免 log 寫入卡死（之前出現 90s→522）
+    await supabase.from('bc_api_logs').insert(row).abortSignal(AbortSignal.timeout(8000))
   } catch (e) {
     console.error('[BC LOG] 寫入失敗:', e)
   }
@@ -46,16 +69,31 @@ async function callBC<T>(tradeType: string, tradeData: object = {}): Promise<T> 
   const sign = generateSign(body)
   const startTime = Date.now()
 
-  const res = await fetch(BC_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json;charset=UTF-8',
-      'x-channel-id': APP_KEY,
-      'x-sign-method': 'md5',
-      'x-sign-value': sign,
-    },
-    body: JSON.stringify(body),
-  })
+  // 加逾時保護：BC 無回應時不會無限期卡住（否則整支同步會掛死）
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 45_000)
+  let res: Response
+  try {
+    res = await fetch(BC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+        'x-channel-id': APP_KEY,
+        'x-sign-method': 'md5',
+        'x-sign-value': sign,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (err) {
+    const duration = Date.now() - startTime
+    const aborted = err instanceof Error && err.name === 'AbortError'
+    const errMsg = aborted ? 'BillionConnect 連線逾時（45s）' : `BillionConnect 連線失敗：${err instanceof Error ? err.message : String(err)}`
+    logBcApi({ trade_type: tradeType, direction: 'outgoing', request_body: body, response_body: null, status: 'error', error_message: errMsg, duration_ms: duration })
+    throw new Error(errMsg)
+  } finally {
+    clearTimeout(timer)
+  }
 
   if (!res.ok) {
     const duration = Date.now() - startTime
