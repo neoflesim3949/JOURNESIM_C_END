@@ -65,6 +65,10 @@ export async function POST(request: Request) {
   const body = await request.json()
   const supabase = createAdminClient()
 
+  // 新套餐排到最後
+  const { data: maxRow } = await supabase.from('packages').select('sort_order').order('sort_order', { ascending: false }).limit(1).maybeSingle()
+  const nextOrder = (Number(maxRow?.sort_order) || 0) + 1
+
   const { data, error } = await supabase.from('packages').insert({
     name: body.name,
     description: body.description || null,
@@ -72,6 +76,7 @@ export async function POST(request: Request) {
     category: body.category || null,
     tags: Array.isArray(body.tags) && body.tags.length ? body.tags : null,
     countries: Array.isArray(body.countries) && body.countries.length ? body.countries : null,
+    sort_order: nextOrder,
   }).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

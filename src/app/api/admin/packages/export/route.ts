@@ -13,7 +13,7 @@ export async function GET() {
     .select('id, name, category, tags, product_type, countries, apns, operators, sort_order').order('sort_order')
   const pkgs = packages || []
 
-  const { data: plans } = await supabase.from('package_plans').select('id, package_id, bc_sku_id')
+  const { data: plans } = await supabase.from('package_plans').select('id, package_id, bc_sku_id').order('sort_order').order('created_at')
   const skuIds = [...new Set((plans || []).map(p => p.bc_sku_id))]
   const { data: bc } = skuIds.length
     ? await supabase.from('bc_products').select('sku_id, name').in('sku_id', skuIds)

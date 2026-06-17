@@ -218,6 +218,21 @@ export default function PackageDetailPage() {
   const fixedPlans = sortFlow(plans.filter((p) => p.plan_category === 'fixed'))
   const hasChanges = editedPrices.size > 0
 
+  // 手動拖曳排序某分組（更新 plans 並存 sort_order）
+  async function reorderGroup(orderedIds: string[]) {
+    const idSet = new Set(orderedIds)
+    const byId = new Map(plans.map((p) => [p.id, p]))
+    const positions: number[] = []
+    plans.forEach((p, i) => { if (idSet.has(p.id)) positions.push(i) })
+    const newPlans = [...plans]
+    positions.forEach((pos, k) => { const pl = byId.get(orderedIds[k]); if (pl) newPlans[pos] = pl })
+    setPlans(newPlans)
+    await fetch(`/api/admin/packages/${id}/prices`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_updates: newPlans.map((p, i) => ({ id: p.id, sort_order: i })) }),
+    })
+  }
+
   return (
     <div>
       <Link href="/admin/packages" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600">
@@ -354,7 +369,7 @@ export default function PackageDetailPage() {
               <PlanTable plans={dailyPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
-                onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} />
+                onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
             </div>
           )}
           {fixedPlans.length > 0 && (
@@ -368,7 +383,7 @@ export default function PackageDetailPage() {
               <PlanTable plans={fixedPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
-                onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} />
+                onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
             </div>
           )}
         </>
@@ -701,12 +716,19 @@ function PreviewModal({ pkg, plans, editedPrices, packageId, onClose, onSaved }:
   )
 }
 
-function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort }: {
+function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
   plans: BoundPlan[]; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
   expandedIds: Set<string>; onToggleExpand: (id: string) => void; onRemove: (id: string) => void
   selectedIds: Set<string>; onToggleSelect: (id: string) => void; exchangeRate: number
   onDetail: (skuId: string) => void; flowSort: '' | 'asc' | 'desc'; onToggleFlowSort: () => void
+  canDrag: boolean; onReorder: (orderedIds: string[]) => void
 }) {
+  const [dragI, setDragI] = useState<number | null>(null)
+  function dropRow(i: number) {
+    if (dragI === null || dragI === i) { setDragI(null); return }
+    const arr = [...plans]; const [m] = arr.splice(dragI, 1); arr.splice(i, 0, m)
+    setDragI(null); onReorder(arr.map(p => p.id))
+  }
   return (
     <div className="mt-3 bg-white rounded-xl border border-gray-200 overflow-x-auto">
       <table className="w-full text-sm">
@@ -731,7 +753,7 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {plans.map((plan) => {
+          {plans.map((plan, i) => {
             const isExp = expandedIds.has(plan.id)
             const isDaily = plan.plan_type === '1'
             const unitDays = plan.days ?? 1
@@ -739,9 +761,16 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
             const hasChanges = plan.copy_prices.some((cp) => cp.price_changed)
             return (
               <Fragment key={plan.id}>
-                <tr className={`hover:bg-gray-50 cursor-pointer ${isExp ? 'bg-blue-50/30' : ''} ${isSel ? 'bg-blue-50/50' : ''} ${hasChanges ? 'bg-red-50/30' : ''}`} onClick={() => onToggleExpand(plan.id)}>
+                <tr draggable={canDrag}
+                  onDragStart={() => canDrag && setDragI(i)}
+                  onDragOver={(e) => { if (canDrag && dragI !== null) e.preventDefault() }}
+                  onDrop={() => canDrag && dropRow(i)}
+                  className={`hover:bg-gray-50 cursor-pointer ${dragI === i ? 'bg-blue-50 opacity-60' : isExp ? 'bg-blue-50/30' : isSel ? 'bg-blue-50/50' : hasChanges ? 'bg-red-50/30' : ''}`} onClick={() => onToggleExpand(plan.id)}>
                   <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={isSel} onChange={() => onToggleSelect(plan.id)} className="accent-blue-600" />
+                    <div className="flex items-center gap-1">
+                      {canDrag && <span className="text-gray-300 cursor-grab active:cursor-grabbing select-none" title="拖曳排序">⠿</span>}
+                      <input type="checkbox" checked={isSel} onChange={() => onToggleSelect(plan.id)} className="accent-blue-600" />
+                    </div>
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex items-start gap-2">

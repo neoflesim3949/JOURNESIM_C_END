@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
-import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil, Download, Upload, Signal } from 'lucide-react'
+import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil, Download, Upload, Signal, Copy } from 'lucide-react'
 
 import { getTypeLabels } from '@/lib/bc-enums'
 import CountryMultiSelect from '@/components/admin/country-multi-select'
@@ -99,6 +99,15 @@ export default function AdminPackagesPage() {
     load()
   }
 
+  const [duplicating, setDuplicating] = useState<string | null>(null)
+  async function handleDuplicate(id: string) {
+    setDuplicating(id)
+    const res = await fetch(`/api/admin/packages/${id}/duplicate`, { method: 'POST' })
+    setDuplicating(null)
+    if (!res.ok) { const j = await res.json().catch(() => ({})); alert(j.error || '複製失敗'); return }
+    load()
+  }
+
   async function handleDelete(id: string) {
     if (!confirm('確定要刪除此套餐？')) return
     await fetch('/api/admin/packages', {
@@ -180,18 +189,27 @@ export default function AdminPackagesPage() {
     }
   }
 
-  // 排序：與相鄰套餐交換 sort_order
-  async function move(idx: number, dir: -1 | 1) {
-    const list = filteredPackages
-    const j = idx + dir
-    if (j < 0 || j >= list.length) return
-    const a = list[idx], b = list[j]
-    const ao = a.sort_order ?? 0, bo = b.sort_order ?? 0
-    await Promise.all([
-      fetch('/api/admin/packages', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: a.id, sort_order: bo === ao ? bo + dir : bo }) }),
-      fetch('/api/admin/packages', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.id, sort_order: ao }) }),
-    ])
-    load()
+  // 拖曳/輸入序號排序（僅未篩選分類時可用）
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  async function persistOrder(arr: Pkg[]) {
+    setPackages(arr)
+    await fetch('/api/admin/packages/reorder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: arr.map(p => p.id) }),
+    })
+  }
+  function dropAt(i: number) {
+    if (dragIdx === null || dragIdx === i) { setDragIdx(null); return }
+    const arr = [...packages]
+    const [m] = arr.splice(dragIdx, 1); arr.splice(i, 0, m)
+    setDragIdx(null); persistOrder(arr)
+  }
+  // 直接輸入序號（1-based）移動到該位置
+  function moveTo(idx: number, posStr: string) {
+    const pos = Math.min(Math.max(1, parseInt(posStr) || idx + 1), packages.length) - 1
+    if (pos === idx) return
+    const arr = [...packages]; const [m] = arr.splice(idx, 1); arr.splice(pos, 0, m)
+    persistOrder(arr)
   }
 
   async function handleToggle(id: string, isActive: boolean) {
@@ -454,9 +472,26 @@ export default function AdminPackagesPage() {
                 </div>
               </div>
             ) : (
-              <div key={pkg.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:border-gray-300 transition-all">
+              <div key={pkg.id}
+                draggable={!filterCategory}
+                onDragStart={() => !filterCategory && setDragIdx(idx)}
+                onDragOver={(e) => { if (!filterCategory && dragIdx !== null) e.preventDefault() }}
+                onDrop={() => !filterCategory && dropAt(idx)}
+                className={`bg-white border rounded-xl p-5 transition-all ${dragIdx === idx ? 'border-blue-400 opacity-60' : 'border-gray-200 hover:border-gray-300'}`}>
                 <div className="flex items-center justify-between">
-                  <div>
+                  <div className="flex items-start gap-3">
+                    {!filterCategory && <span className="mt-0.5 text-gray-300 cursor-grab active:cursor-grabbing select-none" title="拖曳排序">⠿</span>}
+                    {filterCategory ? (
+                      <span className="mt-0.5 inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-medium shrink-0">{idx + 1}</span>
+                    ) : (
+                      <input type="number" min={1} max={packages.length} key={`seq-${pkg.id}-${idx}`} defaultValue={idx + 1}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => moveTo(idx, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                        title="輸入序號移動"
+                        className="mt-0.5 w-9 h-7 text-center rounded bg-gray-100 text-gray-600 text-xs font-medium shrink-0 border border-transparent focus:border-blue-400 focus:bg-white" />
+                    )}
+                    <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-semibold">{pkg.name}</h3>
                       <span className="px-2 py-0.5 text-xs rounded-full bg-blue-50 text-blue-600">{pkg.product_type}</span>
@@ -503,18 +538,15 @@ export default function AdminPackagesPage() {
                         </div>
                       )
                     })()}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="flex flex-col mr-1">
-                      <button onClick={() => move(idx, -1)} disabled={idx === 0} title="上移"
-                        className="text-gray-300 hover:text-gray-600 disabled:opacity-30 leading-none">▲</button>
-                      <button onClick={() => move(idx, 1)} disabled={idx === filteredPackages.length - 1} title="下移"
-                        className="text-gray-300 hover:text-gray-600 disabled:opacity-30 leading-none">▼</button>
-                    </div>
                     <button onClick={() => { setEditingId(pkg.id); setEditForm({ name: pkg.name, description: pkg.description || '', product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', '), countries: pkg.countries || [] }) }}
                       className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Pencil className="w-4 h-4" /></button>
                     <Link href={`/admin/packages/${pkg.id}`}
                       className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">管理內容</Link>
+                    <button onClick={() => handleDuplicate(pkg.id)} disabled={duplicating === pkg.id} title="複製套餐"
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded disabled:opacity-50"><Copy className="w-4 h-4" /></button>
                     <button onClick={() => handleDelete(pkg.id)}
                       className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
                   </div>
