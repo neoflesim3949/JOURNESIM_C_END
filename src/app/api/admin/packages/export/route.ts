@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
 
 // GET — 匯出所有套餐組成（每列＝套餐內一個 BC SKU）
 // 欄位：套餐名稱/國家/電信商/APN/分類/標籤/類型/BC SKU/BC名稱 + 各 copies 售價
@@ -48,7 +48,10 @@ export async function GET() {
     : { data: [] }
   const cMap = new Map((cRows || []).map(c => [c.mcc, c.name_zh || c.name]))
 
+  // 每個套餐一個組別索引（用來上色）
   const rows: Record<string, string | number>[] = []
+  const rowGroup: number[] = [] // 與 rows 對齊，記錄每列屬於第幾個套餐
+  let gi = 0
   for (const pkg of pkgs) {
     const meta = {
       '套餐名稱': pkg.name,
@@ -61,19 +64,38 @@ export async function GET() {
     }
     const list = plansByPkg.get(pkg.id) || []
     if (list.length === 0) {
-      rows.push({ ...meta, 'BC SKU': '', 'BC名稱': '' })
+      rows.push({ ...meta, 'BC SKU': '', 'BC名稱': '' }); rowGroup.push(gi)
     } else {
       for (const pl of list) {
         const prices = priceByPlan.get(pl.id)
         const row: Record<string, string | number> = { ...meta, 'BC SKU': pl.sku, 'BC名稱': nameMap.get(pl.sku) || '' }
         for (const c of copiesCols) { const v = prices?.get(c); if (v) row[c] = v }
-        rows.push(row)
+        rows.push(row); rowGroup.push(gi)
       }
     }
+    gi++
   }
 
   const header = ['套餐名稱', '國家', '電信商', 'APN', '分類', '標籤', '類型', 'BC SKU', 'BC名稱', ...copiesCols]
   const ws = XLSX.utils.json_to_sheet(rows, { header })
+
+  // 一組一色（交替柔色），標頭灰底粗體
+  const palette = ['FFFFFF', 'FFF3E0', 'E3F2FD', 'E8F5E9', 'F3E5F5', 'FFFDE7', 'FCE4EC']
+  const headerStyle = { fill: { patternType: 'solid', fgColor: { rgb: '000000' } }, font: { bold: true, color: { rgb: 'FFFFFF' } } }
+  for (let c = 0; c < header.length; c++) {
+    const ref = XLSX.utils.encode_cell({ r: 0, c })
+    if (ws[ref]) ws[ref].s = headerStyle
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const color = palette[rowGroup[i] % palette.length]
+    if (color === 'FFFFFF') continue
+    for (let c = 0; c < header.length; c++) {
+      const ref = XLSX.utils.encode_cell({ r: i + 1, c })
+      if (!ws[ref]) ws[ref] = { t: 's', v: '' }
+      ws[ref].s = { fill: { patternType: 'solid', fgColor: { rgb: color } } }
+    }
+  }
+
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '套餐')
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer

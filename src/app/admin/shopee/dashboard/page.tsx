@@ -65,6 +65,11 @@ export default function ShopeeDashboardPage() {
     setFrom(f)
     setTo(l)
   }
+  function pickLast30() {
+    // 近 30 天（含今天）
+    setTo(fmtTW(now))
+    setFrom(fmtTW(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000)))
+  }
 
   async function load() {
     setLoading(true)
@@ -124,6 +129,7 @@ export default function ShopeeDashboardPage() {
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
           <button onClick={() => pickMonth(0)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">本期</button>
           <button onClick={() => pickMonth(-1)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">上期</button>
+          <button onClick={pickLast30} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">近30天</button>
           <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={async () => {
             if (!confirm('回填所有已下單商品的成本價？')) return

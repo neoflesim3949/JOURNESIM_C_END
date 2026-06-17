@@ -97,7 +97,8 @@ export async function GET(request: Request) {
       Math.abs(s.other_service_fee ?? 0) + Math.abs(s.processing_fee ?? 0)
     settledWallet += s.wallet_amount ?? 0
   }
-  const settledProfit = settledWallet - settledCost
+  // 利潤 = 商品總價 − 平台費用 − 商品成本
+  const settledProfit = settledRevenue - settledPlatformFees - settledCost
   const settledPlatformRate = settledRevenue > 0 ? (settledPlatformFees / settledRevenue) * 100 : 0
   const settledProfitRate = settledRevenue > 0 ? (settledProfit / settledRevenue) * 100 : 0
 
