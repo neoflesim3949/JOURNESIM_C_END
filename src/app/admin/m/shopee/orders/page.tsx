@@ -133,7 +133,7 @@ export default function MobileShopeeOrdersPage() {
 
       {/* 新增訂單彈窗 */}
       {showNew && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center" onClick={() => setShowNew(false)}>
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end sm:items-center justify-center">
           <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold">手動新增訂單</h2>

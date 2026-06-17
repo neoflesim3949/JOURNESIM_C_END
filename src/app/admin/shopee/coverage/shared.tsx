@@ -108,7 +108,7 @@ export function EditModal({ m, onSave, onClose }: { m: Partial<Master>; onSave: 
   const [sku, setSku] = useState(m.main_sku_code || '')
   const [note, setNote] = useState(m.note || '')
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-bold text-gray-800">{m.id ? '編輯主檔' : '新增主檔'}</h2>

@@ -459,7 +459,7 @@ export default function AdminCardsPage() {
 
       {/* 詳情彈窗 */}
       {detailIccid && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setDetailIccid(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <div>
@@ -613,7 +613,7 @@ export default function AdminCardsPage() {
 
       {/* 新增卡片彈窗 */}
       {showAdd && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !addBusy && setShowAdd(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-bold text-lg">新增卡片</h2>
@@ -681,7 +681,7 @@ export default function AdminCardsPage() {
 
       {/* 國家/運營商詳情彈窗 */}
       {countryDetail && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70] p-4" onClick={() => setCountryDetail(null)}>
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white shrink-0">
               <h3 className="font-bold text-lg text-gray-800">覆蓋國家地區 & 運營商</h3>

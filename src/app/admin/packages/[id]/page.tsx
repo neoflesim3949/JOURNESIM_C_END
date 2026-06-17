@@ -11,6 +11,8 @@ import PlanCompareModal from '@/components/admin/plan-compare-modal'
 import type { ComparePlan } from '@/components/admin/plan-compare-table'
 import BcDetailModal from '@/components/admin/bc-detail-modal'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
+import { roundPrice, type RoundMode } from '@/lib/shopee-pricing'
+import CountryMultiSelect from '@/components/admin/country-multi-select'
 
 interface CopyPrice { id: string; copies: string; cost_price: number; original_cost_price: number | null; sell_price: number; price_changed: boolean }
 interface BoundPlan {
@@ -22,7 +24,10 @@ interface BoundPlan {
   rechargeable_product: string | null
   is_active: boolean; copy_prices: CopyPrice[]
 }
-interface Pkg { id: string; name: string; description: string | null; product_type: string }
+interface Pkg {
+  id: string; name: string; description: string | null; product_type: string
+  category?: string | null; tags?: string[] | null; countries?: string[] | null
+}
 
 export default function PackageDetailPage() {
   const { id } = useParams() as { id: string }
@@ -39,9 +44,24 @@ export default function PackageDetailPage() {
   const [batchPrice, setBatchPrice] = useState('')
   const [batchMarkup, setBatchMarkup] = useState('1.5')
   const [batchAdd, setBatchAdd] = useState('3')
+  const [batchRound, setBatchRound] = useState<RoundMode>('ceil')
+  const [batchRoundTo, setBatchRoundTo] = useState('1')
   const [showPreview, setShowPreview] = useState(false)
   const [showManual, setShowManual] = useState(false)
   const [batchImporting, setBatchImporting] = useState(false)
+  // 編輯套餐資訊（行內，always-visible）
+  const [editForm, setEditForm] = useState({ name: '', product_type: 'esim', category: '', tagsText: '', description: '', countries: [] as string[] })
+  const [countryOpts, setCountryOpts] = useState<{ mcc: string; name: string }[]>([])
+  const [savingInfo, setSavingInfo] = useState(false)
+  const parseTags = (s: string) => s.split(/[,，]/).map(t => t.trim()).filter(Boolean)
+  async function saveEdit() {
+    setSavingInfo(true)
+    await fetch('/api/admin/packages', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name: editForm.name, product_type: editForm.product_type, category: editForm.category, tags: parseTags(editForm.tagsText), description: editForm.description, countries: editForm.countries }),
+    })
+    await loadData(); setSavingInfo(false)
+  }
   const [importCountry, setImportCountry] = useState('')
   const [exchangeRate, setExchangeRate] = useState(0)
   // 商品詳情彈窗
@@ -76,6 +96,16 @@ export default function PackageDetailPage() {
   }
 
   useEffect(() => { loadData() }, [id])
+  useEffect(() => {
+    fetch('/api/admin/shopee/bc-search?action=options')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.countries) setCountryOpts(d.countries.map((c: { mcc: string; name: string }) => ({ mcc: c.mcc, name: `${c.name}（${c.mcc}）` }))) })
+      .catch(() => {})
+  }, [])
+  // 套餐載入後帶入行內編輯表單
+  useEffect(() => {
+    if (pkg) setEditForm({ name: pkg.name, product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', '), description: pkg.description || '', countries: pkg.countries || [] })
+  }, [pkg])
 
   async function handleImportByCountry() {
     if (!importCountry) return
@@ -155,7 +185,7 @@ export default function PackageDetailPage() {
           const markup = parseFloat(batchMarkup)
           if (!isNaN(markup) && cp.cost_price > 0 && exchangeRate > 0) {
             const costTwd = cp.cost_price / exchangeRate
-            newPrices.set(cp.id, Math.ceil(costTwd * markup))
+            newPrices.set(cp.id, roundPrice(costTwd * markup, batchRound, Number(batchRoundTo)))
           }
         } else if (batchMode === 'formula') {
           // 混合公式：(成本TWD + 加價) × 倍率
@@ -163,7 +193,7 @@ export default function PackageDetailPage() {
           const markup = parseFloat(batchMarkup) || 1
           if (cp.cost_price > 0 && exchangeRate > 0) {
             const costTwd = cp.cost_price / exchangeRate
-            newPrices.set(cp.id, Math.ceil((costTwd + add) * markup))
+            newPrices.set(cp.id, roundPrice((costTwd + add) * markup, batchRound, Number(batchRoundTo)))
           }
         }
       }
@@ -218,6 +248,51 @@ export default function PackageDetailPage() {
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
           <Download className="w-4 h-4" /> {importing ? '匯入中...' : '自動匯入'}
         </button>
+      </div>
+
+      {/* 套餐資訊（行內編輯） */}
+      <div className="mt-4 bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-700">套餐資訊</span>
+          <button onClick={saveEdit} disabled={savingInfo}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            <Save className="w-3.5 h-3.5" /> {savingInfo ? '儲存中…' : '儲存資訊'}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-2">
+            <label className="text-xs text-gray-500">套餐名稱</label>
+            <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">類型</label>
+            <select value={editForm.product_type} onChange={e => setEditForm({ ...editForm, product_type: e.target.value })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="esim">eSIM</option><option value="sim">SIM</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">分類</label>
+            <input value={editForm.category} onChange={e => setEditForm({ ...editForm, category: e.target.value })} placeholder="例：東南亞"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">標籤（逗號分隔）</label>
+            <input value={editForm.tagsText} onChange={e => setEditForm({ ...editForm, tagsText: e.target.value })} placeholder="例：熱門, 促銷"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500">國家（多選；篩 APN/電信商）</label>
+            <CountryMultiSelect options={countryOpts} value={editForm.countries}
+              onChange={v => setEditForm({ ...editForm, countries: v })} placeholder="搜尋國家（中文或 MCC）" className="mt-1 w-full" />
+          </div>
+          <div className="md:col-span-3">
+            <label className="text-xs text-gray-500">描述（選填）</label>
+            <input value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })} placeholder="套餐描述"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          </div>
+        </div>
       </div>
 
       {/* Batch bar */}
@@ -346,6 +421,29 @@ export default function PackageDetailPage() {
                 </p>
               </div>
             )}
+            {batchMode !== 'fixed' && (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-500">進位方式</label>
+                  <select value={batchRound} onChange={(e) => setBatchRound(e.target.value as RoundMode)}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                    <option value="ceil">無條件進位</option>
+                    <option value="round">四捨五入</option>
+                    <option value="floor">無條件捨去</option>
+                    <option value="none">不進位</option>
+                    <option value="ceil95">無條件進至95</option>
+                    <option value="floor95">無條件捨至95</option>
+                    <option value="round9">四捨五入至9</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500">進位單位</label>
+                  <input type="number" value={batchRoundTo} onChange={(e) => setBatchRoundTo(e.target.value)}
+                    disabled={['ceil95', 'floor95', 'round9', 'none'].includes(batchRound)}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100" />
+                </div>
+              </div>
+            )}
             <div className="mt-4 flex gap-3">
               <button onClick={handleBatchPriceApply} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">套用</button>
               <button onClick={() => setShowBatchPrice(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg">取消</button>
@@ -357,6 +455,7 @@ export default function PackageDetailPage() {
       {/* Manual Add Modal — 重用 BC 對應彈窗（add 模式：多選 + 詳情 + 價格） */}
       {showManual && (
         <BcMatchModal mode="add" subtitle={pkg.name} adding={batchImporting}
+          defaultKind={pkg.product_type === 'sim' ? 'sim' : 'esim'}
           existingSkus={new Set(plans.map((p) => p.bc_sku_id))}
           onAdd={async (skus) => { await handleImportSkus(skus); setShowManual(false) }}
           onClose={() => setShowManual(false)} />

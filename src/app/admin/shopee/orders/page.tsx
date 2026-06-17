@@ -670,7 +670,7 @@ export default function ShopeeOrdersPage() {
 
       {/* 批次列印彈窗 */}
       {batchPrintModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setBatchPrintModal(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-bold">{batchPrintModal === 'detail' ? `批次明細標籤（${batchPrintData.length} 筆）` : `批次商品標籤（${batchPrintData.length} 筆）`}</h2>
@@ -772,7 +772,7 @@ export default function ShopeeOrdersPage() {
 
       {/* 標籤字體設定彈窗 */}
       {showManualOrder && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !creating && setShowManualOrder(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-bold text-lg">手動新增蝦皮訂單</h2>
@@ -816,7 +816,7 @@ export default function ShopeeOrdersPage() {
       )}
 
       {showLabelSettings && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLabelSettings(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
             <h2 className="font-bold mb-4">標籤 / 收據設定</h2>
             <div className="space-y-3">
@@ -1097,7 +1097,7 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="p-5 border-b border-gray-200 flex items-center justify-between">
           <h2 className="font-bold">批量編輯商品（{groups.length} 種商品）</h2>
@@ -1160,7 +1160,7 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
 
         {/* BC 對應子彈窗（完整篩選） */}
         {matchingIdx !== null && (
-          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-[60]" onClick={() => setMatchingIdx(null)}>
+          <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-[60]">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="p-5 border-b border-gray-200 flex items-center justify-between">
                 <div>

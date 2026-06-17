@@ -71,6 +71,7 @@ export async function POST(request: Request) {
     product_type: body.product_type || 'esim',
     category: body.category || null,
     tags: Array.isArray(body.tags) && body.tags.length ? body.tags : null,
+    countries: Array.isArray(body.countries) && body.countries.length ? body.countries : null,
   }).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -91,6 +92,7 @@ export async function PATCH(request: Request) {
   if (body.product_type !== undefined) updates.product_type = body.product_type
   if (body.category !== undefined) updates.category = body.category || null
   if (body.tags !== undefined) updates.tags = Array.isArray(body.tags) && body.tags.length ? body.tags : null
+  if (body.countries !== undefined) updates.countries = Array.isArray(body.countries) && body.countries.length ? body.countries : null
   if (body.sort_order !== undefined) updates.sort_order = body.sort_order
 
   await supabase.from('packages').update(updates).eq('id', body.id)

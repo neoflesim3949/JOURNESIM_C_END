@@ -26,7 +26,7 @@ export default function PlanCompareModal({ plans: initial, onClose }: { plans: C
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <style>{`
         .cmp-bar { scrollbar-width: thin; scrollbar-color: #cbd5e1 #f1f5f9; }
         .cmp-bar::-webkit-scrollbar { height: 12px; width: 12px; }

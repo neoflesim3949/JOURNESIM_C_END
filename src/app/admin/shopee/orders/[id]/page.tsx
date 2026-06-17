@@ -932,7 +932,7 @@ export default function ShopeeOrderDetailPage() {
 
       {/* 列印彈窗 */}
       {printModal && order && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPrintModal(null)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-5 border-b border-gray-200 flex items-center justify-between">
               <h2 className="font-bold">{printModal === 'detail' ? '明細標籤預覽' : printModal === 'product' ? '商品標籤預覽' : printModal === 'receipt_a5' ? '收據預覽（A5）' : printModal === 'shipping' ? '寄件單預覽（10×15）' : '收據預覽（10×15）'}</h2>
@@ -1126,7 +1126,7 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
           <h3 className="font-semibold">卡與套餐使用狀況</h3>
@@ -1859,7 +1859,7 @@ function BcMatchModal({ item, onMatch, onClose }: {
     : countries
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         {/* 標題 */}
         <div className="p-5 border-b border-gray-200 flex items-center justify-between">

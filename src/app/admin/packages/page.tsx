@@ -3,14 +3,17 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
-import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil, Download, Upload } from 'lucide-react'
+import { Plus, Trash2, Package as PackageIcon, Zap, X, Search, ListFilter, Pencil, Download, Upload, Signal } from 'lucide-react'
 
 import { getTypeLabels } from '@/lib/bc-enums'
+import CountryMultiSelect from '@/components/admin/country-multi-select'
 
 interface Pkg {
   id: string; name: string; description: string | null; product_type: string; scope?: string
   is_active: boolean; _plan_count: number; _product_count: number; _has_price_changes?: boolean
   category?: string | null; tags?: string[] | null; sort_order?: number
+  countries?: string[] | null
+  apns?: string[] | null; operators?: string[] | null; apn_synced_at?: string | null
 }
 
 interface BcProduct {
@@ -23,8 +26,20 @@ export default function AdminPackagesPage() {
   const [packages, setPackages] = useState<Pkg[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', product_type: 'esim', category: '', tagsText: '' })
+  const [form, setForm] = useState({ name: '', description: '', product_type: 'esim', category: '', tagsText: '', countries: [] as string[] })
   const [filterCategory, setFilterCategory] = useState('')
+  // 國家選項（中文+MCC）
+  const [countryOpts, setCountryOpts] = useState<{ mcc: string; name: string }[]>([])
+  // 點擊才撈的 APN/電信商（依套餐 id）
+  const [apnData, setApnData] = useState<Record<string, { apns: string[]; operators: string[]; loading?: boolean }>>({})
+  async function loadApn(id: string) {
+    setApnData(d => ({ ...d, [id]: { apns: d[id]?.apns || [], operators: d[id]?.operators || [], loading: true } }))
+    try {
+      const res = await fetch(`/api/admin/packages/${id}/apn`)
+      const j = await res.json()
+      setApnData(d => ({ ...d, [id]: { apns: j.apns || [], operators: j.operators || [], loading: false } }))
+    } catch { setApnData(d => ({ ...d, [id]: { apns: [], operators: [], loading: false } })) }
+  }
 
   // 未加入列表
   const [showUnassigned, setShowUnassigned] = useState(false)
@@ -51,7 +66,7 @@ export default function AdminPackagesPage() {
 
   // 編輯套餐
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', description: '', product_type: 'esim', category: '', tagsText: '' })
+  const [editForm, setEditForm] = useState({ name: '', description: '', product_type: 'esim', category: '', tagsText: '', countries: [] as string[] })
   const parseTags = (s: string) => s.split(/[,，]/).map(t => t.trim()).filter(Boolean)
 
   async function load() {
@@ -64,16 +79,23 @@ export default function AdminPackagesPage() {
   }
 
   useEffect(() => { load() }, [])
+  // 國家下拉選項（中文 + MCC）
+  useEffect(() => {
+    fetch('/api/admin/shopee/bc-search?action=options')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.countries) setCountryOpts(d.countries.map((c: { mcc: string; name: string }) => ({ mcc: c.mcc, name: `${c.name}（${c.mcc}）` }))) })
+      .catch(() => {})
+  }, [])
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     await fetch('/api/admin/packages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: form.name, description: form.description, product_type: form.product_type, category: form.category, tags: parseTags(form.tagsText) }),
+      body: JSON.stringify({ name: form.name, description: form.description, product_type: form.product_type, category: form.category, tags: parseTags(form.tagsText), countries: form.countries }),
     })
     setShowCreate(false)
-    setForm({ name: '', description: '', product_type: 'esim', category: '', tagsText: '' })
+    setForm({ name: '', description: '', product_type: 'esim', category: '', tagsText: '', countries: [] })
     load()
   }
 
@@ -92,7 +114,7 @@ export default function AdminPackagesPage() {
     await fetch('/api/admin/packages', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: editingId, name: editForm.name, description: editForm.description, product_type: editForm.product_type, category: editForm.category, tags: parseTags(editForm.tagsText) }),
+      body: JSON.stringify({ id: editingId, name: editForm.name, description: editForm.description, product_type: editForm.product_type, category: editForm.category, tags: parseTags(editForm.tagsText), countries: editForm.countries }),
     })
     setEditingId(null)
     load()
@@ -351,6 +373,11 @@ export default function AdminPackagesPage() {
             </div>
           </div>
           <div>
+            <label className="text-sm font-medium">國家（選填，可多選；用來篩 APN/電信商）</label>
+            <CountryMultiSelect options={countryOpts} value={form.countries}
+              onChange={(v) => setForm({ ...form, countries: v })} placeholder="搜尋國家（中文或 MCC）" className="mt-1 w-full" />
+          </div>
+          <div>
             <label className="text-sm font-medium">描述（選填）</label>
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="套餐描述" />
@@ -412,6 +439,11 @@ export default function AdminPackagesPage() {
                   </div>
                 </div>
                 <div>
+                  <label className="text-xs font-medium text-gray-500">國家（可多選；用來篩 APN/電信商）</label>
+                  <CountryMultiSelect options={countryOpts} value={editForm.countries}
+                    onChange={(v) => setEditForm({ ...editForm, countries: v })} placeholder="搜尋國家（中文或 MCC）" className="mt-1 w-full" />
+                </div>
+                <div>
                   <label className="text-xs font-medium text-gray-500">描述（選填）</label>
                   <input value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                     placeholder="套餐描述" className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
@@ -440,6 +472,37 @@ export default function AdminPackagesPage() {
                       {pkg._plan_count} 個 BC 商品 · 被 {pkg._product_count} 個方案使用
                       {pkg._has_price_changes && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs font-medium">成本異動</span>}
                     </p>
+                    {(pkg.countries?.length ?? 0) > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {pkg.countries!.map(mcc => {
+                          const c = countryOpts.find(o => o.mcc === mcc)
+                          return <span key={mcc} className="px-1.5 py-0.5 text-[11px] rounded bg-indigo-50 text-indigo-600">{c?.name || mcc}</span>
+                        })}
+                      </div>
+                    )}
+                    {(() => {
+                      const live = apnData[pkg.id]
+                      const stored = (pkg.apns || pkg.operators) ? { apns: pkg.apns || [], operators: pkg.operators || [], loading: false } : null
+                      const cur = live || stored
+                      return (
+                        <div className="mt-1.5">
+                          {!cur ? (
+                            <button onClick={() => loadApn(pkg.id)} className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
+                              <Signal className="w-3.5 h-3.5" /> 撈 APN / 電信商{(pkg.countries?.length ?? 0) > 0 ? '（限選定國家）' : ''}
+                            </button>
+                          ) : cur.loading ? (
+                            <span className="text-xs text-gray-400">撈取中…</span>
+                          ) : (
+                            <div className="flex flex-col gap-0.5 text-xs text-gray-500">
+                              <div><span className="text-gray-400">電信商：</span>{cur.operators.length ? cur.operators.join('、') : '—'}</div>
+                              <div><span className="text-gray-400">APN：</span><span className="font-mono">{cur.apns.length ? cur.apns.join('、') : '—'}</span>
+                                <button onClick={() => loadApn(pkg.id)} className="ml-2 text-blue-600 hover:underline">重撈</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex flex-col mr-1">
@@ -448,7 +511,7 @@ export default function AdminPackagesPage() {
                       <button onClick={() => move(idx, 1)} disabled={idx === filteredPackages.length - 1} title="下移"
                         className="text-gray-300 hover:text-gray-600 disabled:opacity-30 leading-none">▼</button>
                     </div>
-                    <button onClick={() => { setEditingId(pkg.id); setEditForm({ name: pkg.name, description: pkg.description || '', product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', ') }) }}
+                    <button onClick={() => { setEditingId(pkg.id); setEditForm({ name: pkg.name, description: pkg.description || '', product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', '), countries: pkg.countries || [] }) }}
                       className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"><Pencil className="w-4 h-4" /></button>
                     <Link href={`/admin/packages/${pkg.id}`}
                       className="px-3 py-1.5 bg-blue-50 text-blue-600 text-xs font-medium rounded-lg hover:bg-blue-100">管理內容</Link>

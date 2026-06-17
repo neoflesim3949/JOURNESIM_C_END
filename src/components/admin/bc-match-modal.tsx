@@ -15,7 +15,7 @@ interface CountryDetail {
 }
 export interface BcResult {
   sku_id: string; name: string; unit_days: number
-  capacity: string; capacity_kb?: number; speed: string
+  capacity: string; capacity_kb?: number; speed: string; speed_kbps?: number
   cost_cny: number; cost_twd: number
   copies_options: CopiesOption[]
   countries: string[]; country_total: number
@@ -24,7 +24,7 @@ export interface BcResult {
 
 // ── BC 商品對應彈窗（蝦皮訂單明細 / 商品對應V2 / 套餐管理 共用）──────
 // mode='match'：單選對應（onMatch）；mode='add'：勾選多個批量加入（onAdd）
-export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title, existingSkus, onAdd, adding }: {
+export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title, existingSkus, onAdd, adding, defaultKind = '' }: {
   subtitle?: string
   onMatch?: (skuId: string, copies: string) => void
   onClose: () => void
@@ -33,6 +33,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
   existingSkus?: Set<string>
   onAdd?: (skuIds: string[]) => void
   adding?: boolean
+  defaultKind?: '' | 'sim' | 'esim'
 }) {
   const isAdd = mode === 'add'
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -50,6 +51,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
   const [capacityOpts, setCapacityOpts] = useState<string[]>([])
   const [speedOpts, setSpeedOpts] = useState<string[]>([])
   const [selCountries, setSelCountries] = useState<string[]>([])
+  const [selKind, setSelKind] = useState<'' | 'sim' | 'esim'>(defaultKind)
   const [selDays, setSelDays] = useState('')
   const [selCapacity, setSelCapacity] = useState('')
   const [selSpeed, setSelSpeed] = useState('')
@@ -59,8 +61,11 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [sortPrice, setSortPrice] = useState<'asc' | 'desc' | null>(null)
   const [sortFlow, setSortFlow] = useState<'asc' | 'desc' | null>(null)
-  function cycleFlow() { setSortPrice(null); setSortFlow(p => p === 'asc' ? 'desc' : p === 'desc' ? null : 'asc') }
-  function cyclePrice() { setSortFlow(null); setSortPrice(p => p === 'asc' ? 'desc' : p === 'desc' ? null : 'asc') }
+  const [sortSpeed, setSortSpeed] = useState<'asc' | 'desc' | null>(null)
+  const cyc = (v: 'asc' | 'desc' | null): 'asc' | 'desc' | null => v === 'asc' ? 'desc' : v === 'desc' ? null : 'asc'
+  function cycleFlow() { setSortPrice(null); setSortSpeed(null); setSortFlow(cyc) }
+  function cycleSpeed() { setSortPrice(null); setSortFlow(null); setSortSpeed(cyc) }
+  function cyclePrice() { setSortFlow(null); setSortSpeed(null); setSortPrice(cyc) }
 
   // 國家下拉
   const [countryOpen, setCountryOpen] = useState(false)
@@ -93,6 +98,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
     if (selDays) params.set('days', selDays)
     if (selCapacity) params.set('capacity', selCapacity)
     if (selSpeed) params.set('speed', selSpeed)
+    if (selKind) params.set('kind', selKind)
     if (search) params.set('search', search)
     const res = await fetch(`/api/admin/shopee/bc-search?${params}`)
     if (res.ok) setResults(await res.json())
@@ -108,7 +114,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
     : countries
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         {/* 標題 */}
         <div className="p-5 border-b border-gray-200 flex items-center justify-between">
@@ -136,7 +142,14 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
 
         {/* 篩選列 */}
         <div className="p-5 border-b border-gray-100 space-y-3">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
+            {/* SIM / eSIM */}
+            <select value={selKind} onChange={e => setSelKind(e.target.value as '' | 'sim' | 'esim')}
+              className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">全部類型</option>
+              <option value="esim">eSIM</option>
+              <option value="sim">SIM</option>
+            </select>
             {/* 國家多選 */}
             <div ref={countryRef} className="relative">
               <button type="button" onClick={() => setCountryOpen(v => !v)}
@@ -222,7 +235,9 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
                   <th className="text-left px-4 py-2.5 font-medium w-16 cursor-pointer select-none hover:text-blue-600" onClick={cycleFlow}>
                     流量 {sortFlow === 'asc' ? '↑' : sortFlow === 'desc' ? '↓' : '⇅'}
                   </th>
-                  <th className="text-left px-4 py-2.5 font-medium w-16">限速</th>
+                  <th className="text-left px-4 py-2.5 font-medium w-16 cursor-pointer select-none hover:text-blue-600" onClick={cycleSpeed}>
+                    限速 {sortSpeed === 'asc' ? '↑' : sortSpeed === 'desc' ? '↓' : '⇅'}
+                  </th>
                   <th className="text-left px-4 py-2.5 font-medium w-36">適用國家</th>
                   <th className="text-right px-4 py-2.5 font-medium w-20">天數</th>
                   <th className="text-right px-4 py-2.5 font-medium w-24 cursor-pointer select-none hover:text-blue-600" onClick={cyclePrice}>
@@ -237,6 +252,8 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
                   let sorted = results.filter(r => r.copies_options.length > 0)
                   if (sortFlow) {
                     sorted = [...sorted].sort((a, b) => sortFlow === 'asc' ? (a.capacity_kb ?? 0) - (b.capacity_kb ?? 0) : (b.capacity_kb ?? 0) - (a.capacity_kb ?? 0))
+                  } else if (sortSpeed) {
+                    sorted = [...sorted].sort((a, b) => sortSpeed === 'asc' ? (a.speed_kbps ?? 0) - (b.speed_kbps ?? 0) : (b.speed_kbps ?? 0) - (a.speed_kbps ?? 0))
                   } else if (sortPrice && selDays) {
                     const target = parseInt(selDays)
                     sorted = [...sorted].sort((a, b) => {

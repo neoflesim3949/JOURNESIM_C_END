@@ -232,7 +232,7 @@ export default function MobileShopeeOrderDetail() {
 
       {/* 新增品項彈窗 */}
       {showAdd && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center" onClick={() => setShowAdd(false)}>
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end justify-center">
           <div className="bg-white w-full rounded-t-2xl p-5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold">新增品項</h2>

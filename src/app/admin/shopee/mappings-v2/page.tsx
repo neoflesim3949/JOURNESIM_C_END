@@ -891,7 +891,7 @@ export default function ShopeeMappingsV2Page() {
 
       {/* 批量定價 */}
       {showBatchPrice && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowBatchPrice(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-bold">批量定價（已選 {selectedCount} 項）</h2>
             <div className="mt-3 flex items-center gap-4">

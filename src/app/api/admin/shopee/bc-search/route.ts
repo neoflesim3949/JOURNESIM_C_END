@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { formatCapacity, formatSpeed } from '@/lib/format'
+import { ESIM_TYPES, SIM_TYPES } from '@/lib/bc-enums'
 
 export async function GET(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -58,6 +59,7 @@ export async function GET(request: Request) {
   const capacity = searchParams.get('capacity') || ''
   const speed = searchParams.get('speed') || ''
   const search = searchParams.get('search') || ''
+  const kind = searchParams.get('kind') || '' // ''=全部 / sim / esim
 
   // 至少要有一個篩選條件
   if (!countries && !selectedDays && !capacity && !speed && !search) {
@@ -85,6 +87,9 @@ export async function GET(request: Request) {
       .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, prices, country_data')
       .or('is_active.is.null,is_active.eq.true') // 只對應上架中的 BC 商品
       .range(from, from + 999)
+    // SIM / eSIM 類型篩選
+    if (kind === 'sim') query = query.in('type', SIM_TYPES)
+    else if (kind === 'esim') query = query.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
     // 名稱或 SKU 搜尋（如果不是國家名搜尋）
     if (search && searchMccs.length === 0) {
       query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
@@ -183,6 +188,7 @@ export async function GET(request: Request) {
       capacity: formatCapacity(p.high_flow_size || p.capacity, p.plan_type === '1'),
       capacity_kb: Number(p.high_flow_size || p.capacity) || 0,
       speed: formatSpeed(p.limit_flow_speed),
+      speed_kbps: Number(p.limit_flow_speed) || 0,
       plan_type: p.plan_type,
       unit_days: unitDays,
       cost_cny: costCny,
