@@ -1,18 +1,69 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard } from 'lucide-react'
+import Link from 'next/link'
+import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, ChevronDown, ChevronRight } from 'lucide-react'
 
+interface DetailOrder { id: string; order_number: string; buyer: string; account: string; date: string | null; status: string; revenue: number; cost: number; cards: number; fees?: number; wallet?: number }
 interface GroupData {
   order_count: number; card_count: number
   total_revenue: number; platform_fees: number; platform_rate: number
   product_cost: number; profit_rate: number
   wallet_total?: number; profit?: number; est_profit?: number
+  orders?: DetailOrder[]
+}
+
+function OrderDetailTable({ orders, showWallet }: { orders: DetailOrder[]; showWallet: boolean }) {
+  return (
+    <div className="mt-2 bg-white rounded-xl border border-gray-200 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-gray-500 text-xs">
+          <tr>
+            <th className="text-left px-4 py-2.5 font-medium">訂單日期</th>
+            <th className="text-left px-4 py-2.5 font-medium">帳號</th>
+            <th className="text-left px-4 py-2.5 font-medium">蝦皮訂單號</th>
+            <th className="text-left px-4 py-2.5 font-medium">買家</th>
+            <th className="text-left px-4 py-2.5 font-medium">蝦皮狀態</th>
+            <th className="text-right px-4 py-2.5 font-medium">商品原價</th>
+            {showWallet && <th className="text-right px-4 py-2.5 font-medium">平台費用</th>}
+            <th className="text-right px-4 py-2.5 font-medium">成本</th>
+            {showWallet && <th className="text-right px-4 py-2.5 font-medium">入帳</th>}
+            <th className="text-right px-4 py-2.5 font-medium">{showWallet ? '利潤' : '預估利潤'}</th>
+            <th className="text-right px-4 py-2.5 font-medium">張數</th>
+            <th className="px-3 py-2.5 w-10"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {orders.map(o => (
+            <tr key={o.id} className="hover:bg-gray-50">
+              <td className="px-4 py-2 text-xs text-gray-500">{o.date ? o.date.slice(0, 10) : '-'}</td>
+              <td className="px-4 py-2 text-xs">{o.account}</td>
+              <td className="px-4 py-2 font-mono text-xs">{o.order_number}</td>
+              <td className="px-4 py-2 text-xs">{o.buyer}</td>
+              <td className="px-4 py-2 text-xs">{o.status}</td>
+              <td className="px-4 py-2 text-right text-xs font-medium">NT$ {o.revenue.toLocaleString()}</td>
+              {showWallet && <td className="px-4 py-2 text-right text-xs text-red-500">{o.fees ? `-NT$ ${o.fees.toLocaleString()}` : '-'}</td>}
+              <td className="px-4 py-2 text-right text-xs text-gray-500">{o.cost > 0 ? `NT$ ${o.cost.toLocaleString()}` : '-'}</td>
+              {showWallet && <td className="px-4 py-2 text-right text-xs text-green-600">{o.wallet ? `NT$ ${o.wallet.toLocaleString()}` : '-'}</td>}
+              {(() => { const profit = o.revenue - (o.fees ?? 0) - o.cost; return (
+                <td className={`px-4 py-2 text-right text-xs font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>NT$ {profit.toLocaleString()}</td>
+              ) })()}
+              <td className="px-4 py-2 text-right text-xs">{o.cards}</td>
+              <td className="px-3 py-2 text-center">
+                <Link href={`/admin/shopee/orders/${o.id}`} className="text-blue-600 hover:underline text-xs">查看</Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 interface DashboardData {
   settled: GroupData
   unsettled: GroupData
+  backfilled?: GroupData
 }
 
 function StatCards({ title, subtitle, cards }: { title: string; subtitle?: string; cards: { label: string; value: string; sub: string; icon: typeof ShoppingCart; color: string }[] }) {
@@ -43,6 +94,9 @@ function StatCards({ title, subtitle, cards }: { title: string; subtitle?: strin
 export default function ShopeeDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showUnsettled, setShowUnsettled] = useState(false)
+  const [showSettled, setShowSettled] = useState(false)
+  const [showBackfilled, setShowBackfilled] = useState(false)
   // 預設當月月初到月底（台灣時區）
   const fmtTW = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
   const now = new Date()
@@ -89,6 +143,7 @@ export default function ShopeeDashboardPage() {
 
   const s = data?.settled
   const u = data?.unsettled
+  const b = data?.backfilled
 
   const settledCards = s ? [
     { label: '商品總價', value: `NT$ ${s.total_revenue.toLocaleString()}`, sub: `${s.order_count} 筆訂單`, icon: ShoppingCart, color: 'text-blue-600 bg-blue-50' },
@@ -104,6 +159,14 @@ export default function ShopeeDashboardPage() {
     { label: '平台費用', value: `NT$ ${u.platform_fees.toLocaleString()}`, sub: `費用率 ${u.platform_rate}%`, icon: Percent, color: 'text-orange-600 bg-orange-50' },
     { label: '商品成本', value: `NT$ ${u.product_cost.toLocaleString()}`, sub: '依訂單資料估算', icon: DollarSign, color: 'text-purple-600 bg-purple-50' },
     { label: '預估利潤', value: `NT$ ${(u.est_profit ?? 0).toLocaleString()}`, sub: `預估利潤率 ${u.profit_rate}%`, icon: TrendingUp, color: (u.est_profit ?? 0) >= 0 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50' },
+  ] : []
+
+  const backfilledCards = b ? [
+    { label: '商品總價', value: `NT$ ${b.total_revenue.toLocaleString()}`, sub: `${b.order_count} 筆訂單`, icon: ShoppingCart, color: 'text-blue-600 bg-blue-50' },
+    { label: '卡片使用張數', value: `${b.card_count.toLocaleString()} 張`, sub: `${b.order_count} 筆訂單`, icon: CreditCard, color: 'text-cyan-600 bg-cyan-50' },
+    { label: '平台費用', value: `NT$ ${b.platform_fees.toLocaleString()}`, sub: `費用率 ${b.platform_rate}%`, icon: Percent, color: 'text-orange-600 bg-orange-50' },
+    { label: '商品成本', value: `NT$ ${b.product_cost.toLocaleString()}`, sub: '依訂單資料估算', icon: DollarSign, color: 'text-purple-600 bg-purple-50' },
+    { label: '預估利潤', value: `NT$ ${(b.est_profit ?? 0).toLocaleString()}`, sub: `預估利潤率 ${b.profit_rate}%`, icon: TrendingUp, color: (b.est_profit ?? 0) >= 0 ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50' },
   ] : []
 
   return (
@@ -145,8 +208,42 @@ export default function ShopeeDashboardPage() {
         <p className="mt-8 text-sm text-gray-500">載入中...</p>
       ) : data ? (
         <div className="mt-6 space-y-8">
-          <StatCards title="已結算" subtitle="已匯入金流 Excel 的訂單" cards={settledCards} />
-          <StatCards title="未結算" subtitle="尚未匯入金流的訂單（依訂單資料估算）" cards={unsettledCards} />
+          <div>
+            <StatCards title="已結算" subtitle="已匯入金流 Excel 的訂單" cards={settledCards} />
+            {(data.settled.orders?.length ?? 0) > 0 && (
+              <div className="mt-3">
+                <button onClick={() => setShowSettled(v => !v)} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline">
+                  {showSettled ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  {showSettled ? '收合' : '展開'}已結算訂單明細（{data.settled.orders!.length} 筆）
+                </button>
+                {showSettled && <OrderDetailTable orders={data.settled.orders!} showWallet={true} />}
+              </div>
+            )}
+          </div>
+          <div>
+            <StatCards title="未結算" subtitle="尚未匯入金流的訂單（依訂單資料估算）" cards={unsettledCards} />
+            {(u?.orders?.length ?? 0) > 0 && (
+              <div className="mt-3">
+                <button onClick={() => setShowUnsettled(v => !v)} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline">
+                  {showUnsettled ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  {showUnsettled ? '收合' : '展開'}未結算訂單明細（{u!.orders!.length} 筆）
+                </button>
+                {showUnsettled && <OrderDetailTable orders={u!.orders!} showWallet={false} />}
+              </div>
+            )}
+          </div>
+          <div>
+            <StatCards title="已回填" subtitle="卡號已回填、尚未送出 BC 訂單（未結算中）" cards={backfilledCards} />
+            {(b?.orders?.length ?? 0) > 0 && (
+              <div className="mt-3">
+                <button onClick={() => setShowBackfilled(v => !v)} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline">
+                  {showBackfilled ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  {showBackfilled ? '收合' : '展開'}已回填訂單明細（{b!.orders!.length} 筆）
+                </button>
+                {showBackfilled && <OrderDetailTable orders={b!.orders!} showWallet={false} />}
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </div>

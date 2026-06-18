@@ -54,7 +54,8 @@ function getFinanceStatus(order: ShopeeOrder): { label: string; color: string } 
   const settlements = order.shopee_settlements || []
   if (settlements.length === 0) return { label: '未匯入', color: 'bg-gray-100 text-gray-500' }
   const s = settlements[0]
-  const originalPrice = s.original_price ?? order.product_total ?? 0
+  // 商品原價與訂單明細一致（結算單原價有值才用，否則退回明細活動價合計）
+  const originalPrice = getOriginalPrice(order)
   const sellerCoupon = Math.abs(s.seller_coupon ?? 0)
   const platformFees = Math.abs(s.ams_fee ?? 0) +
     Math.abs(s.transaction_fee ?? 0) + Math.abs(s.other_service_fee ?? 0) + Math.abs(s.processing_fee ?? 0)
@@ -64,10 +65,16 @@ function getFinanceStatus(order: ShopeeOrder): { label: string; color: string } 
   return { label: '已匯入', color: 'bg-green-100 text-green-700' }
 }
 
-function getNetProfitRate(order: ShopeeOrder): { rate: number | null; estimated: boolean } {
+// 商品原價（與訂單明細「利潤結算」一致）：有金流用結算單原價，否則用明細活動價合計
+function getOriginalPrice(order: ShopeeOrder): number {
   const s = order.shopee_settlements?.[0]
   const itemsTotal = (order.shopee_order_items || []).reduce((sum, i) => sum + ((i.sale_price ?? i.original_price ?? 0) * i.quantity), 0)
-  const originalPrice = s?.original_price ?? (itemsTotal > 0 ? itemsTotal : order.product_total ?? 0)
+  return s?.original_price ?? (itemsTotal > 0 ? itemsTotal : order.product_total ?? 0)
+}
+
+function getNetProfitRate(order: ShopeeOrder): { rate: number | null; estimated: boolean } {
+  const s = order.shopee_settlements?.[0]
+  const originalPrice = getOriginalPrice(order)
   if (originalPrice <= 0) return { rate: null, estimated: false }
   const sellerCoupon = Math.abs(s?.seller_coupon ?? order.seller_coupon ?? 0)
   const amsFee = Math.abs(s?.ams_fee ?? 0)
@@ -89,13 +96,17 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   completed: { label: '已完成', color: 'bg-green-100 text-green-700' },
 }
 
-// 已回填：未完成、且所有商品號碼都已填（可批次送 BC）
+// 已完成：所有商品都已「送出 BC 訂單」(bc_ordered) 或完成
+function orderIsCompleted(o: ShopeeOrder): boolean {
+  const its = o.shopee_order_items || []
+  return its.length > 0 && its.every(i => ['bc_ordered', 'completed'].includes(i.status))
+}
+// 已回填：所有商品號碼都已填、但尚未全部送出（可批次送 BC）
 function orderIsBackfilled(o: ShopeeOrder): boolean {
-  if (o.internal_status === 'completed') return false
+  if (orderIsCompleted(o)) return false
   const its = o.shopee_order_items || []
   return its.length > 0 && its.every(i => ['iccid_filled', 'bc_ordered', 'completed'].includes(i.status))
 }
-
 export default function ShopeeOrdersPage() {
   const [orders, setOrders] = useState<ShopeeOrder[]>([])
   const [total, setTotal] = useState(0)
@@ -104,6 +115,7 @@ export default function ShopeeOrdersPage() {
   const [search] = useUrlState('search', '')
   const [searchInput, setSearchInput] = useState(search)
   const [page, setPage] = useUrlState('page', 1)
+  const [pageSize] = useUrlState('page_size', 20)
   const [filterOrderDateFrom] = useUrlState('order_date_from', '')
   const [filterOrderDateTo] = useUrlState('order_date_to', '')
   const [filterCreatedFrom] = useUrlState('created_from', '')
@@ -180,9 +192,8 @@ export default function ShopeeOrdersPage() {
 
   async function load() {
     setLoading(true)
-    const params = new URLSearchParams({ page: String(page), pageSize: '20', sort_by: sortBy, sort_dir: sortDir })
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sort_by: sortBy, sort_dir: sortDir })
     if (search) params.set('search', search)
-    if (filterStatus) params.set('status', filterStatus)
     if (filterReturnStatus) params.set('return_status', filterReturnStatus)
     if (filterOrderDateFrom) params.set('order_date_from', filterOrderDateFrom)
     if (filterOrderDateTo) params.set('order_date_to', filterOrderDateTo)
@@ -190,6 +201,8 @@ export default function ShopeeOrdersPage() {
     if (filterCreatedTo) params.set('created_to', filterCreatedTo)
     if (filterAccount) params.set('account_id', filterAccount)
     if (filterShopeeStatus) params.set('order_status', filterShopeeStatus)
+    if (filterStatus) params.set('system_status', filterStatus)
+    if (filterFinanceStatus) params.set('finance_status', filterFinanceStatus)
     const res = await fetch(`/api/admin/shopee/orders?${params}`)
     if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0); if (d.status_options) setStatusOptions(d.status_options) }
     setLoading(false)
@@ -201,12 +214,10 @@ export default function ShopeeOrdersPage() {
   }
 
   const accountMap = new Map(accounts.map(a => [a.id, a.name]))
-  // 金流狀態在前端過濾（因為是計算欄位）
-  const displayOrders = filterFinanceStatus
-    ? orders.filter(o => getFinanceStatus(o).label === filterFinanceStatus)
-    : orders
+  // 系統狀態 & 金流狀態改為伺服器端篩選（分頁會填滿、跨頁正確）
+  const displayOrders = orders
 
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, sortBy, sortDir, search, filterStatus, filterReturnStatus, filterOrderDateFrom, filterOrderDateTo, filterCreatedFrom, filterCreatedTo, filterAccount, filterShopeeStatus])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, pageSize, sortBy, sortDir, search, filterReturnStatus, filterOrderDateFrom, filterOrderDateTo, filterCreatedFrom, filterCreatedTo, filterAccount, filterShopeeStatus, filterStatus, filterFinanceStatus])
 
   // 月份快捷：本期=本月、上期=上月（offset 0/-1）。回傳該月 1 號~月底
   function monthRange(offset: number) {
@@ -436,7 +447,7 @@ export default function ShopeeOrdersPage() {
     setBatchEditLoading(false)
   }
 
-  const totalPages = Math.ceil(total / 20)
+  const totalPages = Math.ceil(total / pageSize)
 
   return (
     <div>
@@ -550,6 +561,7 @@ export default function ShopeeOrdersPage() {
             <option value="">系統狀態</option>
             <option value="pending">待處理</option>
             <option value="processing">處理中</option>
+            <option value="backfilled">已回填</option>
             <option value="completed">已完成</option>
           </select>
           <select value={filterAccount} onChange={e => setUrl({ account_id: e.target.value, page: 1 })}
@@ -599,11 +611,13 @@ export default function ShopeeOrdersPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {displayOrders.map((o) => {
-                const s = o.internal_status === 'completed'
-                  ? STATUS_LABELS.completed
-                  : orderIsBackfilled(o)
-                    ? { label: '已回填', color: 'bg-indigo-100 text-indigo-700' }
-                    : (STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' })
+                const s = o.internal_status === '不成立'
+                  ? { label: '不成立', color: 'bg-gray-100 text-gray-500' }
+                  : orderIsCompleted(o)
+                    ? STATUS_LABELS.completed
+                    : orderIsBackfilled(o)
+                      ? { label: '已回填', color: 'bg-indigo-100 text-indigo-700' }
+                      : (STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' })
                 const fs = getFinanceStatus(o)
                 const pendingItems = o.shopee_order_items?.filter(i => i.status === 'pending').length || 0
                 const fmtDate = (d: string | null) => {
@@ -630,7 +644,7 @@ export default function ShopeeOrdersPage() {
                       {o.shopee_tracking_code && <div className="text-[10px] text-gray-400">({o.shopee_tracking_code})</div>}
                     </td>
                     <td className="px-4 py-2 text-xs">{o.buyer_account || '-'}</td>
-                    <td className="px-4 py-2 text-xs font-medium">NT$ {o.buyer_total_payment || '-'}</td>
+                    <td className="px-4 py-2 text-xs font-medium">NT$ {getOriginalPrice(o) || '-'}</td>
                     <td className="px-4 py-2 text-xs">
                       {(() => {
                         const nr = getNetProfitRate(o)
@@ -658,7 +672,13 @@ export default function ShopeeOrdersPage() {
           </table>
 
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
-            <span className="text-xs text-gray-500">共 {total} 筆</span>
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              共 {total} 筆 · 每頁
+              <select value={pageSize} onChange={e => setUrl({ page_size: Number(e.target.value), page: 1 })}
+                className="px-2 py-1 border border-gray-300 rounded text-xs">
+                {[20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
             <div className="flex items-center gap-1">
               <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
               <span className="px-3 py-1 text-sm">{page} / {totalPages || 1}</span>

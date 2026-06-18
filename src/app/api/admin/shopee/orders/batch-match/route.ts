@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { snapshotFor } from '@/lib/bc-snapshot'
+import { costCnyFromPrices } from '@/lib/shopee-pricing'
 
 // POST — 批次對應：將指定 SKU code 的所有未對應商品對應到 BC SKU
 export async function POST(request: Request) {
@@ -15,8 +16,9 @@ export async function POST(request: Request) {
   const supabase = createAdminClient()
 
   // 更新指定訂單中同 SKU code 的 items：有 bc 就設對應，名稱則寫快照（本地）
+  // 注意：不在這裡動 status，避免把「已回填(iccid_filled)」的商品因重新對應降回 matched(待處理)
   const itemUpdate: Record<string, unknown> = {}
-  if (bc_sku_id) { itemUpdate.bc_sku_id = bc_sku_id; itemUpdate.matched_copies = copies || '1'; itemUpdate.status = 'matched' }
+  if (bc_sku_id) { itemUpdate.bc_sku_id = bc_sku_id; itemUpdate.matched_copies = copies || '1' }
   if (custom_product_name !== undefined) itemUpdate.custom_product_name = custom_product_name || null
   if (custom_variation_name !== undefined) itemUpdate.custom_variation_name = custom_variation_name || null
   const { data: updated, error } = await supabase.from('shopee_order_items')
@@ -28,6 +30,29 @@ export async function POST(request: Request) {
     .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (bc_sku_id && updated && updated.length > 0) {
+    const ids = updated.map(u => u.id)
+    const { data: its } = await supabase.from('shopee_order_items').select('id, delivery_type, iccid, status').in('id', ids)
+    const rows = its || []
+    const hasIccid = (it: { iccid: unknown }) => Array.isArray(it.iccid) && it.iccid.length > 0
+
+    // status：有卡號(iccid)的維持原狀（已回填），沒卡號的設為 matched
+    const toMatched = rows.filter(it => !hasIccid(it) && (it.status === 'pending' || it.status === 'matched')).map(it => it.id)
+    if (toMatched.length) await supabase.from('shopee_order_items').update({ status: 'matched' }).in('id', toMatched)
+
+    // 對應 BC 時立即帶入成本（依 copies 結算價換算；SIM 實體卡 +¥3 運費，存單張價）
+    const { data: bc } = await supabase.from('bc_products').select('prices').eq('sku_id', bc_sku_id).maybeSingle()
+    const baseCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, copies || '1') : 0
+    if (baseCny > 0) {
+      const { data: rateRow } = await supabase.from('exchange_rates').select('rate').eq('currency', 'CNY').single()
+      const cnyRate = rateRow ? Number(rateRow.rate) : 0.2128
+      const simIds = rows.filter(it => (it.delivery_type || 'sim') === 'sim').map(it => it.id)
+      const esimIds = rows.filter(it => (it.delivery_type || 'sim') !== 'sim').map(it => it.id)
+      if (simIds.length) { const cc = baseCny + 3; await supabase.from('shopee_order_items').update({ cost_cny: cc, cost_twd: Math.ceil(cc / cnyRate) }).in('id', simIds) }
+      if (esimIds.length) { const cc = baseCny; await supabase.from('shopee_order_items').update({ cost_cny: cc, cost_twd: Math.ceil(cc / cnyRate) }).in('id', esimIds) }
+    }
+  }
 
   // 訂單端對應/命名回寫 V2 蝦皮表（讓 V2 逐步補齊）
   // 帳號只取「實際含此 sku_code 的訂單」所屬帳號，避免跨帳號批次把對應寫到別人的庫

@@ -575,11 +575,17 @@ export default function ShopeeOrderDetailPage() {
       </div>
 
       {/* 金流資訊 */}
+      {(() => {
+      // 商品原價：與「利潤結算」一致（有金流用結算單原價，否則用明細活動價合計）
+      const _itemsTotal = items.reduce((sum, i) => sum + ((i.sale_price ?? i.original_price ?? 0) * i.quantity), 0)
+      const _s0 = settlements.length > 0 ? settlements[0] : null
+      const _originalPrice = _s0?.original_price ?? (_itemsTotal > 0 ? _itemsTotal : order.product_total ?? 0)
+      return (
       <div className="mt-4 bg-white p-5 rounded-xl border border-gray-200">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">金流資訊</h3>
         {order.is_manual ? (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-            <OrderField label="商品總價" value={String(order.product_total ?? '')} onSave={v => saveOrderField('product_total', v === '' ? null : Number(v))} />
+            <div><span className="text-gray-500">商品原價：</span>NT$ {_originalPrice}</div>
             <OrderField label="買家運費" value={String(order.buyer_shipping_fee ?? '')} onSave={v => saveOrderField('buyer_shipping_fee', v === '' ? null : Number(v))} />
             <OrderField label="蝦皮補運費" value={String(order.shopee_shipping_subsidy ?? '')} onSave={v => saveOrderField('shopee_shipping_subsidy', v === '' ? null : Number(v))} />
             <OrderField label="退貨運費" value={String(order.return_shipping_fee ?? '')} onSave={v => saveOrderField('return_shipping_fee', v === '' ? null : Number(v))} />
@@ -592,7 +598,7 @@ export default function ShopeeOrderDetailPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-            <div><span className="text-gray-500">商品總價：</span>NT$ {order.product_total ?? '-'}</div>
+            <div><span className="text-gray-500">商品原價：</span>NT$ {_originalPrice}</div>
             <div><span className="text-gray-500">買家運費：</span>NT$ {order.buyer_shipping_fee ?? '-'}</div>
             <div><span className="text-gray-500">蝦皮補運費：</span>NT$ {order.shopee_shipping_subsidy ?? '-'}</div>
             <div><span className="text-gray-500">退貨運費：</span>NT$ {order.return_shipping_fee ?? '-'}</div>
@@ -605,6 +611,8 @@ export default function ShopeeOrderDetailPage() {
           </div>
         )}
       </div>
+      )
+      })()}
 
       {/* 金流結算 & 利潤結算 */}
       {(() => {

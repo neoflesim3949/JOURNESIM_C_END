@@ -35,7 +35,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return hasIccid
     }
     const itemsArr = items || []
-    const allDone = itemsArr.length > 0 && itemsArr.every(isItemReady)
+    // 已完成＝全部都已「送出 BC 訂單」(bc_order_id) 或已完成；只回填卡號未送出 = 處理中(外面顯示已回填)
+    const allDone = itemsArr.length > 0 && itemsArr.every(i => !!i.bc_order_id || i.status === 'completed')
     const someProcessing = itemsArr.some(i => i.bc_order_id || isItemReady(i))
     expectedStatus = allDone ? 'completed' : someProcessing ? 'processing' : 'pending'
   }
