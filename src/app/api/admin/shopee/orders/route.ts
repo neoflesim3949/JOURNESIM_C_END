@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // ── 衍生狀態（與前端徽章一致），供伺服器端篩選 ──
 type OItem = { status?: string | null; quantity?: number | null; sale_price?: number | null; original_price?: number | null }
 type OSettle = { original_price?: number | null; seller_coupon?: number | null; ams_fee?: number | null; transaction_fee?: number | null; other_service_fee?: number | null; processing_fee?: number | null; wallet_amount?: number | null }
-type ORow = { internal_status?: string | null; product_total?: number | null; shopee_order_items?: OItem[]; shopee_settlements?: OSettle[] }
+type ORow = { internal_status?: string | null; product_total?: number | null; seller_coupon?: number | null; shopee_order_items?: OItem[]; shopee_settlements?: OSettle[] }
 
 function isCompleted(o: ORow) { const its = o.shopee_order_items || []; return its.length > 0 && its.every(i => ['bc_ordered', 'completed'].includes(i.status || '')) }
 function isBackfilled(o: ORow) { if (isCompleted(o)) return false; const its = o.shopee_order_items || []; return its.length > 0 && its.every(i => ['iccid_filled', 'bc_ordered', 'completed'].includes(i.status || '')) }
@@ -16,7 +16,9 @@ function financeLabel(o: ORow) {
   if (ss.length === 0) return '未匯入'
   const s = ss[0]
   const fees = Math.abs(s.ams_fee ?? 0) + Math.abs(s.transaction_fee ?? 0) + Math.abs(s.other_service_fee ?? 0) + Math.abs(s.processing_fee ?? 0)
-  const expected = origPrice(o) - Math.abs(s.seller_coupon ?? 0) - fees
+  // 結算單沒帶折扣時（手動單常見），退回用訂單上的賣家優惠券
+  const coupon = Math.abs(s.seller_coupon ?? o.seller_coupon ?? 0)
+  const expected = origPrice(o) - coupon - fees
   return Math.abs(expected - (s.wallet_amount ?? 0)) > 1 ? '金流異常' : '已匯入'
 }
 
