@@ -12,12 +12,12 @@ export async function PATCH(request: Request) {
 
   // 更新售價
   if (body.updates) {
-    const updates = body.updates as { id: string; sell_price: number }[]
+    const updates = body.updates as { id: string; sell_price?: number; ref_price?: number | null }[]
     for (const u of updates) {
-      await supabase.from('package_plan_prices').update({
-        sell_price: u.sell_price,
-        price_changed: false,
-      }).eq('id', u.id)
+      const upd: Record<string, unknown> = {}
+      if (u.sell_price !== undefined) { upd.sell_price = u.sell_price; upd.price_changed = false }
+      if (u.ref_price !== undefined) upd.ref_price = (u.ref_price === null || Number.isNaN(u.ref_price)) ? null : u.ref_price
+      if (Object.keys(upd).length) await supabase.from('package_plan_prices').update(upd).eq('id', u.id)
     }
     return NextResponse.json({ ok: true, updated: updates.length })
   }

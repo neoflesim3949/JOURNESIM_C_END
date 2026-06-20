@@ -79,6 +79,66 @@ export async function GET(request: Request) {
   const { data: accRows } = await supabase.from('shopee_accounts').select('id, name')
   const accMap = new Map((accRows || []).map(a => [a.id, a.name]))
 
+  // ─── 產品統計：主商品（蝦皮商品ID）→ 選項（蝦皮選項ID）彙總數量/金額 ────
+  // 名稱對應 V2 庫（shopee_product_options_v2）：商品ID→商品名、選項ID→選項名
+  const v2ProdName = new Map<string, string>()
+  const v2VarName = new Map<string, string>()
+  {
+    for (let from = 0; ; from += 1000) {
+      const { data: v2 } = await supabase.from('shopee_product_options_v2')
+        .select('shopee_product_id, shopee_variation_id, shopee_product_name, shopee_variation_name, custom_product_name, custom_variation_name')
+        .range(from, from + 999)
+      if (!v2 || v2.length === 0) break
+      for (const o of v2) {
+        const pid = o.shopee_product_id != null ? String(o.shopee_product_id) : ''
+        const vid = o.shopee_variation_id != null ? String(o.shopee_variation_id) : ''
+        // 顯示蝦皮原始名稱優先，V2 沒有才退回自設
+        const pName = (o.shopee_product_name || o.custom_product_name || '').trim()
+        const vName = (o.shopee_variation_name || o.custom_variation_name || '').trim()
+        if (pid && pName && !v2ProdName.has(pid)) v2ProdName.set(pid, pName)
+        if (vid && vName && !v2VarName.has(vid)) v2VarName.set(vid, vName)
+      }
+      if (v2.length < 1000) break
+    }
+  }
+
+  type VarStat = { id: string; name: string; qty: number; revenue: number }
+  type ProdStat = { id: string; name: string; qty: number; revenue: number; children: Map<string, VarStat> }
+  const prodMap = new Map<string, ProdStat>()
+  if (inRangeOrderIds.length > 0) {
+    for (let i = 0; i < inRangeOrderIds.length; i += 500) {
+      const batch = inRangeOrderIds.slice(i, i + 500)
+      const { data: items } = await supabase.from('shopee_order_items')
+        .select('shopee_product_id, shopee_variation_id, shopee_product_name, shopee_variation_name, custom_product_name, custom_variation_name, quantity, sale_price, original_price')
+        .in('shopee_order_id', batch)
+      for (const it of items || []) {
+        const pid = it.shopee_product_id != null ? String(it.shopee_product_id) : ''
+        const vid = it.shopee_variation_id != null ? String(it.shopee_variation_id) : ''
+        // 分組鍵用蝦皮ID；名稱優先取 V2 庫，退回訂單明細快照
+        const pKey = pid || (it.custom_product_name || it.shopee_product_name || '未命名商品')
+        const vKey = vid || (it.custom_variation_name || it.shopee_variation_name || '預設')
+        const pName = (pid && v2ProdName.get(pid)) || it.shopee_product_name || it.custom_product_name || '未命名商品'
+        const vName = (vid && v2VarName.get(vid)) || it.shopee_variation_name || it.custom_variation_name || '預設'
+        const qty = it.quantity ?? 1
+        const rev = (it.sale_price ?? it.original_price ?? 0) * qty
+        let prod = prodMap.get(pKey)
+        if (!prod) { prod = { id: pKey, name: pName, qty: 0, revenue: 0, children: new Map() }; prodMap.set(pKey, prod) }
+        prod.qty += qty; prod.revenue += rev
+        let v = prod.children.get(vKey)
+        if (!v) { v = { id: `${pKey}__${vKey}`, name: vName, qty: 0, revenue: 0 }; prod.children.set(vKey, v) }
+        v.qty += qty; v.revenue += rev
+      }
+    }
+  }
+  const productStats = [...prodMap.values()]
+    .map(p => ({
+      id: p.id, name: p.name, qty: p.qty, revenue: Math.round(p.revenue),
+      children: [...p.children.values()]
+        .map(v => ({ id: v.id, name: v.name, qty: v.qty, revenue: Math.round(v.revenue) }))
+        .sort((a, b) => b.qty - a.qty),
+    }))
+    .sort((a, b) => b.qty - a.qty)
+
   // ─── 3. 已結算 stats ──────────────────────────────────────────────
   let settledCost = 0
   let settledCardCount = 0
@@ -241,5 +301,6 @@ export async function GET(request: Request) {
       profit_rate: Math.round(bfProfitRate * 10) / 10,
       orders: backfilledOrders,
     },
+    product_stats: productStats,
   })
 }

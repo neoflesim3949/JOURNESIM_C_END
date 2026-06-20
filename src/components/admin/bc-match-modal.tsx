@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import PlanCompareModal from './plan-compare-modal'
 import type { ComparePlan } from './plan-compare-table'
+import CountryMultiSelect from './country-multi-select'
 
 interface CopiesOption {
   copies: string; days: number; costCny: number; costTwd: number
@@ -38,6 +39,8 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
   const isAdd = mode === 'add'
   const [selected, setSelected] = useState<Set<string>>(new Set())
   function toggleSel(sku: string) { setSelected(prev => { const n = new Set(prev); n.has(sku) ? n.delete(sku) : n.add(sku); return n }) }
+  // 可加入的（排除已加入的；已加入的仍可勾選比較）
+  const addable = [...selected].filter(s => !existingSkus?.has(s))
   // 比較選取
   const [comparePlans, setComparePlans] = useState<ComparePlan[] | null>(null)
   async function openCompare() {
@@ -55,6 +58,8 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
   const [selDays, setSelDays] = useState('')
   const [selCapacity, setSelCapacity] = useState('')
   const [selSpeed, setSelSpeed] = useState('')
+  const [operatorOpts, setOperatorOpts] = useState<{ name: string; mccs: string[] }[]>([])
+  const [selOperators, setSelOperators] = useState<string[]>([])
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<BcResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -88,6 +93,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
       setDaysOpts(d.days || [])
       setCapacityOpts(d.capacities || [])
       setSpeedOpts(d.speeds || [])
+      setOperatorOpts(d.operators || [])
     })
   }, [])
 
@@ -95,6 +101,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
     setSearching(true)
     const params = new URLSearchParams({ action: 'search' })
     if (selCountries.length > 0) params.set('countries', selCountries.join(','))
+    if (selOperators.length > 0) params.set('operators', selOperators.join(','))
     if (selDays) params.set('days', selDays)
     if (selCapacity) params.set('capacity', selCapacity)
     if (selSpeed) params.set('speed', selSpeed)
@@ -113,6 +120,17 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
     ? countries.filter(c => c.name.toLowerCase().includes(countryQ.toLowerCase()) || c.mcc.toLowerCase().includes(countryQ.toLowerCase()))
     : countries
 
+  // 電信商選項：有選國家時，只列該國家有的電信商
+  const selCountrySet = new Set(selCountries.map(c => c.toUpperCase()))
+  const opOptions = (selCountries.length === 0 ? operatorOpts : operatorOpts.filter(o => o.mccs.some(m => selCountrySet.has(m))))
+    .map(o => ({ mcc: o.name, name: o.name }))
+  // 國家改變後，移除不再屬於該國家的已選電信商
+  useEffect(() => {
+    const valid = new Set(opOptions.map(o => o.mcc))
+    setSelOperators(prev => { const n = prev.filter(op => valid.has(op)); return n.length === prev.length ? prev : n })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selCountries, operatorOpts])
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -130,10 +148,12 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
                   title={selected.size < 2 ? '至少選 2 個' : ''}>
                   比較（{selected.size}）
                 </button>
-                <button onClick={() => onAdd?.([...selected])} disabled={adding}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                  {adding ? '加入中…' : `加入選取（${selected.size}）`}
-                </button>
+                {addable.length > 0 && (
+                  <button onClick={() => onAdd?.(addable)} disabled={adding}
+                    className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                    {adding ? '加入中…' : `加入選取（${addable.length}）`}
+                  </button>
+                )}
               </>
             )}
             <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X className="w-5 h-5" /></button>
@@ -142,7 +162,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
 
         {/* 篩選列 */}
         <div className="p-5 border-b border-gray-100 space-y-3">
-          <div className="grid grid-cols-5 gap-3">
+          <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
             {/* SIM / eSIM */}
             <select value={selKind} onChange={e => setSelKind(e.target.value as '' | 'sim' | 'esim')}
               className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
@@ -190,18 +210,18 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
               )}
             </div>
 
-            {/* 天數 */}
-            <select value={selDays} onChange={e => setSelDays(e.target.value)}
-              className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
-              <option value="">全部天數</option>
-              {daysOpts.map(d => <option key={d} value={d}>{d} 天</option>)}
-            </select>
-
             {/* 流量 */}
             <select value={selCapacity} onChange={e => setSelCapacity(e.target.value)}
               className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
               <option value="">選擇流量</option>
               {capacityOpts.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+
+            {/* 天數 */}
+            <select value={selDays} onChange={e => setSelDays(e.target.value)}
+              className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white">
+              <option value="">全部天數</option>
+              {daysOpts.map(d => <option key={d} value={d}>{d} 天</option>)}
             </select>
 
             {/* 限速 */}
@@ -210,6 +230,10 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
               <option value="">選擇限速</option>
               {speedOpts.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
+
+            {/* 電信商 多選（有選國家時只列該國電信商） */}
+            <CountryMultiSelect options={opOptions} value={selOperators}
+              onChange={setSelOperators} placeholder="選擇電信商" />
           </div>
 
           <div className="flex items-center gap-3">
@@ -277,9 +301,12 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
                       <tr className={`hover:bg-blue-50/50 cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`} onClick={toggleExpand}>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-1.5">
-                            {isAdd && (existingSkus?.has(bc.sku_id)
-                              ? <span className="text-[10px] text-gray-400 w-4 shrink-0">已加</span>
-                              : <input type="checkbox" checked={selected.has(bc.sku_id)} onClick={e => e.stopPropagation()} onChange={() => toggleSel(bc.sku_id)} className="accent-blue-600 shrink-0" />)}
+                            {isAdd && (
+                              <span className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                                <input type="checkbox" checked={selected.has(bc.sku_id)} onChange={() => toggleSel(bc.sku_id)} className="accent-blue-600 shrink-0" />
+                                {existingSkus?.has(bc.sku_id) && <span className="text-[10px] text-gray-400">已加</span>}
+                              </span>
+                            )}
                             <span className="text-gray-400 flex-shrink-0 w-3">{isExpanded ? '▾' : '▸'}</span>
                             <div>
                               <div className={`font-medium text-sm ${isExpanded ? 'text-blue-700' : 'truncate max-w-[350px]'}`}>{bc.name}</div>

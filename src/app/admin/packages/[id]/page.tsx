@@ -14,7 +14,7 @@ import { BcMatchModal } from '@/components/admin/bc-match-modal'
 import { roundPrice, type RoundMode } from '@/lib/shopee-pricing'
 import CountryMultiSelect from '@/components/admin/country-multi-select'
 
-interface CopyPrice { id: string; copies: string; cost_price: number; original_cost_price: number | null; sell_price: number; price_changed: boolean }
+interface CopyPrice { id: string; copies: string; cost_price: number; original_cost_price: number | null; ref_price: number | null; sell_price: number; price_changed: boolean }
 interface BoundPlan {
   id: string; bc_sku_id: string; bc_name: string; bc_type: string
   display_name: string | null; sort_order: number
@@ -37,6 +37,7 @@ export default function PackageDetailPage() {
   const [importing, setImporting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editedPrices, setEditedPrices] = useState<Map<string, number>>(new Map())
+  const [editedRefs, setEditedRefs] = useState<Map<string, number | null>>(new Map())
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [selectedPlanIds, setSelectedPlanIds] = useState<Set<string>>(new Set())
   const [showBatchPrice, setShowBatchPrice] = useState(false)
@@ -70,11 +71,24 @@ export default function PackageDetailPage() {
   const [flowSort, setFlowSort] = useState<'' | 'asc' | 'desc'>('')
   // 比價彈窗（用 BC 原始結算/零售價比同 copies）
   const [comparePlans, setComparePlans] = useState<ComparePlan[] | null>(null)
+  const [compareMode, setCompareMode] = useState<'cost' | 'sell'>('cost')
   async function openCompare(skuIds: string[]) {
     if (skuIds.length === 0) return
     const res = await fetch(`/api/admin/plans/compare?skus=${skuIds.join(',')}`)
     const d = await res.json()
+    setCompareMode('cost')
     setComparePlans(d.items || [])
+  }
+  // 售價比價：用本頁套餐的 copy_prices 售價（TWD）比同 copies
+  function openSellCompare(planList: BoundPlan[]) {
+    if (planList.length === 0) return
+    const items: ComparePlan[] = planList.map(p => ({
+      sku_id: p.bc_sku_id, name: p.bc_name, type: p.bc_type, plan_type: p.plan_type,
+      days: p.days, capacity: p.capacity, high_flow_size: p.high_flow_size, limit_flow_speed: p.limit_flow_speed,
+      prices: p.copy_prices.map(cp => ({ copies: cp.copies, retailPrice: String(cp.sell_price), settlementPrice: String(cp.sell_price), costTwd: exchangeRate > 0 ? Math.round(cp.cost_price / exchangeRate) : 0 })),
+    }))
+    setCompareMode('sell')
+    setComparePlans(items)
   }
 
   async function loadData() {
@@ -135,16 +149,23 @@ export default function PackageDetailPage() {
     setEditedPrices((prev) => new Map(prev).set(cpId, price))
   }
 
+  function handleRefChange(cpId: string, ref: number | null) {
+    setEditedRefs((prev) => new Map(prev).set(cpId, ref))
+  }
+
   async function handleSavePrices() {
-    if (editedPrices.size === 0) return
+    if (editedPrices.size === 0 && editedRefs.size === 0) return
     setSaving(true)
-    const updates = Array.from(editedPrices.entries()).map(([id, sell_price]) => ({ id, sell_price }))
+    const merged = new Map<string, { id: string; sell_price?: number; ref_price?: number | null }>()
+    for (const [id, sell_price] of editedPrices) merged.set(id, { ...(merged.get(id) || { id }), id, sell_price })
+    for (const [id, ref_price] of editedRefs) merged.set(id, { ...(merged.get(id) || { id }), id, ref_price })
     await fetch(`/api/admin/packages/${id}/prices`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates }),
+      body: JSON.stringify({ updates: Array.from(merged.values()) }),
     })
     setEditedPrices(new Map())
+    setEditedRefs(new Map())
     await loadData()
     setSaving(false)
   }
@@ -216,7 +237,8 @@ export default function PackageDetailPage() {
   const toggleFlowSort = () => setFlowSort(s => s === 'asc' ? 'desc' : s === 'desc' ? '' : 'asc')
   const dailyPlans = sortFlow(plans.filter((p) => p.plan_category === 'daily'))
   const fixedPlans = sortFlow(plans.filter((p) => p.plan_category === 'fixed'))
-  const hasChanges = editedPrices.size > 0
+  const hasChanges = editedPrices.size > 0 || editedRefs.size > 0
+  const changeCount = new Set([...editedPrices.keys(), ...editedRefs.keys()]).size
 
   // 手動拖曳排序某分組（更新 plans 並存 sort_order）
   async function reorderGroup(orderedIds: string[]) {
@@ -316,10 +338,16 @@ export default function PackageDetailPage() {
           <input type="checkbox" checked={plans.length > 0 && selectedPlanIds.size === plans.length} onChange={() => { if (selectedPlanIds.size === plans.length) setSelectedPlanIds(new Set()); else setSelectedPlanIds(new Set(plans.map(p => p.id))) }} className="accent-blue-600" /> 全選（{plans.length}）
         </label>
         {plans.length > 1 && (
-          <button onClick={() => openCompare([...new Set(plans.map(p => p.bc_sku_id))])}
-            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
-            比價（全部 {plans.length}）
-          </button>
+          <>
+            <button onClick={() => openCompare([...new Set(plans.map(p => p.bc_sku_id))])}
+              className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700">
+              成本比價（全部 {plans.length}）
+            </button>
+            <button onClick={() => openSellCompare(plans)}
+              className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700">
+              售價比價（全部 {plans.length}）
+            </button>
+          </>
         )}
       </div>
 
@@ -336,7 +364,11 @@ export default function PackageDetailPage() {
               </button>
               <button onClick={() => openCompare([...new Set(plans.filter(p => selectedPlanIds.has(p.id)).map(p => p.bc_sku_id))])}
                 className="flex items-center gap-1 px-3 py-1.5 bg-white border border-emerald-300 text-emerald-700 text-xs font-medium rounded-lg">
-                比價（選取）
+                成本比價（選取）
+              </button>
+              <button onClick={() => openSellCompare(plans.filter(p => selectedPlanIds.has(p.id)))}
+                className="flex items-center gap-1 px-3 py-1.5 bg-white border border-indigo-300 text-indigo-700 text-xs font-medium rounded-lg">
+                售價比價（選取）
               </button>
               <button onClick={() => setSelectedPlanIds(new Set())} className="text-xs text-gray-500">取消選取</button>
             </>
@@ -345,7 +377,7 @@ export default function PackageDetailPage() {
           {hasChanges && (
             <button onClick={handleSavePrices} disabled={saving}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
-              <Save className="w-4 h-4" /> {saving ? '儲存中...' : `儲存（${editedPrices.size} 筆）`}
+              <Save className="w-4 h-4" /> {saving ? '儲存中...' : `儲存（${changeCount} 筆）`}
             </button>
           )}
         </div>
@@ -366,7 +398,7 @@ export default function PackageDetailPage() {
                   <input type="checkbox" checked={dailyPlans.every((p) => selectedPlanIds.has(p.id))} onChange={() => toggleSelectAll(dailyPlans)} className="accent-blue-600" /> 全選
                 </label>
               </div>
-              <PlanTable plans={dailyPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange}
+              <PlanTable plans={dailyPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
                 onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
@@ -380,7 +412,7 @@ export default function PackageDetailPage() {
                   <input type="checkbox" checked={fixedPlans.every((p) => selectedPlanIds.has(p.id))} onChange={() => toggleSelectAll(fixedPlans)} className="accent-blue-600" /> 全選
                 </label>
               </div>
-              <PlanTable plans={fixedPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange}
+              <PlanTable plans={fixedPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
                 onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
@@ -475,7 +507,7 @@ export default function PackageDetailPage() {
           onAdd={async (skus) => { await handleImportSkus(skus); setShowManual(false) }}
           onClose={() => setShowManual(false)} />
       )}
-      {comparePlans && <PlanCompareModal plans={comparePlans} onClose={() => setComparePlans(null)} />}
+      {comparePlans && <PlanCompareModal plans={comparePlans} mode={compareMode} onClose={() => setComparePlans(null)} />}
       {detailSku && <BcDetailModal skuId={detailSku} onClose={() => setDetailSku(null)} />}
     </div>
   )
@@ -716,8 +748,9 @@ function PreviewModal({ pkg, plans, editedPrices, packageId, onClose, onSaved }:
   )
 }
 
-function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
+function PlanTable({ plans, editedPrices, onPriceChange, editedRefs, onRefChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
   plans: BoundPlan[]; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
+  editedRefs: Map<string, number | null>; onRefChange: (id: string, r: number | null) => void
   expandedIds: Set<string>; onToggleExpand: (id: string) => void; onRemove: (id: string) => void
   selectedIds: Set<string>; onToggleSelect: (id: string) => void; exchangeRate: number
   onDetail: (skuId: string) => void; flowSort: '' | 'asc' | 'desc'; onToggleFlowSort: () => void
@@ -747,6 +780,7 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
             <th className="text-right px-3 py-3 font-medium w-20">原始成本<br /><span className="text-xs font-normal">(CNY)</span></th>
             <th className="text-right px-3 py-3 font-medium w-20">成本價<br /><span className="text-xs font-normal">(CNY)</span></th>
             <th className="text-right px-3 py-3 font-medium w-20">成本價<br /><span className="text-xs font-normal">(TWD)</span></th>
+            <th className="text-right px-3 py-3 font-medium w-24">參考價<br /><span className="text-xs font-normal">(TWD)</span></th>
             <th className="text-right px-3 py-3 font-medium w-24">售價<br /><span className="text-xs font-normal">(TWD)</span></th>
             <th className="text-right px-3 py-3 font-medium w-20">毛利率</th>
             <th className="w-10"></th>
@@ -794,6 +828,7 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
                   <td className="px-3 py-3 text-right text-gray-400 text-xs">-</td>
                   <td className="px-3 py-3 text-right text-gray-400 text-xs">-</td>
                   <td className="px-3 py-3 text-right text-gray-400 text-xs">-</td>
+                  <td className="px-3 py-3 text-right text-gray-400 text-xs">-</td>
                   <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => onRemove(plan.id)} className="p-1 text-gray-300 hover:text-red-500 rounded"><X className="w-4 h-4" /></button>
                   </td>
@@ -802,6 +837,8 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
                   const days = unitDays * parseInt(cp.copies)
                   const cur = editedPrices.has(cp.id) ? editedPrices.get(cp.id)! : cp.sell_price
                   const edited = editedPrices.has(cp.id)
+                  const refEdited = editedRefs.has(cp.id)
+                  const refVal = refEdited ? editedRefs.get(cp.id)! : cp.ref_price
                   const costTwd = exchangeRate > 0 ? Math.round(cp.cost_price / exchangeRate) : 0
                   const margin = cur > 0 && costTwd > 0 ? Math.round(((cur - costTwd) / cur) * 100) : 0
                   return (
@@ -818,6 +855,10 @@ function PlanTable({ plans, editedPrices, onPriceChange, expandedIds, onToggleEx
                       </td>
                       <td className="px-3 py-2 text-right text-xs text-gray-500">
                         {costTwd > 0 ? `NT$${costTwd}` : '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                        <input type="number" value={refVal ?? ''} onChange={(e) => onRefChange(cp.id, e.target.value === '' ? null : Number(e.target.value))} placeholder="參考價"
+                          className={`w-24 px-2 py-1 text-right border rounded text-sm ${refEdited ? 'border-green-400 bg-green-50' : 'border-gray-300'}`} />
                       </td>
                       <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                         <input type="number" value={cur || ''} onChange={(e) => onPriceChange(cp.id, Number(e.target.value))} placeholder="售價"

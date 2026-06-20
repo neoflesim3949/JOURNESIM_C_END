@@ -4,6 +4,20 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 import { ESIM_TYPES, SIM_TYPES } from '@/lib/bc-enums'
 
+// 單一國家 entry 的 operatorInfo → 電信商名稱（字串或 [{operator,...}]）
+function opNamesOfEntry(oi: unknown): string[] {
+  if (typeof oi === 'string') return oi.trim() ? [oi.trim()] : []
+  if (Array.isArray(oi)) return (oi as { operator?: string }[]).map(o => o?.operator?.trim()).filter((x): x is string => !!x)
+  return []
+}
+// 從 country_data 取出所有電信商名稱
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function operatorNames(countryData: any): string[] {
+  const out: string[] = []
+  for (const c of (Array.isArray(countryData) ? countryData : []) as { operatorInfo?: unknown }[]) out.push(...opNamesOfEntry(c?.operatorInfo))
+  return out
+}
+
 export async function GET(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -24,13 +38,14 @@ export async function GET(request: Request) {
     const { data: countries } = await supabase.from('bc_countries')
       .select('mcc, name, name_zh').or('scope.eq.local,scope.is.null').order('name')
 
-    // 從 bc_products 取天數和流量選項
+    // 從 bc_products 取天數/流量/電信商選項
     const { data: products } = await supabase.from('bc_products')
-      .select('days, high_flow_size, capacity, plan_type, prices, limit_flow_speed')
+      .select('days, high_flow_size, capacity, plan_type, prices, limit_flow_speed, country_data')
 
     const daysSet = new Set<number>()
     const capMap = new Map<string, boolean>()
     const speedSet = new Set<string>()
+    const opMap = new Map<string, Set<string>>() // 電信商 → 出現的國家 MCC（用來依國家篩選）
     for (const p of products || []) {
       const unitDays = Number(p.days) || 1
       const prices = p.prices as { copies: string }[] | null
@@ -43,6 +58,13 @@ export async function GET(request: Request) {
       if (raw) capMap.set(formatCapacity(raw, p.plan_type === '1'), true)
       const spd = formatSpeed(p.limit_flow_speed)
       if (spd && spd !== '-') speedSet.add(spd)
+      for (const c of (Array.isArray(p.country_data) ? p.country_data : []) as { mcc?: string; operatorInfo?: unknown }[]) {
+        const mcc = (c?.mcc || '').toUpperCase()
+        for (const op of opNamesOfEntry(c?.operatorInfo)) {
+          if (!opMap.has(op)) opMap.set(op, new Set())
+          if (mcc) opMap.get(op)!.add(mcc)
+        }
+      }
     }
 
     return NextResponse.json({
@@ -50,6 +72,7 @@ export async function GET(request: Request) {
       days: Array.from(daysSet).sort((a, b) => a - b).map(String),
       capacities: Array.from(capMap.keys()).sort(),
       speeds: Array.from(speedSet).sort(),
+      operators: [...opMap].map(([name, mccs]) => ({ name, mccs: [...mccs] })).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')),
     })
   }
 
@@ -58,11 +81,12 @@ export async function GET(request: Request) {
   const selectedDays = searchParams.get('days') || ''
   const capacity = searchParams.get('capacity') || ''
   const speed = searchParams.get('speed') || ''
+  const operators = searchParams.get('operators') || '' // 逗號分隔，多選 OR
   const search = searchParams.get('search') || ''
   const kind = searchParams.get('kind') || '' // ''=全部 / sim / esim
 
   // 至少要有一個篩選條件
-  if (!countries && !selectedDays && !capacity && !speed && !search) {
+  if (!countries && !selectedDays && !capacity && !speed && !operators && !search) {
     return NextResponse.json([])
   }
 
@@ -122,6 +146,12 @@ export async function GET(request: Request) {
   // 限速篩選
   if (speed) {
     filtered = filtered.filter(p => formatSpeed(p.limit_flow_speed) === speed)
+  }
+
+  // 電信商篩選（多選 OR：country_data 任一電信商命中即保留）
+  if (operators) {
+    const wanted = operators.split(',').map(s => s.trim()).filter(Boolean)
+    if (wanted.length) filtered = filtered.filter(p => operatorNames(p.country_data).some(op => wanted.includes(op)))
   }
 
   // 天數篩選（天數 = unitDays × copies，任一 copies 匹配就保留）

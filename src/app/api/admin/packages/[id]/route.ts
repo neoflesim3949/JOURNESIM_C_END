@@ -74,6 +74,7 @@ export async function GET(
           copies: pr.copies,
           cost_price: pr.cost_price,
           original_cost_price: pr.original_cost_price || null,
+          ref_price: pr.ref_price ?? null,
           sell_price: pr.sell_price,
           price_changed: pr.price_changed || false,
         })),

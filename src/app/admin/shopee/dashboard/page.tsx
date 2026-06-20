@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, ChevronDown, ChevronRight } from 'lucide-react'
+import { TreeTable, type TreeItem } from '@/components/admin/dashboard/HotRankings'
 
 interface DetailOrder { id: string; order_number: string; buyer: string; account: string; date: string | null; status: string; revenue: number; cost: number; cards: number; fees?: number; wallet?: number }
 interface GroupData {
@@ -64,6 +65,7 @@ interface DashboardData {
   settled: GroupData
   unsettled: GroupData
   backfilled?: GroupData
+  product_stats?: TreeItem[]
 }
 
 function StatCards({ title, subtitle, cards }: { title: string; subtitle?: string; cards: { label: string; value: string; sub: string; icon: typeof ShoppingCart; color: string }[] }) {
@@ -243,6 +245,10 @@ export default function ShopeeDashboardPage() {
                 {showBackfilled && <OrderDetailTable orders={b!.orders!} showWallet={false} />}
               </div>
             )}
+          </div>
+          <div>
+            <TreeTable title="產品統計" data={data.product_stats || []}
+              cols={{ name: '商品 / 選項', qty: '數量', revenue: '銷售額' }} />
           </div>
         </div>
       ) : null}

@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 import { getPlanTypeLabel } from '@/lib/bc-enums'
 
-interface PriceItem { copies: string; retailPrice: string; settlementPrice: string }
+interface PriceItem { copies: string; retailPrice: string; settlementPrice: string; costTwd?: number }
 export interface ComparePlan {
   sku_id: string; name: string; type?: string | null; plan_type: string | null
   days: number | null; capacity: string | null; high_flow_size: string | null; limit_flow_speed: string | null
@@ -12,8 +12,8 @@ export interface ComparePlan {
 }
 
 // 套餐比較表：列＝copies，欄＝套餐，格＝結算/零售價，每列最低價綠標
-export function PlanCompareTable({ plans, useRetail, onRemove }: {
-  plans: ComparePlan[]; useRetail: boolean; onRemove?: (sku: string) => void
+export function PlanCompareTable({ plans, useRetail, onRemove, currency = '¥', showMargin = false }: {
+  plans: ComparePlan[]; useRetail: boolean; onRemove?: (sku: string) => void; currency?: string; showMargin?: boolean
 }) {
   const copiesList = [...new Set(plans.flatMap(p => (p.prices || []).map(pi => Number(pi.copies))).filter(n => !isNaN(n)))]
     .sort((a, b) => a - b)
@@ -27,6 +27,12 @@ export function PlanCompareTable({ plans, useRetail, onRemove }: {
   function minOfRow(copies: number): number | null {
     const vals = plans.map(p => priceOf(p, copies)).filter((v): v is number => v != null)
     return vals.length ? Math.min(...vals) : null
+  }
+  function marginOf(p: ComparePlan, copies: number): number | null {
+    const pi = (p.prices || []).find(x => Number(x.copies) === copies)
+    const sell = priceOf(p, copies)
+    if (!pi || pi.costTwd == null || sell == null || sell <= 0 || pi.costTwd <= 0) return null
+    return Math.round(((sell - pi.costTwd) / sell) * 100)
   }
 
   return (
@@ -69,12 +75,18 @@ export function PlanCompareTable({ plans, useRetail, onRemove }: {
                   const isMin = v != null && min != null && v === min && plans.length > 1
                   return (
                     <td key={p.sku_id} className={`px-4 py-2.5 ${isMin ? 'bg-green-50' : ''}`}>
-                      {v == null ? <span className="text-gray-300">—</span> : (
-                        <div>
-                          <span className={`font-medium ${isMin ? 'text-green-700' : 'text-gray-800'}`}>¥{v}</span>
-                          <span className="text-[10px] text-gray-400 ml-1">{isDaily ? `${unitDays * copies}天` : ''}</span>
-                        </div>
-                      )}
+                      {v == null ? <span className="text-gray-300">—</span> : (() => {
+                        const margin = showMargin ? marginOf(p, copies) : null
+                        return (
+                          <div>
+                            <span className={`font-medium ${isMin ? 'text-green-700' : 'text-gray-800'}`}>{currency}{v}</span>
+                            <span className="text-[10px] text-gray-400 ml-1">{isDaily ? `${unitDays * copies}天` : ''}</span>
+                            {margin != null && (
+                              <span className={`ml-1.5 text-[10px] font-medium ${margin >= 30 ? 'text-green-600' : margin >= 15 ? 'text-yellow-600' : 'text-red-500'}`}>{margin}%</span>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </td>
                   )
                 })}

@@ -14,6 +14,7 @@ export interface TreeItem {
 interface TreeTableProps {
   title: string
   data: TreeItem[]
+  cols?: { name: string; qty: string; revenue: string }
 }
 
 function TreeRow({ item, level }: { item: TreeItem, level: number }) {
@@ -56,11 +57,12 @@ function TreeRow({ item, level }: { item: TreeItem, level: number }) {
   )
 }
 
-function TreeTable({ title, data }: TreeTableProps) {
+export function TreeTable({ title, data, cols }: TreeTableProps) {
   const [page, setPage] = useState(1)
   const pageSize = 10
   const totalPages = Math.ceil(data.length / pageSize)
   const currentData = data.slice((page - 1) * pageSize, page * pageSize)
+  const c = cols || { name: '商品組 / 方案', qty: '數量', revenue: '結算金額' }
 
   return (
     <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
@@ -72,9 +74,9 @@ function TreeTable({ title, data }: TreeTableProps) {
         <table className="w-full text-sm text-left">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
-              <th className="px-4 py-3 font-medium">商品組 / 方案</th>
-              <th className="px-4 py-3 font-medium text-right w-32">數量</th>
-              <th className="px-4 py-3 font-medium text-right w-40">結算金額</th>
+              <th className="px-4 py-3 font-medium">{c.name}</th>
+              <th className="px-4 py-3 font-medium text-right w-32">{c.qty}</th>
+              <th className="px-4 py-3 font-medium text-right w-40">{c.revenue}</th>
             </tr>
           </thead>
           <tbody>
