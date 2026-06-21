@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { buildOptionIndex } from '@/lib/option-index'
 import * as XLSX from 'xlsx'
 
 // POST ?account_id= — 取最新匯入批次的原始 Excel，逐列覆蓋「價格」欄為系統售價，回傳 xlsx
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
   const varCol = ci['商品選項ID']
   const mainSkuCol = ci['主商品貨號']     // 可能不存在（舊匯入）
   const varSkuCol = ci['商品選項貨號']
+  const stockCol = ci['庫存']             // 上架=10000、下架=0
   if (priceCol === undefined || varCol === undefined) {
     return NextResponse.json({ error: '批次缺少價格或商品選項ID 欄位索引' }, { status: 500 })
   }
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
   const options: any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase.from('shopee_product_options_v2')
-      .select('shopee_variation_id, shopee_product_id, main_sku_code, bc_sku_id, copies, price_override, original_price').eq('account_id', accountId)
+      .select('shopee_variation_id, shopee_product_id, main_sku_code, variation_sku_code, bc_sku_id, copies, price_override, original_price, is_listed').eq('account_id', accountId)
       .range(from, from + 999)
     if (!data || data.length === 0) break
     options.push(...data)
@@ -45,20 +47,24 @@ export async function POST(request: Request) {
     ? new Set(options.filter(o => productIds.includes(String(o.shopee_product_id))).map(o => String(o.shopee_variation_id)))
     : null
 
+  // 套餐選項貨號 → 套餐售價（售價以套餐為準）
+  const pkgPriceByCode = new Map((await buildOptionIndex(supabase)).map(it => [it.code, it.sell_price]))
+
   const priceByVar = new Map<string, number>()
   const mainSkuByVar = new Map<string, string>()
   const varSkuByVar = new Map<string, string>()
+  const stockByVar = new Map<string, number>()
   for (const o of options || []) {
     const vid = String(o.shopee_variation_id)
-    // 售價：覆蓋值 > 原蝦皮價
-    const finalPrice = o.price_override != null ? Number(o.price_override)
-      : (o.original_price != null ? Number(o.original_price) : null)
+    // 售價：以套餐為準（無對應才退回原蝦皮價）
+    const pkgPrice = o.variation_sku_code ? (pkgPriceByCode.get(o.variation_sku_code) ?? null) : null
+    const finalPrice = pkgPrice != null ? pkgPrice : (o.original_price != null ? Number(o.original_price) : null)
     if (finalPrice && finalPrice > 0) priceByVar.set(vid, finalPrice)
-    // 貨號：主商品貨號（手填）＋ 商品選項貨號（主貨號_BC_copies，需有主貨號＋已對應）
-    if (o.main_sku_code) {
-      mainSkuByVar.set(vid, String(o.main_sku_code))
-      if (o.bc_sku_id) varSkuByVar.set(vid, `${o.main_sku_code}_${o.bc_sku_id}_${o.copies ?? ''}`)
-    }
+    // 主商品貨號（手填）＋ 商品選項貨號（直接用填入的套餐選項貨號）
+    if (o.main_sku_code) mainSkuByVar.set(vid, String(o.main_sku_code))
+    if (o.variation_sku_code) varSkuByVar.set(vid, String(o.variation_sku_code))
+    // 庫存：下架=0、其餘固定 10000
+    stockByVar.set(vid, o.is_listed === false ? 0 : 10000)
   }
 
   // 就地覆蓋價格欄（其餘 cell 一律不動），未設定售價的列保留原價
@@ -77,6 +83,7 @@ export async function POST(request: Request) {
       const p = priceByVar.get(vid); if (p != null) { row[priceCol] = p; changed++ }
       if (mainSkuCol !== undefined) { const ms = mainSkuByVar.get(vid); if (ms) row[mainSkuCol] = ms }
       if (varSkuCol !== undefined) { const vs = varSkuByVar.get(vid); if (vs) row[varSkuCol] = vs }
+      if (stockCol !== undefined) { const st = stockByVar.get(vid); if (st != null) row[stockCol] = st }
     }
     body.push(row)
   }

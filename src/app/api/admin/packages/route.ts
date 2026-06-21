@@ -99,6 +99,7 @@ export async function PATCH(request: Request) {
   if (body.tags !== undefined) updates.tags = Array.isArray(body.tags) && body.tags.length ? body.tags : null
   if (body.countries !== undefined) updates.countries = Array.isArray(body.countries) && body.countries.length ? body.countries : null
   if (body.sort_order !== undefined) updates.sort_order = body.sort_order
+  if (body.main_option_code !== undefined) updates.main_option_code = (body.main_option_code || '').trim() || null
 
   await supabase.from('packages').update(updates).eq('id', body.id)
   return NextResponse.json({ ok: true })

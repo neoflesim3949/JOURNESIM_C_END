@@ -67,6 +67,7 @@ export async function GET(
       plan_type: bc?.plan_type || null,
       rechargeable_product: bc?.rechargeable_product || null,
       is_active: p.is_active,
+      is_unlimited: p.is_unlimited ?? false,
       copy_prices: (priceMap.get(p.id) || [])
         .sort((a, b) => parseInt(a.copies) - parseInt(b.copies))
         .map((pr) => ({

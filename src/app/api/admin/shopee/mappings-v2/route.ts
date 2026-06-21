@@ -3,6 +3,7 @@ import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { computeCostTwd, costCnyFromPrices } from '@/lib/shopee-pricing'
 import { isBcChanged, snapshotFor } from '@/lib/bc-snapshot'
+import { buildOptionIndex } from '@/lib/option-index'
 
 // GET ?account_id= — 列表，即時算成本/計算售價/最終售價/毛利
 export async function GET(request: Request) {
@@ -33,13 +34,24 @@ export async function GET(request: Request) {
     : { data: [] }
   const bcMap = new Map((bcProducts || []).map(p => [p.sku_id, p]))
 
+  // 套餐選項貨號 → 套餐售價（V2 售價以套餐為準，套餐改價這裡即時跟著變）
+  const optIndex = await buildOptionIndex(supabase)
+  const pkgPriceByCode = new Map(optIndex.map(it => [it.code, it.sell_price]))
+
+  const snapInit: { id: string; price: number }[] = [] // 已對應但尚無前次售價快照的列，建立基準
   const result = (options || []).map(o => {
     const bc = o.bc_sku_id ? bcMap.get(o.bc_sku_id) : null
     const costCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, o.copies) : 0
     const costTwd = computeCostTwd(costCny, cnyRate)
-    // 售價：覆蓋值 > 原蝦皮價
-    const finalPrice = o.price_override != null ? Number(o.price_override)
-      : (o.original_price != null ? Number(o.original_price) : null)
+    // 套餐售價（依填入的選項貨號解析）
+    const pkgPrice = o.variation_sku_code ? (pkgPriceByCode.get(o.variation_sku_code) ?? null) : null
+    // 前次售價快照 vs 目前套餐售價（套餐改價後標示）
+    let priceSnap = o.price_snapshot != null ? Number(o.price_snapshot) : null
+    // 已對應但沒有快照（舊資料）→ 以目前套餐售價建立基準，往後改價才比得出來
+    if (priceSnap == null && pkgPrice != null && o.variation_sku_code) { priceSnap = pkgPrice; snapInit.push({ id: o.id, price: pkgPrice }) }
+    const priceChanged = pkgPrice != null && priceSnap != null && pkgPrice !== priceSnap
+    // 售價：以套餐為準（無對應才退回原蝦皮價）；不再支援手動覆蓋
+    const finalPrice = pkgPrice != null ? pkgPrice : (o.original_price != null ? Number(o.original_price) : null)
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
     // 商品選項貨號自動生成：主商品貨號_BC SKU_copies（需有主貨號＋已對應）
     const variationSkuAuto = (o.main_sku_code && o.bc_sku_id)
@@ -51,6 +63,9 @@ export async function GET(request: Request) {
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
       cost_twd: costTwd || null,
+      package_price: pkgPrice,
+      price_snapshot: priceSnap,
+      price_changed: priceChanged,
       final_price: finalPrice || null,
       margin,
       margin_pct: margin != null && finalPrice ? Math.round((margin / finalPrice) * 1000) / 10 : null,
@@ -58,6 +73,11 @@ export async function GET(request: Request) {
       bc_changed: isBcChanged(o.bc_sku_id, o.bc_name_snapshot, o.bc_cost_snapshot, bc?.name, costCny),
     }
   })
+
+  // 持久化前次售價基準（一次性，往後就有快照可比對）
+  for (const s of snapInit) {
+    await supabase.from('shopee_product_options_v2').update({ price_snapshot: s.price }).eq('id', s.id)
+  }
 
   // 規格自訂排序
   const specOrders: { product_id: string; spec_type: string; spec_value: string; sort_index: number }[] = []
@@ -82,6 +102,12 @@ export async function PATCH(request: Request) {
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if ('bc_sku_id' in body) updates.bc_sku_id = body.bc_sku_id || null
   if ('copies' in body) updates.copies = body.copies || null
+  if ('variation_sku_code' in body) updates.variation_sku_code = body.variation_sku_code || null
+  if ('is_listed' in body) updates.is_listed = !!body.is_listed
+  if ('price_snapshot' in body) {
+    const v = body.price_snapshot
+    updates.price_snapshot = v === null || v === '' ? null : Number(v)
+  }
   if ('price_override' in body) {
     const v = body.price_override
     updates.price_override = v === null || v === '' ? null : Number(v)

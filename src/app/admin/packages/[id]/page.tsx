@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, X, Trash2, DollarSign, Eye } from 'lucide-react'
 import { formatCapacity, formatSpeed } from '@/lib/format'
+import { buildOptionCode } from '@/lib/option-code'
 
 import { getTypeLabels } from '@/lib/bc-enums'
 import PlanCompareModal from '@/components/admin/plan-compare-modal'
@@ -22,11 +23,12 @@ interface BoundPlan {
   capacity: string | null; high_flow_size: string | null
   limit_flow_speed: string | null; plan_type: string | null
   rechargeable_product: string | null
-  is_active: boolean; copy_prices: CopyPrice[]
+  is_active: boolean; is_unlimited?: boolean; copy_prices: CopyPrice[]
 }
 interface Pkg {
   id: string; name: string; description: string | null; product_type: string
   category?: string | null; tags?: string[] | null; countries?: string[] | null
+  main_option_code?: string | null
 }
 
 export default function PackageDetailPage() {
@@ -51,7 +53,7 @@ export default function PackageDetailPage() {
   const [showManual, setShowManual] = useState(false)
   const [batchImporting, setBatchImporting] = useState(false)
   // 編輯套餐資訊（行內，always-visible）
-  const [editForm, setEditForm] = useState({ name: '', product_type: 'esim', category: '', tagsText: '', description: '', countries: [] as string[] })
+  const [editForm, setEditForm] = useState({ name: '', product_type: 'esim', category: '', tagsText: '', description: '', countries: [] as string[], mainCode: '' })
   const [countryOpts, setCountryOpts] = useState<{ mcc: string; name: string }[]>([])
   const [savingInfo, setSavingInfo] = useState(false)
   const parseTags = (s: string) => s.split(/[,，]/).map(t => t.trim()).filter(Boolean)
@@ -59,7 +61,7 @@ export default function PackageDetailPage() {
     setSavingInfo(true)
     await fetch('/api/admin/packages', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, name: editForm.name, product_type: editForm.product_type, category: editForm.category, tags: parseTags(editForm.tagsText), description: editForm.description, countries: editForm.countries }),
+      body: JSON.stringify({ id, name: editForm.name, product_type: editForm.product_type, category: editForm.category, tags: parseTags(editForm.tagsText), description: editForm.description, countries: editForm.countries, main_option_code: editForm.mainCode }),
     })
     await loadData(); setSavingInfo(false)
   }
@@ -118,7 +120,7 @@ export default function PackageDetailPage() {
   }, [])
   // 套餐載入後帶入行內編輯表單
   useEffect(() => {
-    if (pkg) setEditForm({ name: pkg.name, product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', '), description: pkg.description || '', countries: pkg.countries || [] })
+    if (pkg) setEditForm({ name: pkg.name, product_type: pkg.product_type, category: pkg.category || '', tagsText: (pkg.tags || []).join(', '), description: pkg.description || '', countries: pkg.countries || [], mainCode: pkg.main_option_code || '' })
   }, [pkg])
 
   async function handleImportByCountry() {
@@ -151,6 +153,15 @@ export default function PackageDetailPage() {
 
   function handleRefChange(cpId: string, ref: number | null) {
     setEditedRefs((prev) => new Map(prev).set(cpId, ref))
+  }
+
+  // 切換「吃到飽」（影響選項貨號是否加 F）
+  async function handleToggleUnlimited(planId: string, val: boolean) {
+    await fetch(`/api/admin/packages/${id}/prices`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_updates: [{ id: planId, is_unlimited: val }] }),
+    })
+    await loadData()
   }
 
   async function handleSavePrices() {
@@ -310,6 +321,11 @@ export default function PackageDetailPage() {
             </select>
           </div>
           <div>
+            <label className="text-xs text-gray-500">主選項ID（生成貨號用）</label>
+            <input value={editForm.mainCode} onChange={e => setEditForm({ ...editForm, mainCode: e.target.value })} placeholder="例：JPIIJ"
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" />
+          </div>
+          <div>
             <label className="text-xs text-gray-500">分類</label>
             <input value={editForm.category} onChange={e => setEditForm({ ...editForm, category: e.target.value })} placeholder="例：東南亞"
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
@@ -398,7 +414,7 @@ export default function PackageDetailPage() {
                   <input type="checkbox" checked={dailyPlans.every((p) => selectedPlanIds.has(p.id))} onChange={() => toggleSelectAll(dailyPlans)} className="accent-blue-600" /> 全選
                 </label>
               </div>
-              <PlanTable plans={dailyPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
+              <PlanTable plans={dailyPlans} mainCode={pkg?.main_option_code || ''} onToggleUnlimited={handleToggleUnlimited} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
                 onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
@@ -412,7 +428,7 @@ export default function PackageDetailPage() {
                   <input type="checkbox" checked={fixedPlans.every((p) => selectedPlanIds.has(p.id))} onChange={() => toggleSelectAll(fixedPlans)} className="accent-blue-600" /> 全選
                 </label>
               </div>
-              <PlanTable plans={fixedPlans} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
+              <PlanTable plans={fixedPlans} mainCode={pkg?.main_option_code || ''} onToggleUnlimited={handleToggleUnlimited} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
                 onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
@@ -748,8 +764,8 @@ function PreviewModal({ pkg, plans, editedPrices, packageId, onClose, onSaved }:
   )
 }
 
-function PlanTable({ plans, editedPrices, onPriceChange, editedRefs, onRefChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
-  plans: BoundPlan[]; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
+function PlanTable({ plans, mainCode, onToggleUnlimited, editedPrices, onPriceChange, editedRefs, onRefChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
+  plans: BoundPlan[]; mainCode: string; onToggleUnlimited: (planId: string, val: boolean) => void; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
   editedRefs: Map<string, number | null>; onRefChange: (id: string, r: number | null) => void
   expandedIds: Set<string>; onToggleExpand: (id: string) => void; onRemove: (id: string) => void
   selectedIds: Set<string>; onToggleSelect: (id: string) => void; exchangeRate: number
@@ -813,6 +829,9 @@ function PlanTable({ plans, editedPrices, onPriceChange, editedRefs, onRefChange
                         <div className="font-medium truncate flex items-center gap-1.5">
                           <button onClick={(e) => { e.stopPropagation(); onDetail(plan.bc_sku_id) }} className="text-left hover:text-blue-600 hover:underline">{plan.bc_name}</button>
                           <button onClick={(e) => { e.stopPropagation(); onDetail(plan.bc_sku_id) }} title="查看詳情" className="text-gray-300 hover:text-blue-600 shrink-0"><Eye className="w-3.5 h-3.5" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); onToggleUnlimited(plan.id, !plan.is_unlimited) }}
+                            title={plan.is_unlimited ? '吃到飽（貨號加 F）— 點擊取消' : '標記吃到飽（貨號加 F）'}
+                            className={`px-1.5 py-0.5 text-xs rounded shrink-0 ${plan.is_unlimited ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>吃到飽</button>
                           {hasChanges && <span className="px-1 py-0.5 text-xs bg-red-100 text-red-600 rounded">異動</span>}
                         </div>
                         <div className="text-xs text-gray-400 font-mono">{plan.bc_sku_id}</div>
@@ -844,7 +863,17 @@ function PlanTable({ plans, editedPrices, onPriceChange, editedRefs, onRefChange
                   return (
                     <tr key={cp.id} className={`hover:bg-gray-100/50 ${cp.price_changed ? 'bg-red-50/50' : 'bg-gray-50/50'}`}>
                       <td className="px-3 py-2"></td>
-                      <td className="px-3 py-2 pl-10" colSpan={3}></td>
+                      <td className="px-3 py-2 pl-10" colSpan={3}>
+                        {(() => {
+                          const code = buildOptionCode(mainCode, plan, days, plan.is_unlimited)
+                          return code ? (
+                            <button type="button" onClick={() => { navigator.clipboard?.writeText(code) }}
+                              title="點擊複製選項貨號" className="font-mono text-[11px] text-gray-500 hover:text-blue-600">
+                              {code}
+                            </button>
+                          ) : <span className="text-[10px] text-gray-300">設定「主選項ID」後產生貨號</span>
+                        })()}
+                      </td>
                       <td className="px-3 py-2"></td>
                       <td className="px-3 py-2 text-gray-700 font-medium text-xs"><span className="text-gray-400">└ </span>{days} 天</td>
                       <td className="px-3 py-2 text-right text-xs text-gray-400">
