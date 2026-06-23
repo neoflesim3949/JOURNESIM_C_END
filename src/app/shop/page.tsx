@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { Search, ChevronRight, ImageIcon } from 'lucide-react'
-import { formatPrice } from '@/lib/utils'
+import { useCurrency } from '@/lib/currency'
 import { CountryModal } from '@/components/shop/country-modal'
 
 interface BCCountry {
@@ -30,6 +30,7 @@ export default function ShopPage() {
 }
 
 function ShopContent() {
+  const { format } = useCurrency()
   const searchParams = useSearchParams()
   const initialScope = (searchParams.get('scope') as ScopeTab) || 'local'
   const typeParam = searchParams.get('type') as 'esim' | 'sim' | null
@@ -167,7 +168,7 @@ function ShopContent() {
                         {item.lowest_price ? (
                           <div className="text-right">
                             <p className="text-[10px] text-muted-foreground uppercase leading-none">起價</p>
-                            <p className="text-sm font-bold text-primary">{formatPrice(item.lowest_price)}</p>
+                            <p className="text-sm font-bold text-primary">{format(item.lowest_price)}</p>
                           </div>
                         ) : (
                           <p className="text-xs text-muted-foreground">Coming Soon</p>

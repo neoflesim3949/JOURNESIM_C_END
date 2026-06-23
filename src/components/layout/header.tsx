@@ -5,11 +5,13 @@ import { useEffect, useState } from 'react'
 import { Menu, X, ShoppingCart, User, Cpu, ClipboardList, LayoutGrid } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useCart } from '@/lib/cart'
+import { useCurrency, CURRENCIES, type Currency } from '@/lib/currency'
 
 export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const { itemCount } = useCart()
+  const { currency, setCurrency } = useCurrency()
   const [logo, setLogo] = useState<string | null>(null)
   const [logoReady, setLogoReady] = useState(false)
 
@@ -58,6 +60,11 @@ export function Header() {
 
           {/* Right: Actions */}
           <div className="hidden lg:flex items-center gap-3">
+            <select value={currency} onChange={e => setCurrency(e.target.value as Currency)}
+              aria-label="幣別" title="顯示幣別（結帳以新台幣計價）"
+              className="text-sm font-medium text-foreground bg-transparent border border-border rounded-lg px-2 py-1.5 cursor-pointer hover:border-primary/50 focus:outline-none">
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
             {isLoggedIn && (
               <Link href="/account/simcards" className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors">
                 <LayoutGrid className="w-4 h-4" />
@@ -103,6 +110,13 @@ export function Header() {
             <Link href="/guide" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>幫助中心</Link>
             <Link href="/guide#install" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>安裝教學</Link>
             <div className="border-t border-border pt-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-foreground">顯示幣別</span>
+                <select value={currency} onChange={e => setCurrency(e.target.value as Currency)}
+                  className="text-sm font-medium bg-transparent border border-border rounded-lg px-2 py-1.5">
+                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
               {isLoggedIn && (
                 <Link href="/account/simcards" className="block text-sm font-medium text-foreground hover:text-primary" onClick={() => setMobileOpen(false)}>卡片狀態</Link>
               )}

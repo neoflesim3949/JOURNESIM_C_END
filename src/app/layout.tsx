@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ConditionalLayout } from "@/components/layout/conditional-layout";
 import { CartProvider } from "@/lib/cart";
+import { CurrencyProvider } from "@/lib/currency";
 import { AnalyticsScripts } from "@/components/tracking/analytics";
 import { ReferralTracker } from "@/components/referral/ReferralTracker";
 import { Suspense } from "react";
@@ -60,11 +61,13 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <CartProvider>
-          <AnalyticsScripts />
-          <Suspense fallback={null}>
-            <ReferralTracker />
-          </Suspense>
-          <ConditionalLayout>{children}</ConditionalLayout>
+          <CurrencyProvider>
+            <AnalyticsScripts />
+            <Suspense fallback={null}>
+              <ReferralTracker />
+            </Suspense>
+            <ConditionalLayout>{children}</ConditionalLayout>
+          </CurrencyProvider>
         </CartProvider>
       </body>
     </html>

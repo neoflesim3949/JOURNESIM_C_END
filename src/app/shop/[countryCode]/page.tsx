@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft, ChevronRight, ImageIcon } from 'lucide-react'
-import { formatPrice } from '@/lib/utils'
+import { useCurrency } from '@/lib/currency'
 
 interface CountryInfo {
   name: string; continent?: string; flag_url: string | null; icon_url?: string | null
@@ -16,6 +16,7 @@ interface PackageSummary {
 }
 
 export default function CountryPage() {
+  const { format } = useCurrency()
   const { countryCode } = useParams() as { countryCode: string }
   const searchParams = useSearchParams()
   const typeParam = searchParams.get('type') as 'esim' | 'sim' | null
@@ -105,7 +106,7 @@ export default function CountryPage() {
                   <div className="text-lg font-semibold">{pkg.name}</div>
                   {pkg.description && <div className="text-sm text-muted-foreground mt-0.5">{pkg.description}</div>}
                   {pkg.lowest_price && pkg.lowest_price > 0 && (
-                    <div className="text-sm text-muted-foreground mt-1">起價 {formatPrice(pkg.lowest_price)}</div>
+                    <div className="text-sm text-muted-foreground mt-1">起價 {format(pkg.lowest_price)}</div>
                   )}
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />

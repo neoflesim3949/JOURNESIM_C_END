@@ -5,8 +5,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Minus, Plus, ShoppingBag, ShoppingCart, Check } from 'lucide-react'
-import { formatPrice } from '@/lib/utils'
+import { ArrowLeft, Minus, Plus, ShoppingBag, ShoppingCart, Check, Zap, Wifi, Headphones, Globe, ShieldCheck, Smartphone, ChevronDown, QrCode, CreditCard, Signal } from 'lucide-react'
+import { useCurrency } from '@/lib/currency'
 import { formatCapacity } from '@/lib/format'
 import { useCart } from '@/lib/cart'
 import { trackAddToCart } from '@/components/tracking/analytics'
@@ -27,6 +27,7 @@ interface ProductData {
   id: string; name: string; description: string | null
   country_code: string; country_name: string; product_type: string
   country_flag: string | null
+  operators?: string[] | null; apns?: string[] | null; countries?: string[] | null
 }
 
 export default function ProductDetailPage() {
@@ -42,6 +43,7 @@ function ProductDetailContent() {
 
   const router = useRouter()
   const { addItem } = useCart()
+  const { format, currency } = useCurrency()
   const [product, setProduct] = useState<ProductData | null>(null)
   const [plans, setPlans] = useState<PlanData[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,6 +55,7 @@ function ProductDetailContent() {
   const [selectedDays, setSelectedDays] = useState('')
   const [selectedFixedPlan, setSelectedFixedPlan] = useState('')
   const [quantity, setQuantity] = useState(1)
+  const [openFaq, setOpenFaq] = useState<number | null>(0)
 
   useEffect(() => {
     async function load() {
@@ -226,6 +229,20 @@ function ProductDetailContent() {
     )
   }
 
+  const isEsim = product.product_type !== 'sim'
+  const faqs = isEsim ? [
+    { q: '什麼是 eSIM？', a: 'eSIM 是內建於手機的虛擬 SIM 卡，免插實體卡，掃描我們提供的 QR Code 即可安裝使用。' },
+    { q: '我的手機支援 eSIM 嗎？', a: '多數近年的 iPhone、Google Pixel、三星旗艦等機型支援 eSIM。建議於手機設定中確認，或聯繫客服協助確認。' },
+    { q: '何時安裝、何時生效？', a: '建議出發前先完成安裝；抵達當地開啟「數據漫遊」即可連線。流量與天數自首次連線啟用後開始計算。' },
+    { q: '可以分享個人熱點嗎？', a: '一般支援個人熱點分享，實際依方案與當地電信商規範為準。' },
+    { q: '用完可以加購嗎？', a: '可隨時再購買新方案。eSIM 一經安裝啟用後屬一次性數位商品，不適用退款。' },
+  ] : [
+    { q: '如何使用實體 SIM 卡？', a: '收到卡片後插入手機，開啟「數據漫遊」即可使用。' },
+    { q: '卡片何時寄出？', a: '訂單成立後依物流時程寄送，請預留收件時間，建議提前下單。' },
+    { q: '流量何時開始計算？', a: '自首次連線啟用後，依方案天數開始計算。' },
+    { q: '可以分享個人熱點嗎？', a: '一般支援個人熱點分享，實際依方案與當地電信商規範為準。' },
+  ]
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
       <Link href={`/shop/${countryCode}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
@@ -370,7 +387,8 @@ function ProductDetailContent() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">總計</div>
-                <div className="text-3xl font-bold text-primary">{formatPrice(totalPrice)}</div>
+                <div className="text-3xl font-bold text-primary">{format(totalPrice)}</div>
+                {currency !== 'TWD' && <div className="text-xs text-muted-foreground mt-0.5">結帳以新台幣計價 NT$ {totalPrice.toLocaleString()}</div>}
               </div>
             </div>
             <div className="flex gap-3">
@@ -403,6 +421,117 @@ function ProductDetailContent() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ===== 商品介紹區 ===== */}
+      <div className="mt-14 space-y-12">
+        {/* 優勢 */}
+        <section>
+          <h2 className="text-xl font-bold text-center">為什麼選擇 FLESIM</h2>
+          <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-4">
+            {[
+              { icon: Zap, title: '即時開通', desc: '付款後立即取得，免等待寄送。' },
+              { icon: Signal, title: '高速網路', desc: '當地電信商 4G/5G 高速連線。' },
+              { icon: isEsim ? QrCode : CreditCard, title: isEsim ? '掃碼即用' : '隨插即用', desc: isEsim ? '掃描 QR Code 安裝，免換實體卡。' : '插入手機即可使用，操作簡單。' },
+              { icon: Globe, title: '無漫遊費', desc: '透明定價，無隱藏費用與帳單驚喜。' },
+              { icon: ShieldCheck, title: '安全付款', desc: '支援多種安全的付款方式。' },
+              { icon: Headphones, title: '客服支援', desc: '購買與使用問題隨時為您協助。' },
+            ].map((f) => (
+              <div key={f.title} className="bg-white border border-border rounded-2xl p-5 hover:shadow-sm transition-shadow">
+                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <f.icon className="w-5 h-5 text-primary" />
+                </div>
+                <h3 className="mt-3 font-semibold">{f.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground leading-relaxed">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 方案重點 / 規格 */}
+        <section>
+          <h2 className="text-xl font-bold">方案重點</h2>
+          <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: '商品類型', value: isEsim ? 'eSIM' : '實體 SIM 卡' },
+              { label: '適用地區', value: product.country_name || '—' },
+              { label: '方案型態', value: [hasDailyPlans && '日費', hasFixedPlans && '總量'].filter(Boolean).join(' / ') || '—' },
+              { label: '開通方式', value: isEsim ? '掃碼安裝' : '插卡即用' },
+            ].map((s) => (
+              <div key={s.label} className="bg-muted/50 rounded-xl p-4">
+                <div className="text-xs text-muted-foreground">{s.label}</div>
+                <div className="mt-1 font-semibold">{s.value}</div>
+              </div>
+            ))}
+          </div>
+          {(product.operators?.length || product.apns?.length) ? (
+            <div className="mt-4 grid sm:grid-cols-2 gap-3">
+              {product.operators?.length ? (
+                <div className="bg-white border border-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium"><Signal className="w-4 h-4 text-primary" /> 適用電信商</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {product.operators.map((op) => <span key={op} className="px-2 py-0.5 text-xs rounded-full bg-primary/10 text-primary">{op}</span>)}
+                  </div>
+                </div>
+              ) : null}
+              {product.apns?.length ? (
+                <div className="bg-white border border-border rounded-xl p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium"><Wifi className="w-4 h-4 text-primary" /> APN 設定</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {product.apns.map((a) => <span key={a} className="px-2 py-0.5 text-xs rounded-full bg-muted font-mono">{a}</span>)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+
+        {/* 使用步驟 */}
+        <section>
+          <h2 className="text-xl font-bold text-center">三步驟輕鬆上網</h2>
+          <div className="mt-6 grid md:grid-cols-3 gap-4">
+            {[
+              { icon: ShoppingBag, title: '1. 選擇方案', desc: '挑選數據量與天數，完成結帳。' },
+              isEsim
+                ? { icon: QrCode, title: '2. 掃碼安裝', desc: '掃描取得的 QR Code 安裝 eSIM。' }
+                : { icon: CreditCard, title: '2. 插入卡片', desc: '收到實體 SIM 卡後插入手機。' },
+              { icon: Signal, title: '3. 開始上網', desc: '開啟數據漫遊，抵達當地即可連線。' },
+            ].map((s) => (
+              <div key={s.title} className="bg-white border border-border rounded-2xl p-5 text-center">
+                <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                  <s.icon className="w-6 h-6 text-primary" />
+                </div>
+                <h3 className="mt-3 font-semibold">{s.title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{s.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* FAQ */}
+        <section>
+          <h2 className="text-xl font-bold">常見問題</h2>
+          <div className="mt-5 space-y-2">
+            {faqs.map((f, i) => (
+              <div key={i} className="border border-border rounded-xl overflow-hidden">
+                <button onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left text-sm font-medium hover:bg-muted/50">
+                  {f.q}
+                  <ChevronDown className={`w-4 h-4 shrink-0 text-muted-foreground transition-transform ${openFaq === i ? 'rotate-180' : ''}`} />
+                </button>
+                {openFaq === i && <div className="px-4 pb-4 text-sm text-muted-foreground leading-relaxed">{f.a}</div>}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 安心保障 */}
+        <section className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 py-2 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5"><ShieldCheck className="w-4 h-4 text-primary" /> 安全付款</span>
+          <span className="inline-flex items-center gap-1.5"><Zap className="w-4 h-4 text-primary" /> 即時開通</span>
+          <span className="inline-flex items-center gap-1.5"><Smartphone className="w-4 h-4 text-primary" /> 免綁約</span>
+          <span className="inline-flex items-center gap-1.5"><Headphones className="w-4 h-4 text-primary" /> 客服支援</span>
+        </section>
       </div>
     </div>
   )

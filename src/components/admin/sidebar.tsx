@@ -94,6 +94,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/params/exchange-rate', label: '匯率管理' },
       { href: '/admin/params/countries', label: '國家 MCC 管理' },
       { href: '/admin/params/login', label: '登入管理' },
+      { href: '/admin/params/articles', label: '文章管理' },
     ],
   },
   { href: '/admin/media', label: '圖片庫', icon: Image },
