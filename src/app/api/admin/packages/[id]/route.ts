@@ -32,9 +32,12 @@ export async function GET(
   const skuIds = plans.map((p) => p.bc_sku_id)
   const { data: bcProducts } = await supabase
     .from('bc_products')
-    .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, rechargeable_product')
+    .select('sku_id, name, type, days, capacity, high_flow_size, limit_flow_speed, plan_type, rechargeable_product, is_active')
     .in('sku_id', skuIds)
   const bcMap = new Map((bcProducts || []).map((p) => [p.sku_id, p]))
+
+  // 補初始化 BC 品名快照（舊資料），往後品名變更才比得出來
+  const nameSnapInit: { id: string; name: string }[] = []
 
   // 價格
   const planIds = plans.map((p) => p.id)
@@ -52,6 +55,12 @@ export async function GET(
 
   const result = plans.map((p) => {
     const bc = bcMap.get(p.bc_sku_id)
+    // BC 下架：bc_products 不存在 或 is_active=false
+    const isDelisted = !bc || bc.is_active === false
+    // BC 品名變更：快照 vs 現況（快照為空＝舊資料，補初始化基準）
+    let nameSnap: string | null = p.bc_name_snapshot ?? null
+    if (nameSnap == null && bc?.name) { nameSnap = bc.name; nameSnapInit.push({ id: p.id, name: bc.name }) }
+    const nameChanged = !!(nameSnap && bc?.name && nameSnap !== bc.name)
     return {
       id: p.id,
       bc_sku_id: p.bc_sku_id,
@@ -68,6 +77,9 @@ export async function GET(
       rechargeable_product: bc?.rechargeable_product || null,
       is_active: p.is_active,
       is_unlimited: p.is_unlimited ?? false,
+      is_delisted: isDelisted,
+      name_changed: nameChanged,
+      bc_name_snapshot: nameSnap,
       copy_prices: (priceMap.get(p.id) || [])
         .sort((a, b) => parseInt(a.copies) - parseInt(b.copies))
         .map((pr) => ({
@@ -81,6 +93,11 @@ export async function GET(
         })),
     }
   })
+
+  // 持久化品名快照基準（一次性）
+  for (const s of nameSnapInit) {
+    await supabase.from('package_plans').update({ bc_name_snapshot: s.name }).eq('id', s.id)
+  }
 
   return NextResponse.json({ package: pkg, plans: result })
 }

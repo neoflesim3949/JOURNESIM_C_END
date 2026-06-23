@@ -34,10 +34,13 @@ export async function GET() {
     }
   }
 
-  // 檢查哪些套餐有價格異動
-  const changedPkgIds = new Set<string>()
+  // 檢查哪些套餐有：價格異動 / BC 品名變更 / BC 下架
+  const changedPkgIds = new Set<string>()    // 成本異動
+  const nameChangedPkgIds = new Set<string>() // BC 品名變更
+  const delistedPkgIds = new Set<string>()    // BC 下架
+  const nameSnapInit: { id: string; name: string }[] = []
   if (packageIds.length > 0) {
-    const { data: allPlans } = await supabase.from('package_plans').select('id, package_id').in('package_id', packageIds)
+    const { data: allPlans } = await supabase.from('package_plans').select('id, package_id, bc_sku_id, bc_name_snapshot').in('package_id', packageIds)
     const planIds = (allPlans || []).map((p) => p.id)
     if (planIds.length > 0) {
       const { data: changedPrices } = await supabase.from('package_plan_prices').select('package_plan_id').in('package_plan_id', planIds).eq('price_changed', true)
@@ -45,7 +48,24 @@ export async function GET() {
       for (const plan of allPlans || []) {
         if (changedPlanIds.has(plan.id)) changedPkgIds.add(plan.package_id)
       }
+      // BC 現況（品名 / 是否上架）
+      const skus = [...new Set((allPlans || []).map((p) => p.bc_sku_id).filter(Boolean))] as string[]
+      const { data: bcRows } = skus.length
+        ? await supabase.from('bc_products').select('sku_id, name, is_active').in('sku_id', skus)
+        : { data: [] }
+      const bcMap = new Map((bcRows || []).map((b) => [b.sku_id, b]))
+      for (const plan of allPlans || []) {
+        const bc = bcMap.get(plan.bc_sku_id)
+        if (!bc || bc.is_active === false) { delistedPkgIds.add(plan.package_id); continue }
+        let snap = plan.bc_name_snapshot ?? null
+        if (snap == null && bc.name) { snap = bc.name; nameSnapInit.push({ id: plan.id, name: bc.name }) }
+        if (snap && bc.name && snap !== bc.name) nameChangedPkgIds.add(plan.package_id)
+      }
     }
+  }
+  // 持久化品名快照基準（一次性）
+  for (const s of nameSnapInit) {
+    await supabase.from('package_plans').update({ bc_name_snapshot: s.name }).eq('id', s.id)
   }
 
   const result = (packages || []).map((p) => ({
@@ -53,6 +73,8 @@ export async function GET() {
     _plan_count: planCounts.get(p.id) || 0,
     _product_count: productCounts.get(p.id) || 0,
     _has_price_changes: changedPkgIds.has(p.id),
+    _has_name_changes: nameChangedPkgIds.has(p.id),
+    _has_delisted: delistedPkgIds.has(p.id),
   }))
 
   return NextResponse.json(result)

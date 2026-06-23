@@ -24,12 +24,13 @@ export async function PATCH(request: Request) {
 
   // 更新方案名稱/排序
   if (body.plan_updates) {
-    const planUpdates = body.plan_updates as { id: string; display_name?: string; sort_order?: number; is_unlimited?: boolean }[]
+    const planUpdates = body.plan_updates as { id: string; display_name?: string; sort_order?: number; is_unlimited?: boolean; bc_name_snapshot?: string }[]
     for (const u of planUpdates) {
       const upd: Record<string, unknown> = {}
       if (u.display_name !== undefined) upd.display_name = u.display_name || null
       if (u.sort_order !== undefined) upd.sort_order = u.sort_order
       if (u.is_unlimited !== undefined) upd.is_unlimited = !!u.is_unlimited
+      if (u.bc_name_snapshot !== undefined) upd.bc_name_snapshot = u.bc_name_snapshot || null
       if (Object.keys(upd).length) await supabase.from('package_plans').update(upd).eq('id', u.id)
     }
     return NextResponse.json({ ok: true, updated: planUpdates.length })

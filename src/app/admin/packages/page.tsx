@@ -10,10 +10,11 @@ import CountryMultiSelect from '@/components/admin/country-multi-select'
 
 interface Pkg {
   id: string; name: string; description: string | null; product_type: string; scope?: string
-  is_active: boolean; _plan_count: number; _product_count: number; _has_price_changes?: boolean
+  is_active: boolean; _plan_count: number; _product_count: number; _has_price_changes?: boolean; _has_name_changes?: boolean; _has_delisted?: boolean
   category?: string | null; tags?: string[] | null; sort_order?: number
   countries?: string[] | null
   apns?: string[] | null; operators?: string[] | null; apn_synced_at?: string | null
+  main_option_code?: string | null
 }
 
 interface BcProduct {
@@ -477,7 +478,7 @@ export default function AdminPackagesPage() {
                 onDragStart={() => !filterCategory && setDragIdx(idx)}
                 onDragOver={(e) => { if (!filterCategory && dragIdx !== null) e.preventDefault() }}
                 onDrop={() => !filterCategory && dropAt(idx)}
-                className={`bg-white border rounded-xl p-5 transition-all ${dragIdx === idx ? 'border-blue-400 opacity-60' : 'border-gray-200 hover:border-gray-300'}`}>
+                className={`bg-white border rounded-xl p-5 transition-all ${dragIdx === idx ? 'border-blue-400 opacity-60' : (pkg._has_price_changes || pkg._has_name_changes || pkg._has_delisted) ? 'border-red-300 bg-red-50/30 hover:border-red-400' : 'border-gray-200 hover:border-gray-300'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-start gap-3">
                     {!filterCategory && <span className="mt-0.5 text-gray-300 cursor-grab active:cursor-grabbing select-none" title="拖曳排序">⠿</span>}
@@ -501,11 +502,14 @@ export default function AdminPackagesPage() {
                         {pkg.is_active ? '上架中' : '已下架'}
                       </button>
                       {(pkg.tags || []).map(t => <span key={t} className="px-1.5 py-0.5 text-[11px] rounded bg-gray-100 text-gray-500">{t}</span>)}
+                      {pkg.main_option_code && <span className="px-1.5 py-0.5 text-[11px] rounded bg-indigo-50 text-indigo-600 font-mono">主商品號：{pkg.main_option_code}</span>}
                     </div>
                     {pkg.description && <p className="mt-1 text-sm text-gray-500">{pkg.description}</p>}
                     <p className="mt-1 text-xs text-gray-400">
                       {pkg._plan_count} 個 BC 商品 · 被 {pkg._product_count} 個方案使用
                       {pkg._has_price_changes && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs font-medium">成本異動</span>}
+                      {pkg._has_name_changes && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs font-medium">品名變更</span>}
+                      {pkg._has_delisted && <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs font-medium">BC 已下架</span>}
                     </p>
                     {(pkg.countries?.length ?? 0) > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1">

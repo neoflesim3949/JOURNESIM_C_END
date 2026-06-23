@@ -60,8 +60,9 @@ function ShopContent() {
   }, [scopeTab])
 
   const rawItems = useMemo(() => {
-    if (scopeTab === 'local') return countries.map(c => ({ id: c.mcc, name: c.name, continent: c.continent || '未歸類', icon_url: c.flag_url, lowest_price: c.lowest_price }))
-    return groups.map(g => ({ id: g.country_code, name: g.name, continent: g.continent || (scopeTab === 'global' ? '全球' : '未歸類'), icon_url: g.icon_url, lowest_price: g.lowest_price }))
+    // 只顯示已設定套餐（有起價）的方案；未設定套餐的不顯示
+    if (scopeTab === 'local') return countries.filter(c => c.lowest_price != null).map(c => ({ id: c.mcc, name: c.name, continent: c.continent || '未歸類', icon_url: c.flag_url, lowest_price: c.lowest_price }))
+    return groups.filter(g => g.lowest_price != null).map(g => ({ id: g.country_code, name: g.name, continent: g.continent || (scopeTab === 'global' ? '全球' : '未歸類'), icon_url: g.icon_url, lowest_price: g.lowest_price }))
   }, [scopeTab, countries, groups])
 
   const continents = useMemo(() => [...new Set(rawItems.map((c) => c.continent).filter(Boolean))].sort(), [rawItems])

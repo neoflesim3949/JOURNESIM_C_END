@@ -23,7 +23,9 @@ interface BoundPlan {
   capacity: string | null; high_flow_size: string | null
   limit_flow_speed: string | null; plan_type: string | null
   rechargeable_product: string | null
-  is_active: boolean; is_unlimited?: boolean; copy_prices: CopyPrice[]
+  is_active: boolean; is_unlimited?: boolean
+  is_delisted?: boolean; name_changed?: boolean; bc_name_snapshot?: string | null
+  copy_prices: CopyPrice[]
 }
 interface Pkg {
   id: string; name: string; description: string | null; product_type: string
@@ -160,6 +162,15 @@ export default function PackageDetailPage() {
     await fetch(`/api/admin/packages/${id}/prices`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan_updates: [{ id: planId, is_unlimited: val }] }),
+    })
+    await loadData()
+  }
+
+  // 確認 BC 品名變更 → 把快照更新成現況，清除紅色警示
+  async function handleConfirmName(planId: string, currentName: string) {
+    await fetch(`/api/admin/packages/${id}/prices`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_updates: [{ id: planId, bc_name_snapshot: currentName }] }),
     })
     await loadData()
   }
@@ -414,7 +425,7 @@ export default function PackageDetailPage() {
                   <input type="checkbox" checked={dailyPlans.every((p) => selectedPlanIds.has(p.id))} onChange={() => toggleSelectAll(dailyPlans)} className="accent-blue-600" /> 全選
                 </label>
               </div>
-              <PlanTable plans={dailyPlans} mainCode={pkg?.main_option_code || ''} onToggleUnlimited={handleToggleUnlimited} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
+              <PlanTable plans={dailyPlans} mainCode={pkg?.main_option_code || ''} onToggleUnlimited={handleToggleUnlimited} onConfirmName={handleConfirmName} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
                 onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
@@ -428,7 +439,7 @@ export default function PackageDetailPage() {
                   <input type="checkbox" checked={fixedPlans.every((p) => selectedPlanIds.has(p.id))} onChange={() => toggleSelectAll(fixedPlans)} className="accent-blue-600" /> 全選
                 </label>
               </div>
-              <PlanTable plans={fixedPlans} mainCode={pkg?.main_option_code || ''} onToggleUnlimited={handleToggleUnlimited} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
+              <PlanTable plans={fixedPlans} mainCode={pkg?.main_option_code || ''} onToggleUnlimited={handleToggleUnlimited} onConfirmName={handleConfirmName} editedPrices={editedPrices} onPriceChange={handlePriceChange} editedRefs={editedRefs} onRefChange={handleRefChange}
                 expandedIds={expandedIds} onToggleExpand={toggleExpand} onRemove={handleRemovePlan}
                 selectedIds={selectedPlanIds} onToggleSelect={toggleSelect} exchangeRate={exchangeRate}
                 onDetail={setDetailSku} flowSort={flowSort} onToggleFlowSort={toggleFlowSort} canDrag={!flowSort} onReorder={reorderGroup} />
@@ -764,8 +775,8 @@ function PreviewModal({ pkg, plans, editedPrices, packageId, onClose, onSaved }:
   )
 }
 
-function PlanTable({ plans, mainCode, onToggleUnlimited, editedPrices, onPriceChange, editedRefs, onRefChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
-  plans: BoundPlan[]; mainCode: string; onToggleUnlimited: (planId: string, val: boolean) => void; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
+function PlanTable({ plans, mainCode, onToggleUnlimited, onConfirmName, editedPrices, onPriceChange, editedRefs, onRefChange, expandedIds, onToggleExpand, onRemove, selectedIds, onToggleSelect, exchangeRate, onDetail, flowSort, onToggleFlowSort, canDrag, onReorder }: {
+  plans: BoundPlan[]; mainCode: string; onToggleUnlimited: (planId: string, val: boolean) => void; onConfirmName: (planId: string, currentName: string) => void; editedPrices: Map<string, number>; onPriceChange: (id: string, p: number) => void
   editedRefs: Map<string, number | null>; onRefChange: (id: string, r: number | null) => void
   expandedIds: Set<string>; onToggleExpand: (id: string) => void; onRemove: (id: string) => void
   selectedIds: Set<string>; onToggleSelect: (id: string) => void; exchangeRate: number
@@ -809,13 +820,14 @@ function PlanTable({ plans, mainCode, onToggleUnlimited, editedPrices, onPriceCh
             const unitDays = plan.days ?? 1
             const isSel = selectedIds.has(plan.id)
             const hasChanges = plan.copy_prices.some((cp) => cp.price_changed)
+            const hasIssue = hasChanges || plan.name_changed || plan.is_delisted
             return (
               <Fragment key={plan.id}>
                 <tr draggable={canDrag}
                   onDragStart={() => canDrag && setDragI(i)}
                   onDragOver={(e) => { if (canDrag && dragI !== null) e.preventDefault() }}
                   onDrop={() => canDrag && dropRow(i)}
-                  className={`hover:bg-gray-50 cursor-pointer ${dragI === i ? 'bg-blue-50 opacity-60' : isExp ? 'bg-blue-50/30' : isSel ? 'bg-blue-50/50' : hasChanges ? 'bg-red-50/30' : ''}`} onClick={() => onToggleExpand(plan.id)}>
+                  className={`hover:bg-gray-50 cursor-pointer ${dragI === i ? 'bg-blue-50 opacity-60' : isExp ? 'bg-blue-50/30' : isSel ? 'bg-blue-50/50' : hasIssue ? 'bg-red-50/30' : ''}`} onClick={() => onToggleExpand(plan.id)}>
                   <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-1">
                       {canDrag && <span className="text-gray-300 cursor-grab active:cursor-grabbing select-none" title="拖曳排序">⠿</span>}
@@ -832,7 +844,14 @@ function PlanTable({ plans, mainCode, onToggleUnlimited, editedPrices, onPriceCh
                           <button onClick={(e) => { e.stopPropagation(); onToggleUnlimited(plan.id, !plan.is_unlimited) }}
                             title={plan.is_unlimited ? '吃到飽（貨號加 F）— 點擊取消' : '標記吃到飽（貨號加 F）'}
                             className={`px-1.5 py-0.5 text-xs rounded shrink-0 ${plan.is_unlimited ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>吃到飽</button>
-                          {hasChanges && <span className="px-1 py-0.5 text-xs bg-red-100 text-red-600 rounded">異動</span>}
+                          {hasChanges && <span className="px-1 py-0.5 text-xs bg-red-100 text-red-600 rounded">成本異動</span>}
+                          {plan.is_delisted && <span className="px-1 py-0.5 text-xs bg-red-100 text-red-600 rounded">BC 已下架</span>}
+                          {plan.name_changed && (
+                            <span className="px-1 py-0.5 text-xs bg-red-100 text-red-600 rounded inline-flex items-center gap-1" title={`前次品名：${plan.bc_name_snapshot || '—'}`}>
+                              品名變更
+                              <button onClick={(e) => { e.stopPropagation(); onConfirmName(plan.id, plan.bc_name) }} className="underline hover:text-red-800">確認</button>
+                            </span>
+                          )}
                         </div>
                         <div className="text-xs text-gray-400 font-mono">{plan.bc_sku_id}</div>
                       </div>
