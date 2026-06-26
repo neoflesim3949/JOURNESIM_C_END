@@ -22,7 +22,7 @@ export default function AdminMemberDetailPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
-  const [editForm, setEditForm] = useState({ display_name: '', email: '' })
+  const [editForm, setEditForm] = useState({ display_name: '', email: '', password: '' })
   const [saving, setSaving] = useState(false)
 
   async function loadData() {
@@ -40,19 +40,23 @@ export default function AdminMemberDetailPage() {
 
   function startEdit() {
     if (!member) return
-    setEditForm({ display_name: member.display_name || '', email: member.email })
+    setEditForm({ display_name: member.display_name || '', email: member.email, password: '' })
     setEditing(true)
   }
 
   async function handleSave() {
+    if (editForm.password && editForm.password.length < 6) { alert('密碼至少 6 碼'); return }
     setSaving(true)
-    await fetch(`/api/admin/members/${id}`, {
+    const body: Record<string, unknown> = { display_name: editForm.display_name, email: editForm.email }
+    if (editForm.password) body.password = editForm.password // 留空＝不改密碼
+    const res = await fetch(`/api/admin/members/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(editForm),
+      body: JSON.stringify(body),
     })
-    setEditing(false)
     setSaving(false)
+    if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || '儲存失敗'); return }
+    setEditing(false)
     await loadData()
   }
 
@@ -126,6 +130,12 @@ export default function AdminMemberDetailPage() {
               <div>
                 <label className="text-xs font-medium">Email</label>
                 <input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium">重設密碼（留空＝不改）</label>
+                <input type="text" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                  placeholder="輸入新密碼（至少 6 碼）"
                   className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
               </div>
             </div>

@@ -449,6 +449,14 @@ export default function ShopeeOrdersPage() {
     setBatchEditLoading(false)
   }
 
+  async function reloadBatchEdit() {
+    const res = await fetch('/api/admin/shopee/orders/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [...selectedIds] }),
+    })
+    if (res.ok) setBatchEditData(await res.json())
+  }
+
   const totalPages = Math.ceil(total / pageSize)
 
   return (
@@ -789,6 +797,7 @@ export default function ShopeeOrdersPage() {
           orderIds={[...selectedIds]}
           onClose={() => setBatchEditModal(false)}
           onSaved={() => { load() }}
+          onReload={reloadBatchEdit}
         />
       )}
 
@@ -950,14 +959,29 @@ interface SkuGroup {
   count: number
 }
 
-function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
+function BatchEditModal({ data, loading, orderIds, onClose, onSaved, onReload }: {
   data: { order: any; items: any[] }[]
   loading: boolean
   orderIds: string[]
   onClose: () => void
   onSaved: () => void
+  onReload: () => Promise<void> | void
 }) {
   const [groups, setGroups] = useState<SkuGroup[]>([])
+  const [autoMatching, setAutoMatching] = useState(false)
+  async function autoMatchV2() {
+    setAutoMatching(true)
+    const res = await fetch('/api/admin/shopee/orders/batch-automatch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds }),
+    })
+    const d = await res.json().catch(() => ({}))
+    setAutoMatching(false)
+    if (!res.ok) { alert(d.error || '自動對應失敗'); return }
+    await onReload()  // 重抓資料 → groups 重算（名稱/BC 帶入）
+    onSaved()         // 同步刷新訂單列表
+    if (!d.matched) alert('沒有可自動對應的項目（V2 尚未對應這些商品選項）')
+  }
 
   // data 是非同步 fetch 進來，用 effect 在資料抵達時重算 groups（避免「要點兩次才有資料」）
   // 故意不把 maps 放進 deps：儲存後父層會 refetch maps，若依賴會把使用者剛儲存的 bcSkuName 覆蓋掉
@@ -1067,6 +1091,10 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved }: {
         <div className="p-5 border-b border-gray-200 flex items-center justify-between">
           <h2 className="font-bold">批量編輯商品（{groups.length} 種商品）</h2>
           <div className="flex items-center gap-2">
+            <button onClick={autoMatchV2} disabled={autoMatching}
+              className="px-4 py-2 border border-blue-300 text-blue-700 text-sm rounded-lg hover:bg-blue-50 disabled:opacity-50">
+              {autoMatching ? '對應中…' : 'V2 自動對應'}
+            </button>
             <button onClick={handleSave} disabled={saving}
               className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {saving ? '儲存中...' : '全部儲存'}

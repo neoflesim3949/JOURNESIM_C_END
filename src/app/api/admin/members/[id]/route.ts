@@ -39,6 +39,14 @@ export async function PATCH(
   const body = await request.json()
   const supabase = createAdminClient()
 
+  // 重設登入密碼（Auth）
+  if (body.password !== undefined) {
+    const pw = String(body.password || '')
+    if (pw.length < 6) return NextResponse.json({ error: '密碼至少 6 碼' }, { status: 400 })
+    const { error: pErr } = await supabase.auth.admin.updateUserById(id, { password: pw })
+    if (pErr) return NextResponse.json({ error: pErr.message }, { status: 400 })
+  }
+
   const updates: Record<string, unknown> = {}
   if (body.display_name !== undefined) updates.display_name = body.display_name
   if (body.email !== undefined) updates.email = body.email
@@ -48,8 +56,10 @@ export async function PATCH(
     if (field in body) updates[field] = body[field]
   }
 
-  const { error } = await supabase.from('members').update(updates).eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (Object.keys(updates).length > 0) {
+    const { error } = await supabase.from('members').update(updates).eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true })
 }

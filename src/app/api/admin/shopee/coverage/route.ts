@@ -11,7 +11,6 @@ function rowKey(o: Opt): string {
   return `name:${(o.shopee_variation_name || '').trim()}`
 }
 function finalPrice(o: Opt): number | null {
-  if (o.price_override != null) return Number(o.price_override)
   if (o.original_price != null) return Number(o.original_price)
   return null
 }
@@ -44,7 +43,7 @@ export async function GET(request: Request) {
   if (skuCodes.length) {
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase.from('shopee_product_options_v2')
-        .select('account_id, main_sku_code, bc_sku_id, copies, shopee_variation_name, custom_variation_name, custom_product_name, original_price, price_override, bc_name_snapshot')
+        .select('account_id, main_sku_code, bc_sku_id, copies, shopee_variation_name, custom_variation_name, custom_product_name, original_price, bc_name_snapshot')
         .in('main_sku_code', skuCodes).range(from, from + 999)
       if (!data || data.length === 0) break
       for (const o of data) {

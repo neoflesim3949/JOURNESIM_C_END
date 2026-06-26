@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import Link from 'next/link'
 import { Users, ChevronRight } from 'lucide-react'
+import { AddMemberButton } from '@/components/admin/add-member-button'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +16,10 @@ export default async function AdminMembersPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold">會員管理</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">會員管理</h1>
+        <AddMemberButton />
+      </div>
 
       {(!members || members.length === 0) ? (
         <div className="mt-8 text-center py-16">

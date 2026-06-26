@@ -17,7 +17,6 @@ interface OptionRow {
   original_price: number | null
   bc_sku_id: string | null
   copies: string | null
-  price_override: number | null
   is_listed?: boolean | null
   custom_product_name: string | null
   custom_variation_name: string | null
@@ -25,6 +24,7 @@ interface OptionRow {
   cost_cny: number | null
   cost_twd: number | null
   package_price?: number | null
+  manual_price?: number | null
   price_snapshot?: number | null
   price_changed?: boolean
   bc_name_snapshot?: string | null
@@ -33,6 +33,7 @@ interface OptionRow {
   margin_pct: number | null
   updated_at: string | null
   bc_changed?: boolean
+  removed_at?: string | null
 }
 interface Account { id: string; name: string; excel_password: string | null }
 
@@ -61,6 +62,11 @@ export default function ShopeeMappingsV2Page() {
   const [search, setSearch] = useState('')
   // 套餐選項貨號索引：code → { bc_sku_id, copies, sell_price, package_name }
   const [optionIndex, setOptionIndex] = useState<Map<string, { bc_sku_id: string; copies: string; sell_price: number | null; package_name: string }>>(new Map())
+  // 解析失敗（找不到套餐選項貨號）的列 id → 紅框提示
+  const [skuErrors, setSkuErrors] = useState<Set<string>>(new Set())
+  function setSkuError(id: string, on: boolean) {
+    setSkuErrors(prev => { if (on === prev.has(id)) return prev; const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n })
+  }
   const [specOrders, setSpecOrders] = useState<{ product_id: string; spec_type: string; spec_value: string; sort_index: number }[]>([])
   const [orderOverride, setOrderOverride] = useState<Record<string, string[]>>({})
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -83,10 +89,16 @@ export default function ShopeeMappingsV2Page() {
       if (!accountId && d?.length) setAccountId(d[0].id)
     })
     // 套餐選項貨號索引（填入貨號→自動解析 BC）
-    fetch('/api/admin/packages/option-index').then(r => r.json()).then((d: { items?: { code: string; bc_sku_id: string; copies: string; sell_price: number | null; package_name: string }[] }) => {
-      setOptionIndex(new Map((d.items || []).map(it => [it.code, it])))
-    })
+    fetchOptionIndex()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 重新抓取套餐選項貨號索引（套餐改過主選項ID/吃到飽後會變，故每次解析失敗會重抓一次）
+  async function fetchOptionIndex() {
+    const d = await fetch('/api/admin/packages/option-index').then(r => r.json()).catch(() => ({})) as { items?: { code: string; bc_sku_id: string; copies: string; sell_price: number | null; package_name: string }[] }
+    const m = new Map((d.items || []).map(it => [it.code, it]))
+    setOptionIndex(m)
+    return m
+  }
 
   async function load() {
     if (!accountId) { setOptions([]); return }
@@ -143,7 +155,7 @@ export default function ShopeeMappingsV2Page() {
       })
       const d = await res.json()
       if (!res.ok) { alert(d.error || '匯入失敗'); return }
-      alert(`成功匯入 ${d.count} 個選項`)
+      alert(`成功匯入 ${d.count} 個選項${d.removed > 0 ? `\n⚠ 偵測到 ${d.removed} 個選項已在蝦皮端刪除（已標紅）` : ''}`)
       load()
     } catch (err) {
       alert('匯入失敗：' + (err instanceof Error ? err.message : String(err)))
@@ -167,14 +179,19 @@ export default function ShopeeMappingsV2Page() {
   }
 
   // 填入「套餐選項貨號」→ 解析對應的套餐選項，自動帶出億點 BC
+  // 找不到時不彈窗（避免擋住你刪改），改用紅框提示
   async function applySkuCode(o: OptionRow, raw: string) {
     const code = raw.trim()
     if (!code) {
+      setSkuError(o.id, false)
       if (o.variation_sku_code || o.bc_sku_id) await patch(o.id, { variation_sku_code: null, bc_sku_id: null, copies: null })
       return
     }
-    const hit = optionIndex.get(code)
-    if (!hit) { alert(`找不到對應的套餐選項貨號：${code}\n請確認套餐管理已設定主選項ID 並有此規格。`); return }
+    // 先查快取索引；查不到就重抓最新一次再查（套餐剛設定/改過時索引可能過期）
+    let hit = optionIndex.get(code)
+    if (!hit) hit = (await fetchOptionIndex()).get(code)
+    if (!hit) { setSkuError(o.id, true); return } // 紅框提示，不彈窗
+    setSkuError(o.id, false)
     await patch(o.id, { variation_sku_code: code, bc_sku_id: hit.bc_sku_id, copies: hit.copies, price_snapshot: hit.sell_price })
   }
 
@@ -269,8 +286,9 @@ export default function ShopeeMappingsV2Page() {
       '規格名稱': o.shopee_variation_name || '',
       '商品自設名稱': o.custom_product_name || '',
       '規格自設名稱': o.custom_variation_name || '',
+      '是否上架': (o.is_listed ?? true) ? '' : '下架', // 上架留空，只標下架
+      '商品選項貨號': o.variation_sku_code || '',
       '對應BC快速碼': o.bc_sku_id ? `${o.bc_sku_id}_${o.copies}` : '',
-      '售價(覆蓋)': o.price_override ?? '',
       '原蝦皮價(參考)': o.original_price ?? '',
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
@@ -301,7 +319,7 @@ export default function ShopeeMappingsV2Page() {
     XLSX.writeFile(wb, `商品對應V2_BC對應表_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  // 上傳「我們自己的表」：依選項ID 套用 商品自設名稱/規格自設名稱/售價(覆蓋)/快速碼
+  // 上傳「我們自己的表」：依選項ID 套用 商品自設名稱/規格自設名稱/商品選項貨號/快速碼
   async function uploadOurs(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -313,7 +331,8 @@ export default function ShopeeMappingsV2Page() {
       const header = Object.keys(json[0])
       const hasProd = header.includes('商品自設名稱')
       const hasVar = header.includes('規格自設名稱')
-      const hasPrice = header.includes('售價(覆蓋)')
+      const hasVarSku = header.includes('商品選項貨號')
+      const hasListed = header.includes('是否上架')
       const hasQuick = header.includes('對應BC快速碼')
       const hasBcSku = header.includes('對應BC SKU')   // BC 對應表的欄位
       const hasCopies = header.includes('copies')
@@ -323,7 +342,9 @@ export default function ShopeeMappingsV2Page() {
         const set: Record<string, unknown> = {}
         if (hasProd) set.custom_product_name = String(r['商品自設名稱'] || '').trim() || null
         if (hasVar) set.custom_variation_name = String(r['規格自設名稱'] || '').trim() || null
-        if (hasPrice) { const v = String(r['售價(覆蓋)'] || '').trim(); set.price_override = v === '' ? null : Number(v) }
+        // 商品選項貨號（套餐選項貨號）→ 伺服器解析帶出 BC/copies/套餐售價；空白＝不動
+        if (hasVarSku) { const v = String(r['商品選項貨號'] || '').trim(); if (v) set.variation_sku_code = v }
+        if (hasListed) { const v = String(r['是否上架'] || '').trim().toLowerCase(); set.is_listed = !['下架', '0', 'false', 'n'].includes(v) } // 空白＝上架，只有「下架」才下架
         if (hasQuick) { const m = String(r['對應BC快速碼'] || '').trim().match(/^(.+)_([0-9]+)$/); if (m) { set.bc_sku_id = m[1]; set.copies = m[2] } }
         // BC 對應表：對應BC SKU + copies（填「-」＝取消對應，空白＝不動）
         if (hasBcSku) {
@@ -340,7 +361,7 @@ export default function ShopeeMappingsV2Page() {
       })
       const d = await res.json()
       if (!res.ok) { alert(d.error || '上傳失敗'); return }
-      alert(`已套用 ${d.count} 筆`)
+      alert(`已套用 ${d.count} 筆${d.unresolved > 0 ? `\n⚠ 有 ${d.unresolved} 個商品選項貨號找不到對應套餐選項（已保留貨號、未帶 BC）` : ''}`)
       load()
     } catch (err) {
       alert('解析失敗：' + (err instanceof Error ? err.message : String(err)))
@@ -374,7 +395,9 @@ export default function ShopeeMappingsV2Page() {
       if (!map.has(pid)) map.set(pid, { id: pid, name: o.shopee_product_name || '(未命名商品)', opts: [] })
       map.get(pid)!.opts.push(o)
     }
-    return [...map.values()]
+    // 依「最近更新」由新到舊排序（任何操作 bump updated_at 後就會排到最前）
+    const lastTs = (opts: OptionRow[]) => opts.reduce((m, o) => (o.updated_at && o.updated_at > m) ? o.updated_at : m, '')
+    return [...map.values()].sort((a, b) => lastTs(b.opts).localeCompare(lastTs(a.opts)))
   }, [options])
 
   const filteredProducts = search
@@ -382,6 +405,16 @@ export default function ShopeeMappingsV2Page() {
     : products
 
   const current = productId ? products.find(p => p.id === productId) : null
+  // 最貴/最便宜變體價格比率（蝦皮規則：超過 5 倍會被擋）
+  const pricedOpts = current ? current.opts.filter(o => o.final_price != null && o.final_price > 0) : []
+  const hiOpt = pricedOpts.length > 1 ? pricedOpts.reduce((a, b) => (b.final_price! > a.final_price! ? b : a)) : null
+  const loOpt = pricedOpts.length > 1 ? pricedOpts.reduce((a, b) => (b.final_price! < a.final_price! ? b : a)) : null
+  const priceRatioOver5 = !!(hiOpt && loOpt && hiOpt.final_price! / loOpt.final_price! > 5)
+  const vName = (o: OptionRow) => {
+    const p = o.custom_product_name || o.shopee_product_name || ''
+    const v = o.custom_variation_name || o.shopee_variation_name || ''
+    return [p, v].filter(Boolean).join(' ') || '—'
+  }
 
   // 當前商品：依數據量(規格1)分組，組內依天數(規格2)排序，每個組合一列展開
   const groups = useMemo(() => {
@@ -418,6 +451,7 @@ export default function ShopeeMappingsV2Page() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account_id: accountId, product_id: productId, spec_type: 'data', order }),
     })
+    load() // 重新整理 updated_at（排序變更也算更新）
   }
 
   function onDropSpec(toIdx: number) {
@@ -595,12 +629,14 @@ export default function ShopeeMappingsV2Page() {
                 const mapped = p.opts.filter(o => o.bc_sku_id).length
                 const lowMargin = p.opts.some(o => o.margin_pct != null && o.margin_pct < 40)
                 const bcChanged = p.opts.some(o => o.bc_changed)
+                const removedCount = p.opts.filter(o => o.removed_at).length
                 const alertFp = alertFingerprint(p.opts)
                 const showAlert = (lowMargin || bcChanged) && dismissedAlerts[p.id] !== alertFp
+                const danger = showAlert || removedCount > 0
                 const alertMsg = [lowMargin && '有選項毛利率低於 40%', bcChanged && 'BC 商品已變更（品名/成本）'].filter(Boolean).join('；')
                 return (
                   <div key={p.id} onClick={() => openProduct(p.id)}
-                    className={`group relative cursor-pointer bg-white border rounded-xl p-4 hover:shadow-sm transition ${showAlert ? 'border-red-300 hover:border-red-400 bg-red-50/30' : 'border-gray-200 hover:border-blue-400'}`}>
+                    className={`group relative cursor-pointer bg-white border rounded-xl p-4 hover:shadow-sm transition ${danger ? 'border-red-300 hover:border-red-400 bg-red-50/30' : 'border-gray-200 hover:border-blue-400'}`}>
                     <input type="checkbox" checked={selectedProducts.has(p.id)} onClick={e => e.stopPropagation()} onChange={() => toggleProduct(p.id)}
                       className="absolute top-3 right-3 accent-blue-600" />
                     {showAlert && (
@@ -620,6 +656,9 @@ export default function ShopeeMappingsV2Page() {
                       <span className={`text-sm ${mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}`}>已對應 {mapped}/{p.opts.length}</span>
                       <span className="text-sm text-gray-400">更新：{latestUpdate(p.opts)}</span>
                     </div>
+                    {removedCount > 0 && (
+                      <div className="mt-2 inline-block px-2 py-0.5 rounded bg-red-600 text-white text-xs font-medium">蝦皮已刪除 {removedCount} 個選項</div>
+                    )}
                   </div>
                 )
               })}
@@ -643,8 +682,9 @@ export default function ShopeeMappingsV2Page() {
                 <tbody className="divide-y divide-gray-100">
                   {filteredProducts.map(p => {
                     const mapped = p.opts.filter(o => o.bc_sku_id).length
+                    const removedCount = p.opts.filter(o => o.removed_at).length
                     return (
-                      <tr key={p.id} className="hover:bg-gray-50/60 cursor-pointer" onClick={() => openProduct(p.id)}>
+                      <tr key={p.id} className={`cursor-pointer ${removedCount > 0 ? 'bg-red-50 hover:bg-red-100/60' : 'hover:bg-gray-50/60'}`} onClick={() => openProduct(p.id)}>
                         <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
                           <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProduct(p.id)} className="accent-blue-600" />
                         </td>
@@ -660,6 +700,7 @@ export default function ShopeeMappingsV2Page() {
                                     className="w-4 h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] leading-none hover:bg-red-600 shrink-0">✕</button>
                                 )}
                                 <div className={`font-medium max-w-[480px] truncate ${showAlert ? 'text-red-600' : 'text-gray-800'}`}>{p.name}</div>
+                                {removedCount > 0 && <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-600 text-white text-[10px] font-medium">蝦皮已刪除 {removedCount}</span>}
                               </div>
                             )
                           })()}
@@ -686,6 +727,13 @@ export default function ShopeeMappingsV2Page() {
           <button onClick={() => { setProductId(''); setSelectedIds(new Set()) }} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-blue-600 mb-3">
             <ArrowLeft className="w-4 h-4" /> 返回商品列表
           </button>
+          {priceRatioOver5 && hiOpt && loOpt && (
+            <div className="mb-3 px-4 py-3 rounded-xl bg-red-50 border border-red-300 text-sm text-red-700 space-y-1">
+              <div>最貴與最便宜變體的價格比率超過 5（包括促銷價）。請調整價格。</div>
+              <div className="text-xs">最高品項為：{vName(hiOpt)}　售價：NT$ {hiOpt.final_price}</div>
+              <div className="text-xs">最低品項為：{vName(loOpt)}　售價：NT$ {loOpt.final_price}</div>
+            </div>
+          )}
           <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
             <div className="font-bold text-gray-800">{current.name}</div>
             <div className="text-[11px] text-gray-400 font-mono mt-0.5">商品ID: {current.id.startsWith('__') ? '—' : current.id} · {current.opts.length} 個選項</div>
@@ -764,16 +812,22 @@ export default function ShopeeMappingsV2Page() {
                 {orderedGroups.map((g, gi) => g.rows.map((o, ri) => {
                   const s2 = splitSpec(o.shopee_variation_name)[1]
                   return (
-                    <tr key={o.id} className={`hover:bg-gray-50/40 ${o.bc_changed ? 'bg-red-50' : ''} ${ri === 0 && gi > 0 ? 'border-t-2 border-gray-200' : 'border-t border-gray-100'}`}>
+                    <tr key={o.id} className={`hover:bg-gray-50/40 ${o.removed_at ? 'bg-red-100 ring-1 ring-inset ring-red-300' : o.bc_changed ? 'bg-red-50' : ''} ${ri === 0 && gi > 0 ? 'border-t-2 border-gray-200' : 'border-t border-gray-100'}`}>
                       {ri === 0 && (
                         <td rowSpan={g.rows.length} className="px-3 py-2 align-middle text-center font-medium text-gray-700 border-r border-gray-200 bg-gray-50/40">{g.spec1}</td>
                       )}
                       <td className="px-3 py-2 font-medium whitespace-nowrap">{s2}</td>
-                      <td className="px-3 py-2 font-mono text-[10px] text-gray-500">{o.shopee_variation_id}</td>
+                      <td className="px-3 py-2 font-mono text-[10px] text-gray-500">
+                        {o.shopee_variation_id}
+                        {o.removed_at && <div className="mt-0.5 inline-block px-1 py-0.5 rounded bg-red-600 text-white text-[10px] font-sans font-medium">蝦皮已刪除</div>}
+                      </td>
                       <td className="px-3 py-2">
                         <input key={`sku-${o.variation_sku_code ?? ''}`} defaultValue={o.variation_sku_code ?? ''} placeholder="填入套餐選項貨號"
+                          onChange={() => { if (skuErrors.has(o.id)) setSkuError(o.id, false) }}
                           onBlur={e => { const v = e.target.value.trim(); if (v !== (o.variation_sku_code ?? '')) applySkuCode(o, v) }}
-                          className="w-44 px-2 py-1 border border-gray-300 rounded text-[11px] font-mono" />
+                          title={skuErrors.has(o.id) ? '找不到對應的套餐選項貨號' : undefined}
+                          className={`w-44 px-2 py-1 border rounded text-[11px] font-mono ${skuErrors.has(o.id) ? 'border-red-500 bg-red-50' : 'border-gray-300'}`} />
+                        {skuErrors.has(o.id) && <div className="mt-0.5 text-[10px] text-red-600">找不到此貨號</div>}
                       </td>
                       <td className="px-3 py-2">
                         <input key={`n-${o.custom_product_name ?? ''}`} defaultValue={o.custom_product_name ?? ''} placeholder="自設名稱"
@@ -804,11 +858,21 @@ export default function ShopeeMappingsV2Page() {
                       <td className="px-3 py-2 text-right text-gray-600">{o.cost_cny != null ? `¥${o.cost_cny}` : '—'}</td>
                       <td className="px-3 py-2 text-right">{o.cost_twd ? `NT$ ${o.cost_twd}` : '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <div className="font-medium text-gray-800 whitespace-nowrap">{o.final_price != null ? `NT$ ${o.final_price}` : '—'}</div>
-                        {o.price_changed && (
-                          <div className="text-[10px] text-amber-600 mt-0.5 whitespace-nowrap">前次 NT$ {o.price_snapshot}
-                            <button onClick={() => patch(o.id, { price_snapshot: o.package_price })} className="ml-1 underline hover:text-amber-700">確認</button>
-                          </div>
+                        {o.package_price != null ? (
+                          <>
+                            <div className="font-medium text-gray-800 whitespace-nowrap">{o.final_price != null ? `NT$ ${o.final_price}` : '—'}</div>
+                            {o.price_changed && (
+                              <div className="text-[10px] text-amber-600 mt-0.5 whitespace-nowrap">前次 NT$ {o.price_snapshot}
+                                <button onClick={() => patch(o.id, { price_snapshot: o.package_price })} className="ml-1 underline hover:text-amber-700">確認</button>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          // 未對應套餐選項 → 人工改價
+                          <input type="number" key={`mp-${o.manual_price ?? ''}`} defaultValue={o.manual_price ?? ''}
+                            placeholder={o.original_price != null ? String(o.original_price) : '售價'}
+                            onBlur={e => { const v = e.target.value.trim(); const next = v === '' ? null : Number(v); if (next !== (o.manual_price ?? null)) patch(o.id, { manual_price: next }) }}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-xs" />
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{o.margin != null ? <span className={o.margin >= 0 ? 'text-green-600' : 'text-red-500'}>NT$ {o.margin}</span> : '—'}</td>

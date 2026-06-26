@@ -41,7 +41,8 @@ export async function POST(request: Request) {
   // 2. 逐資料列組 upsert（商品名稱/ID 空白時往下沿用上一筆）
   let lastProductName = '', lastProductId = ''
   const rows: Record<string, unknown>[] = []
-  const seen = new Set<string>()
+  const seen = new Set<string>()            // 本次上傳的「選項ID」
+  const seenProducts = new Set<string>()    // 本次上傳的「商品ID」
   for (let i = dataStart; i < raw_aoa.length; i++) {
     const r = raw_aoa[i] as unknown[]
     const variationId = cell(r, '商品選項ID')
@@ -51,18 +52,18 @@ export async function POST(request: Request) {
     const productName = cell(r, '商品名稱') || lastProductName
     const productId = cell(r, '商品ID') || lastProductId
     lastProductName = productName; lastProductId = productId
+    if (productId) seenProducts.add(productId)
     rows.push({
       account_id, batch_id: batch.id,
       shopee_product_id: productId || null,
       shopee_product_name: productName || null,
       shopee_variation_id: variationId,
       shopee_variation_name: cell(r, '商品規格名稱') || null,
-      main_sku_code: cell(r, '主商品貨號') || null,
-      variation_sku_code: cell(r, '商品選項貨號') || null,
       original_price: num(cell(r, '價格')),
       raw_row_index: i,
+      removed_at: null, // 本次有出現 → 清除「蝦皮已刪除」標記
       updated_at: new Date().toISOString(),
-      // 不含 bc_sku_id/copies/price_override → 既有列 upsert 時保留
+      // 不含 main_sku_code/variation_sku_code/bc_sku_id/copies → upsert 保留 V2 既有值（避免覆蓋套餐選項貨號）
     })
   }
 
@@ -76,5 +77,24 @@ export async function POST(request: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, batch_id: batch.id, count: rows.length })
+  // 3. 比對：本次有上傳到的「商品」中，缺少的「選項ID」= 蝦皮端已刪除 → 標記 removed_at
+  //    （只比對本次有上傳的商品，避免部分上傳誤判其他商品被刪）
+  const existing: { id: string; shopee_product_id: string | null; shopee_variation_id: string }[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase.from('shopee_product_options_v2')
+      .select('id, shopee_product_id, shopee_variation_id').eq('account_id', account_id).range(from, from + 999)
+    if (!data || data.length === 0) break
+    existing.push(...data)
+    if (data.length < 1000) break
+  }
+  const removedIds = existing.filter(e =>
+    e.shopee_product_id && seenProducts.has(String(e.shopee_product_id)) && !seen.has(String(e.shopee_variation_id))
+  ).map(e => e.id)
+  for (let i = 0; i < removedIds.length; i += 500) {
+    const now = new Date().toISOString()
+    await supabase.from('shopee_product_options_v2')
+      .update({ removed_at: now, updated_at: now }).in('id', removedIds.slice(i, i + 500))
+  }
+
+  return NextResponse.json({ ok: true, batch_id: batch.id, count: rows.length, removed: removedIds.length })
 }

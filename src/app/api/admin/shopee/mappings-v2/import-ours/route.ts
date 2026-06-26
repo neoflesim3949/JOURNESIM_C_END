@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchBcMap, snapshotFor } from '@/lib/bc-snapshot'
+import { buildOptionIndex } from '@/lib/option-index'
 
-// POST — 批量上傳「我們的表」：依選項ID 設定 商品自設名稱/規格自設名稱/售價(覆蓋)/BC快速碼
-// body: { account_id, rows: [{ variation_id, set: {custom_product_name?, custom_variation_name?, price_override?, bc_sku_id?, copies?} }] }
-const ALLOWED = ['custom_product_name', 'custom_variation_name', 'price_override', 'bc_sku_id', 'copies']
+// POST — 批量上傳「我們的表」：依選項ID 設定 商品自設名稱/規格自設名稱/BC快速碼/商品選項貨號
+// body: { account_id, rows: [{ variation_id, set: {custom_product_name?, custom_variation_name?, bc_sku_id?, copies?, variation_sku_code?} }] }
+const ALLOWED = ['custom_product_name', 'custom_variation_name', 'bc_sku_id', 'copies', 'variation_sku_code', 'price_snapshot', 'is_listed']
 
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -15,7 +16,21 @@ export async function POST(request: Request) {
   const supabase = createAdminClient()
 
   let updated = 0
+  let unresolved = 0
   const work = rows.filter((r: { variation_id?: string; set?: Record<string, unknown> }) => r?.variation_id && r.set && Object.keys(r.set).length > 0)
+
+  // 「商品選項貨號」→ 解析套餐選項，帶出 BC/copies/套餐售價（與 V2 介面填寫一致）
+  if (work.some((r: { set: Record<string, unknown> }) => 'variation_sku_code' in r.set)) {
+    const index = new Map((await buildOptionIndex(supabase)).map(it => [it.code, it]))
+    for (const r of work as { set: Record<string, unknown> }[]) {
+      if (!('variation_sku_code' in r.set)) continue
+      const code = String(r.set.variation_sku_code || '').trim()
+      if (!code) { delete r.set.variation_sku_code; continue } // 空白不動，避免覆蓋既有
+      const hit = index.get(code)
+      if (hit) { r.set.variation_sku_code = code; r.set.bc_sku_id = hit.bc_sku_id; r.set.copies = hit.copies; r.set.price_snapshot = hit.sell_price }
+      else { r.set.variation_sku_code = code; unresolved++ } // 保留貨號，不動 BC
+    }
+  }
 
   // 有設 BC 對應的列 → 先撈 BC 品名/成本，套用快照
   const bcMap = await fetchBcMap(supabase, work.map((r: { set: Record<string, unknown> }) => r.set.bc_sku_id as string | undefined))
@@ -35,5 +50,5 @@ export async function POST(request: Request) {
     updated += results.filter(Boolean).length
   }
 
-  return NextResponse.json({ ok: true, count: updated })
+  return NextResponse.json({ ok: true, count: updated, unresolved })
 }

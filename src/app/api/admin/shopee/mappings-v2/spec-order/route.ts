@@ -20,5 +20,9 @@ export async function PUT(request: Request) {
   const { error } = await supabase.from('shopee_spec_order')
     .upsert(rows, { onConflict: 'account_id,product_id,spec_type,spec_value' })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // 排序變更也算更新 → bump 該商品所有選項的 updated_at（列表依最近更新排序）
+  await supabase.from('shopee_product_options_v2')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('account_id', account_id).eq('shopee_product_id', String(product_id))
   return NextResponse.json({ ok: true })
 }

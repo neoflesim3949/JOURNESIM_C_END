@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const options: any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase.from('shopee_product_options_v2')
-      .select('shopee_variation_id, shopee_product_id, main_sku_code, variation_sku_code, bc_sku_id, copies, price_override, original_price, is_listed').eq('account_id', accountId)
+      .select('shopee_variation_id, shopee_product_id, main_sku_code, variation_sku_code, bc_sku_id, copies, manual_price, original_price, is_listed').eq('account_id', accountId)
       .range(from, from + 999)
     if (!data || data.length === 0) break
     options.push(...data)
@@ -56,9 +56,9 @@ export async function POST(request: Request) {
   const stockByVar = new Map<string, number>()
   for (const o of options || []) {
     const vid = String(o.shopee_variation_id)
-    // 售價：以套餐為準（無對應才退回原蝦皮價）
+    // 售價：有對應＝套餐售價；未對應＝人工售價 > 原蝦皮價
     const pkgPrice = o.variation_sku_code ? (pkgPriceByCode.get(o.variation_sku_code) ?? null) : null
-    const finalPrice = pkgPrice != null ? pkgPrice : (o.original_price != null ? Number(o.original_price) : null)
+    const finalPrice = pkgPrice != null ? pkgPrice : (o.manual_price != null ? Number(o.manual_price) : (o.original_price != null ? Number(o.original_price) : null))
     if (finalPrice && finalPrice > 0) priceByVar.set(vid, finalPrice)
     // 主商品貨號（手填）＋ 商品選項貨號（直接用填入的套餐選項貨號）
     if (o.main_sku_code) mainSkuByVar.set(vid, String(o.main_sku_code))

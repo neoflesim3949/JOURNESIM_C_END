@@ -39,8 +39,12 @@ export async function GET(request: Request) {
   const pkgPriceByCode = new Map(optIndex.map(it => [it.code, it.sell_price]))
 
   const snapInit: { id: string; price: number }[] = [] // 已對應但尚無前次售價快照的列，建立基準
+  const orphanIds: string[] = [] // 沒有套餐選項貨號卻殘留 BC 對應（舊資料）→ 視為未對應並清除
   const result = (options || []).map(o => {
-    const bc = o.bc_sku_id ? bcMap.get(o.bc_sku_id) : null
+    // BC 一律由「套餐選項貨號」決定：沒貨號＝沒對應
+    const hasCode = !!o.variation_sku_code
+    if (!hasCode && o.bc_sku_id) orphanIds.push(o.id)
+    const bc = (hasCode && o.bc_sku_id) ? bcMap.get(o.bc_sku_id) : null
     const costCny = bc ? costCnyFromPrices(bc.prices as { copies: string; settlementPrice: string }[] | null, o.copies) : 0
     const costTwd = computeCostTwd(costCny, cnyRate)
     // 套餐售價（依填入的選項貨號解析）
@@ -50,16 +54,17 @@ export async function GET(request: Request) {
     // 已對應但沒有快照（舊資料）→ 以目前套餐售價建立基準，往後改價才比得出來
     if (priceSnap == null && pkgPrice != null && o.variation_sku_code) { priceSnap = pkgPrice; snapInit.push({ id: o.id, price: pkgPrice }) }
     const priceChanged = pkgPrice != null && priceSnap != null && pkgPrice !== priceSnap
-    // 售價：以套餐為準（無對應才退回原蝦皮價）；不再支援手動覆蓋
-    const finalPrice = pkgPrice != null ? pkgPrice : (o.original_price != null ? Number(o.original_price) : null)
+    // 售價：有對應＝套餐售價；未對應＝人工售價 > 原蝦皮價
+    const finalPrice = pkgPrice != null
+      ? pkgPrice
+      : (o.manual_price != null ? Number(o.manual_price) : (o.original_price != null ? Number(o.original_price) : null))
     const margin = finalPrice && costTwd ? finalPrice - costTwd : null
-    // 商品選項貨號自動生成：主商品貨號_BC SKU_copies（需有主貨號＋已對應）
-    const variationSkuAuto = (o.main_sku_code && o.bc_sku_id)
-      ? `${o.main_sku_code}_${o.bc_sku_id}_${o.copies ?? ''}`
-      : (o.variation_sku_code || null)
     return {
       ...o,
-      variation_sku_auto: variationSkuAuto,
+      // 沒貨號 → 對應一律視為空
+      bc_sku_id: hasCode ? o.bc_sku_id : null,
+      copies: hasCode ? o.copies : null,
+      variation_sku_auto: o.variation_sku_code || null,
       bc_name: bc?.name || null,
       cost_cny: costCny || null,
       cost_twd: costTwd || null,
@@ -70,13 +75,19 @@ export async function GET(request: Request) {
       margin,
       margin_pct: margin != null && finalPrice ? Math.round((margin / finalPrice) * 1000) / 10 : null,
       // BC 同步後品名/成本是否與對應當下不同
-      bc_changed: isBcChanged(o.bc_sku_id, o.bc_name_snapshot, o.bc_cost_snapshot, bc?.name, costCny),
+      bc_changed: hasCode ? isBcChanged(o.bc_sku_id, o.bc_name_snapshot, o.bc_cost_snapshot, bc?.name, costCny) : false,
     }
   })
 
   // 持久化前次售價基準（一次性，往後就有快照可比對）
   for (const s of snapInit) {
     await supabase.from('shopee_product_options_v2').update({ price_snapshot: s.price }).eq('id', s.id)
+  }
+  // 清除「沒貨號卻殘留 BC」的孤兒對應（一次性，使資料一致：匯出/出貨也才正確）
+  for (let i = 0; i < orphanIds.length; i += 200) {
+    await supabase.from('shopee_product_options_v2')
+      .update({ bc_sku_id: null, copies: null, bc_name_snapshot: null, bc_cost_snapshot: null, price_snapshot: null })
+      .in('id', orphanIds.slice(i, i + 200))
   }
 
   // 規格自訂排序
@@ -92,7 +103,7 @@ export async function GET(request: Request) {
   return NextResponse.json({ options: result, spec_orders: specOrders })
 }
 
-// PATCH — 更新對應(bc_sku_id+copies) 或 覆蓋售價(price_override，null=清除)
+// PATCH — 更新對應(bc_sku_id+copies)/選項貨號/上架/前次售價快照
 export async function PATCH(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await request.json()
@@ -108,9 +119,9 @@ export async function PATCH(request: Request) {
     const v = body.price_snapshot
     updates.price_snapshot = v === null || v === '' ? null : Number(v)
   }
-  if ('price_override' in body) {
-    const v = body.price_override
-    updates.price_override = v === null || v === '' ? null : Number(v)
+  if ('manual_price' in body) {
+    const v = body.manual_price
+    updates.manual_price = v === null || v === '' ? null : Number(v)
   }
 
   const supabase = createAdminClient()
@@ -139,7 +150,14 @@ export async function DELETE(request: Request) {
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: '缺少 id' }, { status: 400 })
   const supabase = createAdminClient()
+  // 刪除前取得所屬商品 → 刪除後 bump 同商品其餘選項（刪除也算更新）
+  const { data: row } = await supabase.from('shopee_product_options_v2').select('account_id, shopee_product_id').eq('id', id).maybeSingle()
   const { error } = await supabase.from('shopee_product_options_v2').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (row?.shopee_product_id) {
+    await supabase.from('shopee_product_options_v2')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('account_id', row.account_id).eq('shopee_product_id', row.shopee_product_id)
+  }
   return NextResponse.json({ ok: true })
 }

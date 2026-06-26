@@ -221,6 +221,18 @@ export default function ShopeeOrderDetailPage() {
     }); load()
   }
 
+  // 依 V2 對應自動帶入 BC（蝦皮選項ID → V2.bc_sku_id+copies）
+  const [autoMatching, setAutoMatching] = useState(false)
+  async function autoMatch() {
+    setAutoMatching(true)
+    const res = await fetch(`/api/admin/shopee/orders/${id}/automatch`, { method: 'POST' })
+    const d = await res.json().catch(() => ({}))
+    setAutoMatching(false)
+    if (!res.ok) { alert(d.error || '自動對應失敗'); return }
+    if (d.matched > 0) { await load(); }
+    else alert('沒有可自動對應的項目（V2 尚未對應此商品選項）')
+  }
+
   // 對應 BC 商品（直接對應 bc_sku_id + copies）— 保留原已回填的 ICCID，不重設
   async function matchBcItem(itemId: string, bcSkuId: string, copies: string) {
     if (!matchingItem) return
@@ -718,7 +730,15 @@ export default function ShopeeOrderDetailPage() {
 
       {/* 商品明細 */}
       <div className="mt-6">
-        <h2 className="text-lg font-semibold">商品明細（{items.length}）{pendingCount > 0 && <span className="text-orange-500 text-sm ml-2">{pendingCount} 待對應</span>}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">商品明細（{items.length}）{pendingCount > 0 && <span className="text-orange-500 text-sm ml-2">{pendingCount} 待對應</span>}</h2>
+          {pendingCount > 0 && (
+            <button onClick={autoMatch} disabled={autoMatching}
+              className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {autoMatching ? '對應中…' : '依 V2 自動對應'}
+            </button>
+          )}
+        </div>
         <div className="mt-3 space-y-3">
           {items.map((item) => {
             const st = ITEM_STATUS[item.status] || { label: item.status, color: 'bg-gray-100 text-gray-600' }
