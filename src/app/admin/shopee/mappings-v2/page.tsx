@@ -70,6 +70,8 @@ export default function ShopeeMappingsV2Page() {
   const [search, setSearch] = useState('')
   // 套餐選項貨號索引：code → { bc_sku_id, copies, sell_price, package_name }
   const [optionIndex, setOptionIndex] = useState<Map<string, { bc_sku_id: string; copies: string; sell_price: number | null; package_name: string }>>(new Map())
+  // 各商品「已調整」時間：shopee_product_id → ISO 時間
+  const [productAdjusted, setProductAdjusted] = useState<Record<string, string>>({})
   // 解析失敗（找不到套餐選項貨號）的列 id → 紅框提示
   const [skuErrors, setSkuErrors] = useState<Set<string>>(new Set())
   function setSkuError(id: string, on: boolean) {
@@ -100,6 +102,17 @@ export default function ShopeeMappingsV2Page() {
     fetchOptionIndex()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 手動標記某商品「已調整」的時間
+  async function markAdjusted(productId: string) {
+    if (!accountId || productId.startsWith('__')) return
+    const now = new Date().toISOString()
+    await fetch('/api/admin/shopee/mappings-v2/adjusted', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, product_id: productId }),
+    })
+    setProductAdjusted(prev => ({ ...prev, [productId]: now }))
+  }
+
   // 重新抓取套餐選項貨號索引（套餐改過主選項ID/吃到飽後會變，故每次解析失敗會重抓一次）
   async function fetchOptionIndex() {
     const d = await fetch('/api/admin/packages/option-index').then(r => r.json()).catch(() => ({})) as { items?: { code: string; bc_sku_id: string; copies: string; sell_price: number | null; package_name: string }[] }
@@ -116,6 +129,7 @@ export default function ShopeeMappingsV2Page() {
       const d = await res.json()
       setOptions(d.options || [])
       setSpecOrders(d.spec_orders || [])
+      setProductAdjusted(d.product_adjusted || {})
     } finally { setLoading(false) }
   }
   useEffect(() => { load() }, [accountId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -673,6 +687,13 @@ export default function ShopeeMappingsV2Page() {
                       <span className={`text-sm ${mapped === p.opts.length ? 'text-green-600' : 'text-amber-600'}`}>已對應 {mapped}/{p.opts.length}</span>
                       <span className="text-sm text-gray-400">更新：{latestUpdate(p.opts)}</span>
                     </div>
+                    {!p.id.startsWith('__') && (
+                      <div className="mt-2 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => markAdjusted(p.id)}
+                          className="px-2 py-0.5 text-[11px] rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium">已調整</button>
+                        {productAdjusted[p.id] && <span className="text-[11px] text-gray-400">{new Date(productAdjusted[p.id]).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</span>}
+                      </div>
+                    )}
                     {removedCount > 0 && (
                       <div className="mt-2 inline-block px-2 py-0.5 rounded bg-red-600 text-white text-xs font-medium">蝦皮已刪除 {removedCount} 個選項</div>
                     )}

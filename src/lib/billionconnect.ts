@@ -187,7 +187,14 @@ export async function getOrderInfo(params: string | { channelOrderId?: string; o
 // F010 — 查詢卡有效期
 // =====================================================
 export async function getCardExpiry(iccid: string[]) {
-  return callBC<BCCardExpiry[]>('F010', { iccid })
+  // BC F010 限制：單次查詢卡片數量須少於 100，超過則分批（每批 90）再合併
+  if (iccid.length <= 90) return callBC<BCCardExpiry[]>('F010', { iccid })
+  const out: BCCardExpiry[] = []
+  for (let i = 0; i < iccid.length; i += 90) {
+    const r = await callBC<BCCardExpiry[]>('F010', { iccid: iccid.slice(i, i + 90) })
+    if (Array.isArray(r)) out.push(...r)
+  }
+  return out
 }
 
 // =====================================================

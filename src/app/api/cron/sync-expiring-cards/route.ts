@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getCardExpiry } from '@/lib/billionconnect'
+import { refreshCardPlanUsage } from '@/lib/card-plan-sync'
 
 // Vercel Cron 或外部呼叫共用端點。
 // 需帶 Authorization: Bearer <CRON_SECRET>，Vercel Cron 會自動帶入。
-// 1. 到期日快要到 / 已過（前後 7 天）的卡片
-// 2. 從未同步過（bc_synced_at IS NULL）的卡片
-// 3. 狀態為「已開卡 / 使用中」且超過 12 小時未同步的卡片
-// 會呼叫 BC F010（每批 50 筆）並回寫本地快取
+// 1. 到期日在「到期前 7 天 ～ 失效後 3 天」區間的卡片（其餘不再每天同步）
+// 2. 從未同步過（bc_synced_at IS NULL）的卡片（初次補撈）
+// 會呼叫 BC F010 並回寫本地快取；卡片變動時另由 N002/N003 webhook 即時更新
 
 function isAuthorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET
@@ -30,38 +30,33 @@ async function runSync() {
   const supabase = createAdminClient()
   const startedAt = Date.now()
 
-  // 計算選取範圍
+  // 計算選取範圍：到期前 7 天 ～ 失效後 3 天
   const now = new Date()
   const in7days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-  const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000).toISOString()
+  const past3days = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString()
 
   // 撈出待同步 ICCID
   const targetIds = new Set<string>()
+  const windowIds = new Set<string>() // 到期視窗內的卡（另打 F012 同步套餐使用狀況）
 
-  // (1) 到期日 <= +7 天（含已過期）
-  {
+  // (1) 到期日在 [失效後3天, 到期前7天]（分頁撈全）
+  for (let from = 0; ; from += 1000) {
     const { data } = await supabase.from('manual_iccids')
       .select('iccid')
       .not('expiration_date', 'is', null)
+      .gte('expiration_date', past3days)
       .lte('expiration_date', in7days)
-    for (const r of data || []) targetIds.add(r.iccid)
+      .range(from, from + 999)
+    if (!data || data.length === 0) break
+    for (const r of data) { targetIds.add(r.iccid); windowIds.add(r.iccid) }
+    if (data.length < 1000) break
   }
 
-  // (2) 從未同步過
+  // (2) 從未同步過（初次補撈）
   {
     const { data } = await supabase.from('manual_iccids')
       .select('iccid')
       .is('bc_synced_at', null)
-      .limit(500)
-    for (const r of data || []) targetIds.add(r.iccid)
-  }
-
-  // (3) 狀態為已開卡或使用中，且超過 12 小時未同步
-  {
-    const { data } = await supabase.from('manual_iccids')
-      .select('iccid')
-      .in('card_status', ['0', '1'])
-      .lt('bc_synced_at', twelveHoursAgo)
       .limit(500)
     for (const r of data || []) targetIds.add(r.iccid)
   }
@@ -101,10 +96,19 @@ async function runSync() {
     }
   }
 
+  // F012：同步到期視窗內卡片的套餐使用狀況（判斷「到期未使用」用）
+  let planUpdated = 0
+  try {
+    planUpdated = await refreshCardPlanUsage(supabase, Array.from(windowIds))
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err))
+  }
+
   return NextResponse.json({
     ok: true,
     total: allIds.length,
     updated,
+    plan_updated: planUpdated,
     errors: errors.slice(0, 5),
     duration_ms: Date.now() - startedAt,
   })

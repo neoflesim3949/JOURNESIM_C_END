@@ -100,7 +100,13 @@ export async function GET(request: Request) {
     if (data.length < 1000) break
   }
 
-  return NextResponse.json({ options: result, spec_orders: specOrders })
+  // 各商品「已調整」時間
+  const { data: adjRows } = await supabase.from('shopee_product_adjusted')
+    .select('shopee_product_id, adjusted_at').eq('account_id', accountId)
+  const product_adjusted: Record<string, string> = {}
+  for (const a of adjRows || []) product_adjusted[a.shopee_product_id] = a.adjusted_at
+
+  return NextResponse.json({ options: result, spec_orders: specOrders, product_adjusted })
 }
 
 // PATCH — 更新對應(bc_sku_id+copies)/選項貨號/上架/前次售價快照

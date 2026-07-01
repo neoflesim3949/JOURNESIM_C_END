@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { AdminSidebar } from '@/components/admin/sidebar'
+import { ExpiringUnusedAlert } from '@/components/admin/expiring-unused-alert'
 
 export default async function AdminLayout({
   children,
@@ -20,6 +21,7 @@ export default async function AdminLayout({
       <main className="flex-1 ml-64">
         <div className="p-8">{children}</div>
       </main>
+      <ExpiringUnusedAlert />
     </div>
   )
 }

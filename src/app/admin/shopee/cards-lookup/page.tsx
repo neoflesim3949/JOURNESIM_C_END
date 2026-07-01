@@ -27,8 +27,10 @@ interface Row {
   plan: { ok: boolean; orders?: PlanOrder[]; error?: string }
 }
 
-const CARD_STATUS: Record<string, string> = { '0': '載體有效', '1': '載體無效', '2': '已停用' }
-const PLAN_STATUS: Record<string, string> = { '0': '未使用', '1': '使用中', '2': '已用完', '3': '已過期', '4': '已退訂' }
+// 依 BC 官方文件 F010 status：0-已開卡 1-使用中 2-已用盡 3-失效 4-續期 5-報廢
+const CARD_STATUS: Record<string, string> = { '0': '已開卡', '1': '使用中', '2': '已用盡', '3': '失效', '4': '續期', '5': '報廢' }
+// 依 BC 官方文件 F012 planStatus：0-未使用 1-正在使用 2-使用結束 3-已取消
+const PLAN_STATUS: Record<string, string> = { '0': '未使用', '1': '正在使用', '2': '使用結束', '3': '已取消' }
 
 function fmtTraffic(s?: string) {
   if (s == null || s === '') return '—'
@@ -46,6 +48,8 @@ export default function CardsLookupPage() {
   const [error, setError] = useState<string | null>(null)
   const [working, setWorking] = useState<string | null>(null) // 正在送 F017 的 channelSubOrderId
   const [onlyUnused, setOnlyUnused] = useState(true)
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set()) // key = `${iccid}|${channelSubOrderId}`
   const [batchWorking, setBatchWorking] = useState(false)
 
@@ -156,24 +160,37 @@ export default function CardsLookupPage() {
     } finally { setWorking(null) }
   }
 
-  async function loadExpiring() {
-    const res = await fetch('/api/admin/cards/expiring-tomorrow')
+  async function loadExpiring(scope: 'tomorrow' | 'month' | 'range' = 'tomorrow') {
+    let url = '/api/admin/cards/expiring-tomorrow'
+    if (scope === 'month') url = '/api/admin/cards/expiring-month'
+    else if (scope === 'range') {
+      if (!rangeFrom || !rangeTo) { alert('請選擇起訖日期'); return }
+      url = `/api/admin/cards/expiring-range?from=${rangeFrom}&to=${rangeTo}`
+    }
+    const res = await fetch(url)
     const d = await res.json()
     if (!res.ok) { alert(d.error || '查詢失敗'); return }
     if (!d.iccids || d.iccids.length === 0) {
-      alert(`${(d.dates || []).join(' / ')} 沒有到期卡片`)
+      alert(`${d.label || (d.dates || []).join(' / ')} 沒有到期卡片`)
       return
     }
-    setText(d.iccids.join('\n'))
+    const allIccids: string[] = d.iccids
+    setText(allIccids.join('\n'))
     setLoading(true); setError(null); setRows([])
     try {
-      const r2 = await fetch('/api/admin/cards-lookup', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ iccids: d.iccids }),
-      })
-      const d2 = await r2.json()
-      if (!r2.ok) { setError(d2.error || '查詢失敗'); return }
-      setRows(d2.rows || [])
+      // 卡片查詢單次上限 200，分批查詢再合併
+      const merged: Row[] = []
+      for (let i = 0; i < allIccids.length; i += 200) {
+        const batch = allIccids.slice(i, i + 200)
+        const r2 = await fetch('/api/admin/cards-lookup', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ iccids: batch }),
+        })
+        const d2 = await r2.json()
+        if (!r2.ok) { setError(d2.error || '查詢失敗'); break }
+        merged.push(...(d2.rows || []))
+        setRows([...merged]) // 逐批更新，邊查邊顯示
+      }
     } finally { setLoading(false) }
   }
 
@@ -184,10 +201,25 @@ export default function CardsLookupPage() {
           <h1 className="text-2xl font-bold">卡片查詢退卡</h1>
           <p className="mt-1 text-sm text-gray-500">貼入多筆 ICCID（每行一個或以逗號 / 空白分隔），一次查 F010 卡狀態 + F012 套餐使用，可直接申請 F017 售後</p>
         </div>
-        <button onClick={loadExpiring}
-          className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
-          <Calendar className="w-4 h-4" /> 查詢到期卡片
-        </button>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <button onClick={() => loadExpiring('tomorrow')}
+            className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
+            <Calendar className="w-4 h-4" /> 查詢到期卡片
+          </button>
+          <button onClick={() => loadExpiring('month')}
+            className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
+            <Calendar className="w-4 h-4" /> 查詢本月到期
+          </button>
+          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1">
+            <input type="date" value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
+              className="text-sm outline-none" />
+            <span className="text-gray-400 text-sm">~</span>
+            <input type="date" value={rangeTo} onChange={e => setRangeTo(e.target.value)}
+              className="text-sm outline-none" />
+            <button onClick={() => loadExpiring('range')}
+              className="ml-1 px-3 py-1 bg-amber-600 text-white text-sm rounded-md hover:bg-amber-700">查詢區間到期</button>
+          </div>
+        </div>
       </div>
 
       <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">

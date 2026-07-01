@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { refreshCardExpiry } from '@/lib/card-expiry-sync'
 
 const APP_SECRET = process.env.BILLIONCONNECT_APP_SECRET!
 
@@ -267,6 +268,8 @@ export async function POST(request: Request) {
           activation_updated_at: now,
         }).eq('iccid', iccid)
       }
+      // 收到啟用通知 → 打 F010 更新卡片到期時間
+      await refreshCardExpiry(supabase, items.map((it: { iccid?: string }) => it?.iccid).filter(Boolean) as string[])
       break
     }
 
@@ -285,6 +288,8 @@ export async function POST(request: Request) {
         if (it.subOrderId) update.activation_sub_order_id = it.subOrderId
         await supabase.from('manual_iccids').update(update).eq('iccid', iccid)
       }
+      // 收到到期通知 → 打 F010 更新卡片到期時間
+      await refreshCardExpiry(supabase, items.map((it: { iccid?: string }) => it?.iccid).filter(Boolean) as string[])
       break
     }
 
