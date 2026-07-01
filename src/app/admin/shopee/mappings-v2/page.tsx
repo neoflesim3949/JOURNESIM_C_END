@@ -51,6 +51,14 @@ function dayNum(s: string): number {
   return m ? Number(m[1]) : 9999
 }
 
+// 毛利率門檻：7 天以下 40%，超過 7 天 37%
+function marginMin(o: OptionRow): number {
+  return dayNum(splitSpec(o.shopee_variation_name)[1]) > 7 ? 37 : 40
+}
+function isLowMargin(o: OptionRow): boolean {
+  return o.margin_pct != null && o.margin_pct < marginMin(o)
+}
+
 export default function ShopeeMappingsV2Page() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [accountId, setAccountId] = useUrlState('account', '')
@@ -260,11 +268,20 @@ export default function ShopeeMappingsV2Page() {
       if (!dataIdxByProd.has(s.product_id)) dataIdxByProd.set(s.product_id, new Map())
       dataIdxByProd.get(s.product_id)!.set(s.spec_value, s.sort_index)
     }
+    // 沒有拖曳排序時，數據量以「首見順序」分組（與詳情頁一致）
+    const firstSeen = new Map<string, Map<string, number>>()
+    for (const o of list) {
+      const pid = pidOf(o); const s1 = splitSpec(o.shopee_variation_name)[0]
+      if (!firstSeen.has(pid)) firstSeen.set(pid, new Map())
+      const m = firstSeen.get(pid)!; if (!m.has(s1)) m.set(s1, m.size)
+    }
     const dataRank = (o: OptionRow) => {
       const pid = pidOf(o); const s1 = splitSpec(o.shopee_variation_name)[0]
       const ov = orderOverride[pid]
-      if (ov) { const i = ov.indexOf(s1); return i === -1 ? 9999 : i }
-      return dataIdxByProd.get(pid)?.get(s1) ?? 9999
+      if (ov) { const i = ov.indexOf(s1); if (i !== -1) return i }
+      const saved = dataIdxByProd.get(pid)?.get(s1)
+      if (saved != null) return saved
+      return firstSeen.get(pid)?.get(s1) ?? 9999
     }
     list.sort((a, b) => {
       const pa = prodIndex.get(pidOf(a)) ?? 9999, pb = prodIndex.get(pidOf(b)) ?? 9999
@@ -627,13 +644,13 @@ export default function ShopeeMappingsV2Page() {
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
               {filteredProducts.map(p => {
                 const mapped = p.opts.filter(o => o.bc_sku_id).length
-                const lowMargin = p.opts.some(o => o.margin_pct != null && o.margin_pct < 40)
+                const lowMargin = p.opts.some(isLowMargin)
                 const bcChanged = p.opts.some(o => o.bc_changed)
                 const removedCount = p.opts.filter(o => o.removed_at).length
                 const alertFp = alertFingerprint(p.opts)
                 const showAlert = (lowMargin || bcChanged) && dismissedAlerts[p.id] !== alertFp
                 const danger = showAlert || removedCount > 0
-                const alertMsg = [lowMargin && '有選項毛利率低於 40%', bcChanged && 'BC 商品已變更（品名/成本）'].filter(Boolean).join('；')
+                const alertMsg = [lowMargin && '有選項毛利率偏低（7天內<40%、超過7天<37%）', bcChanged && 'BC 商品已變更（品名/成本）'].filter(Boolean).join('；')
                 return (
                   <div key={p.id} onClick={() => openProduct(p.id)}
                     className={`group relative cursor-pointer bg-white border rounded-xl p-4 hover:shadow-sm transition ${danger ? 'border-red-300 hover:border-red-400 bg-red-50/30' : 'border-gray-200 hover:border-blue-400'}`}>
@@ -690,7 +707,7 @@ export default function ShopeeMappingsV2Page() {
                         </td>
                         <td className="px-3 py-2">
                           {(() => {
-                            const has = p.opts.some(o => (o.margin_pct != null && o.margin_pct < 40) || o.bc_changed)
+                            const has = p.opts.some(o => isLowMargin(o) || o.bc_changed)
                             const fp = alertFingerprint(p.opts)
                             const showAlert = has && dismissedAlerts[p.id] !== fp
                             return (
@@ -876,7 +893,7 @@ export default function ShopeeMappingsV2Page() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">{o.margin != null ? <span className={o.margin >= 0 ? 'text-green-600' : 'text-red-500'}>NT$ {o.margin}</span> : '—'}</td>
-                      <td className="px-3 py-2 text-right">{o.margin_pct != null ? <span className={o.margin_pct >= 40 ? 'text-green-600' : 'text-red-500'}>{o.margin_pct}%</span> : '—'}</td>
+                      <td className="px-3 py-2 text-right">{o.margin_pct != null ? <span className={o.margin_pct >= marginMin(o) ? 'text-green-600' : 'text-red-500'}>{o.margin_pct}%</span> : '—'}</td>
                       <td className="px-3 py-2 text-center">
                         {(() => { const listed = o.is_listed ?? true; return (
                           <button onClick={() => patch(o.id, { is_listed: !listed })}

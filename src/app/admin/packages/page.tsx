@@ -15,6 +15,7 @@ interface Pkg {
   countries?: string[] | null
   apns?: string[] | null; operators?: string[] | null; apn_synced_at?: string | null
   main_option_code?: string | null
+  updated_at?: string | null
 }
 
 interface BcProduct {
@@ -501,6 +502,7 @@ export default function AdminPackagesPage() {
                         className={`px-2 py-0.5 text-xs rounded-full ${pkg.is_active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
                         {pkg.is_active ? '上架中' : '已下架'}
                       </button>
+                      {pkg.updated_at && <span className="px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-500">最後編輯：{new Date(pkg.updated_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</span>}
                       {(pkg.tags || []).map(t => <span key={t} className="px-1.5 py-0.5 text-[11px] rounded bg-gray-100 text-gray-500">{t}</span>)}
                       {pkg.main_option_code && <span className="px-1.5 py-0.5 text-[11px] rounded bg-indigo-50 text-indigo-600 font-mono">主商品號：{pkg.main_option_code}</span>}
                     </div>

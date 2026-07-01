@@ -13,6 +13,7 @@ interface BCProduct {
   days: number | null; capacity: string | null; high_flow_size: string | null
   limit_flow_speed: string | null; plan_type: string | null; sales_method: string | null
   prices: PriceItem[] | null; country_data: CountryItem[] | null
+  _day_price?: number | null; _day_copies?: string | null
   is_active: boolean; desc: string | null; operator_info: string | null
   hotspot_support: string | null; acceleration_support: string | null
   usage_count: string | null; time_zone: string | null; point_contact_type: string | null
@@ -31,6 +32,9 @@ export default function AdminAccelerationPlansPage() {
   const [detailProduct, setDetailProduct] = useState<BCProduct | null>(null)
   const [filterPlanType, setFilterPlanType] = useState('')
   const [filterSalesMethod, setFilterSalesMethod] = useState('')
+  const [filterDays, setFilterDays] = useState('')
+  const [sortPrice, setSortPrice] = useState<'' | 'asc' | 'desc'>('')
+  const [daysOptions, setDaysOptions] = useState<number[]>([])
   const [showCompare, setShowCompare] = useState(false)
 
   async function load() {
@@ -39,6 +43,8 @@ export default function AdminAccelerationPlansPage() {
     if (search) params.set('search', search)
     if (filterPlanType) params.set('planType', filterPlanType)
     if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
+    if (filterDays) params.set('days', filterDays)
+    if (filterDays && sortPrice) params.set('sortPrice', sortPrice)
     const res = await fetch(`/api/admin/plans?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -48,7 +54,15 @@ export default function AdminAccelerationPlansPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterSalesMethod])
+  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterSalesMethod, filterDays, sortPrice]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 載入天數選項
+  useEffect(() => {
+    fetch('/api/admin/plans?type=acceleration&countriesOnly=1')
+      .then(r => r.ok ? r.json() : Promise.resolve({ days: [] }))
+      .then(d => setDaysOptions(d.days || []))
+      .catch(() => {})
+  }, [])
 
   function handleSearch() { setPage(1); load() }
 
@@ -106,6 +120,11 @@ export default function AdminAccelerationPlansPage() {
           <option value="">銷售方式</option>
           {Object.entries(SALES_METHOD).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
+        <select value={filterDays} onChange={(e) => { setSortPrice(''); setPage(1); setFilterDays(e.target.value) }}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+          <option value="">天數</option>
+          {daysOptions.map(d => <option key={d} value={d}>{d} 天</option>)}
+        </select>
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input type="text" placeholder="搜尋套餐名稱或 SKU" value={search}
@@ -133,7 +152,14 @@ export default function AdminAccelerationPlansPage() {
                   <th className="text-left px-4 py-3 font-medium w-20">流量</th>
                   <th className="text-left px-4 py-3 font-medium w-16">限速</th>
                   <th className="text-left px-4 py-3 font-medium w-16">天數</th>
-                  <th className="text-right px-4 py-3 font-medium w-20">結算價</th>
+                  <th className="text-right px-4 py-3 font-medium w-24">
+                    {filterDays ? (
+                      <button onClick={() => { setPage(1); setSortPrice(s => s === 'asc' ? 'desc' : s === 'desc' ? '' : 'asc') }}
+                        className="inline-flex items-center gap-1 hover:text-blue-600">
+                        結算價 <span className="text-[10px]">{sortPrice === 'asc' ? '▲' : sortPrice === 'desc' ? '▼' : '⇅'}</span>
+                      </button>
+                    ) : '結算價'}
+                  </th>
                   <th className="text-center px-4 py-3 font-medium w-14">詳情</th>
                 </tr>
               </thead>
@@ -163,8 +189,8 @@ export default function AdminAccelerationPlansPage() {
                         <td className="px-4 py-3 text-xs">{getSalesMethodLabel(product.sales_method)}</td>
                         <td className="px-4 py-3 text-xs">{formatCapacity(product.high_flow_size ?? product.capacity, isDaily)}</td>
                         <td className="px-4 py-3 text-xs">{formatSpeed(product.limit_flow_speed)}</td>
-                        <td className="px-4 py-3 text-xs">{hasPrices ? `${prices.length} 規格` : prices.length === 1 ? `${unitDays * parseInt(prices[0].copies)} 天` : '-'}</td>
-                        <td className="px-4 py-3 text-right text-xs">{prices.length === 1 ? `¥${prices[0].settlementPrice}` : '-'}</td>
+                        <td className="px-4 py-3 text-xs">{filterDays ? `${filterDays} 天` : hasPrices ? `${prices.length} 規格` : prices.length === 1 ? `${unitDays * parseInt(prices[0].copies)} 天` : '-'}</td>
+                        <td className="px-4 py-3 text-right text-xs">{filterDays ? (product._day_price != null ? `¥${product._day_price}` : '-') : prices.length === 1 ? `¥${prices[0].settlementPrice}` : '-'}</td>
                         <td className="px-4 py-3 text-center">
                           <button onClick={(e) => { e.stopPropagation(); setDetailProduct(product) }}
                             className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">

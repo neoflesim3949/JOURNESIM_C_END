@@ -43,7 +43,7 @@ export async function GET(request: Request) {
   if (skuCodes.length) {
     for (let from = 0; ; from += 1000) {
       const { data } = await supabase.from('shopee_product_options_v2')
-        .select('account_id, main_sku_code, bc_sku_id, copies, shopee_variation_name, custom_variation_name, custom_product_name, original_price, bc_name_snapshot')
+        .select('account_id, main_sku_code, bc_sku_id, copies, variation_sku_code, shopee_variation_name, custom_variation_name, custom_product_name, original_price, bc_name_snapshot')
         .in('main_sku_code', skuCodes).range(from, from + 999)
       if (!data || data.length === 0) break
       for (const o of data) {
@@ -64,21 +64,24 @@ export async function GET(request: Request) {
       const arr = groups.get(k) || []
       arr.push(o); groups.set(k, arr)
     }
-    let missing = 0, priceDiff = 0, nameDiff = 0
+    let missing = 0, codeDiff = 0, nameDiff = 0
+    // 選項號 = 套餐選項貨號 > 對應BC(bc_sku_id_copies)
+    const codeOf = (o: Opt): string | null => o.variation_sku_code || (o.bc_sku_id ? `${o.bc_sku_id}_${o.copies ?? ''}` : null)
     const rows = [...groups.entries()].map(([key, list]) => {
-      const byAcc: Record<string, { price: number | null; name: string } | null> = {}
+      const byAcc: Record<string, { price: number | null; name: string; code: string | null } | null> = {}
       for (const a of accList) {
         const o = list.find(x => x.account_id === a.id)
-        byAcc[a.id] = o ? { price: finalPrice(o), name: dispName(o) } : null
+        byAcc[a.id] = o ? { price: finalPrice(o), name: dispName(o), code: codeOf(o) } : null
       }
       const listed = accList.filter(a => byAcc[a.id])
       const isMissing = listed.length > 0 && listed.length < accList.length
-      const prices = [...new Set(listed.map(a => byAcc[a.id]!.price))]
-      const isPriceDiff = listed.length >= 2 && prices.length > 1
+      // 選項號不一致：兩邊都上架但對應的選項號不同
+      const codes = [...new Set(listed.map(a => byAcc[a.id]!.code).filter(Boolean))]
+      const isCodeDiff = listed.length >= 2 && codes.length > 1
       const names = [...new Set(listed.map(a => byAcc[a.id]!.name).filter(Boolean))]
       const isNameDiff = names.length > 1
       if (isMissing) missing++
-      if (isPriceDiff) priceDiff++
+      if (isCodeDiff) codeDiff++
       if (isNameDiff) nameDiff++
       const rep = list[0]
       return {
@@ -86,10 +89,10 @@ export async function GET(request: Request) {
         bc_sku_id: rep.bc_sku_id || null,
         copies: rep.copies || null,
         bc_name: rep.bc_name_snapshot || null,
-        variation_sku: rep.bc_sku_id ? `${m.main_sku_code}_${rep.bc_sku_id}_${rep.copies ?? ''}` : null,
+        variation_sku: codeOf(rep),
         spec: dispName(rep) || (rep.shopee_variation_name || ''),
         byAcc,
-        missing: isMissing, priceDiff: isPriceDiff, nameDiff: isNameDiff,
+        missing: isMissing, codeDiff: isCodeDiff, nameDiff: isNameDiff,
       }
     }).sort((a, b) => a.spec.localeCompare(b.spec, 'zh-Hant'))
 
@@ -97,8 +100,8 @@ export async function GET(request: Request) {
     return {
       id: m.id, inventory_name: m.inventory_name, main_sku_code: m.main_sku_code, note: m.note, sort_index: m.sort_index,
       perAcc, rows,
-      issues: { missing, priceDiff, nameDiff },
-      hasIssue: missing > 0 || priceDiff > 0 || nameDiff > 0 || opts.length === 0,
+      issues: { missing, codeDiff, nameDiff },
+      hasIssue: missing > 0 || codeDiff > 0 || nameDiff > 0 || opts.length === 0,
       empty: opts.length === 0,
     }
   })

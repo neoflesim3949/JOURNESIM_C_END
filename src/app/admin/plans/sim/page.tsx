@@ -24,6 +24,7 @@ interface BCProduct {
   days: number | null; capacity: string | null; high_flow_size: string | null
   limit_flow_speed: string | null; plan_type: string | null; sales_method: string | null
   prices: PriceItem[] | null; country_data: CountryItem[] | null
+  _day_price?: number | null; _day_copies?: string | null
   is_active: boolean; desc: string | null; operator_info: string | null
   hotspot_support: string | null; acceleration_support: string | null
   usage_count: string | null; time_zone: string | null; point_contact_type: string | null
@@ -49,6 +50,7 @@ export default function AdminSimPlansPage() {
   const [filterCountries, setFilterCountries] = useState<string[]>([])
   const [countryOptions, setCountryOptions] = useState<{ mcc: string; name: string }[]>([])
   const [filterDays, setFilterDays] = useState('')
+  const [sortPrice, setSortPrice] = useState<'' | 'asc' | 'desc'>('')
   const [filterCapacity, setFilterCapacity] = useState('')
   const [daysOptions, setDaysOptions] = useState<number[]>([])
   const [capacityOptions, setCapacityOptions] = useState<{ value: string; label: string }[]>([])
@@ -71,6 +73,7 @@ export default function AdminSimPlansPage() {
       if (filterSalesMethod) params.set('salesMethod', filterSalesMethod)
       if (filterCountries.length) params.set('countries', filterCountries.join(','))
       if (filterDays) params.set('days', filterDays)
+      if (filterDays && sortPrice) params.set('sortPrice', sortPrice)
       if (filterCapacity) params.set('capacity', filterCapacity)
       const res = await fetch(`/api/admin/plans?${params}`)
       if (res.ok) {
@@ -82,7 +85,7 @@ export default function AdminSimPlansPage() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterCountries, filterDays, filterCapacity])
+  useEffect(() => { load() }, [page, pageSize, filterPlanType, filterProductType, filterSalesMethod, filterCountries, filterDays, filterCapacity, sortPrice]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 載入 SIM 的篩選選項（國家 / 天數 / 流量）
   useEffect(() => {
@@ -162,7 +165,7 @@ export default function AdminSimPlansPage() {
         </select>
         <CountryMultiSelect options={countryOptions} value={filterCountries}
           onChange={(v) => { setFilterCountries(v); setPage(1) }} className="w-56" />
-        <select value={filterDays} onChange={handleFilterChange(setFilterDays)}
+        <select value={filterDays} onChange={(e) => { setSortPrice(''); setPage(1); setFilterDays(e.target.value) }}
           className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white">
           <option value="">天數</option>
           {daysOptions.map(d => <option key={d} value={d}>{d} 天</option>)}
@@ -200,7 +203,14 @@ export default function AdminSimPlansPage() {
                   <th className="text-left px-4 py-3 font-medium w-20">流量</th>
                   <th className="text-left px-4 py-3 font-medium w-16">限速</th>
                   <th className="text-left px-4 py-3 font-medium w-16">天數</th>
-                  <th className="text-right px-4 py-3 font-medium w-20">結算價</th>
+                  <th className="text-right px-4 py-3 font-medium w-24">
+                    {filterDays ? (
+                      <button onClick={() => { setPage(1); setSortPrice(s => s === 'asc' ? 'desc' : s === 'desc' ? '' : 'asc') }}
+                        className="inline-flex items-center gap-1 hover:text-blue-600">
+                        結算價 <span className="text-[10px]">{sortPrice === 'asc' ? '▲' : sortPrice === 'desc' ? '▼' : '⇅'}</span>
+                      </button>
+                    ) : '結算價'}
+                  </th>
                   <th className="text-center px-4 py-3 font-medium w-14">詳情</th>
                 </tr>
               </thead>
@@ -234,8 +244,8 @@ export default function AdminSimPlansPage() {
                         <td className="px-4 py-3 text-xs">{getSalesMethodLabel(product.sales_method)}</td>
                         <td className="px-4 py-3 text-xs">{formatCapacity(product.high_flow_size ?? product.capacity, isDaily)}</td>
                         <td className="px-4 py-3 text-xs">{formatSpeed(product.limit_flow_speed)}</td>
-                        <td className="px-4 py-3 text-xs">{hasPrices ? `${prices.length} 規格` : prices.length === 1 ? `${unitDays * parseInt(prices[0].copies)} 天` : '-'}</td>
-                        <td className="px-4 py-3 text-right text-xs">{prices.length === 1 ? `¥${prices[0].settlementPrice}` : '-'}</td>
+                        <td className="px-4 py-3 text-xs">{filterDays ? `${filterDays} 天` : hasPrices ? `${prices.length} 規格` : prices.length === 1 ? `${unitDays * parseInt(prices[0].copies)} 天` : '-'}</td>
+                        <td className="px-4 py-3 text-right text-xs">{filterDays ? (product._day_price != null ? `¥${product._day_price}` : '-') : prices.length === 1 ? `¥${prices[0].settlementPrice}` : '-'}</td>
                         <td className="px-4 py-3 text-center">
                           <button onClick={(e) => { e.stopPropagation(); setDetailProduct(product) }}
                             className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">

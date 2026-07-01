@@ -55,7 +55,8 @@ export async function GET(request: Request) {
   // 國家篩選：countries=逗號分隔 MCC（多選，OR）；相容舊的單一 country
   const countriesParam = (searchParams.get('countries') || searchParams.get('country') || '')
     .split(',').map(s => s.trim()).filter(Boolean)
-  const daysParam = searchParams.get('days') || ''           // 天數（bc_products.days）
+  const daysParam = searchParams.get('days') || ''           // 天數（實際可選天數 = 單位天數×copies）
+  const sortPrice = searchParams.get('sortPrice') || ''      // asc / desc（依選取天數的結算價排序，僅有選天數時有效）
   const capacityParam = searchParams.get('capacity') || ''   // 流量（high_flow_size 或 capacity 的原始 KB 值）
   const countriesOnly = searchParams.get('countriesOnly') === '1'
 
@@ -68,14 +69,18 @@ export async function GET(request: Request) {
     const capMap = new Map<string, string>() // 原始KB → 顯示label
     for (let from = 0; ; from += 1000) {
       const { data } = await applyTypeFilter(
-        supabase.from('bc_products').select('country_data, days, high_flow_size, capacity, plan_type'), type
+        supabase.from('bc_products').select('country_data, days, prices, high_flow_size, capacity, plan_type'), type
       ).range(from, from + 999)
       if (!data || data.length === 0) break
       for (const p of data) {
         for (const c of (p.country_data || []) as { mcc: string; name: string }[]) {
           if (c?.mcc && !map.has(c.mcc)) map.set(c.mcc, c.name)
         }
-        if (p.days != null && !isNaN(Number(p.days))) daysSet.add(Number(p.days))
+        // 可選天數 = 單位天數 × copies（每個規格各一個天數）
+        const unit = Number(p.days) || 1
+        const prices = (p.prices || []) as { copies: string }[]
+        if (prices.length) { for (const pr of prices) { const d = unit * (parseInt(pr.copies) || 1); if (d > 0) daysSet.add(d) } }
+        else if (p.days != null && !isNaN(Number(p.days))) daysSet.add(Number(p.days))
         // 流量選項拆「每日(單日型 plan_type=1)」與「總量」；value 編碼 kind:KB
         const cap = p.high_flow_size ?? p.capacity
         if (cap != null && String(cap) !== '') {
@@ -107,10 +112,7 @@ export async function GET(request: Request) {
     query = query.in('sku_id', skus.length ? skus : ['__none__'])
   }
 
-  // 篩選：天數（bc_products.days，單位天數）
-  if (daysParam) {
-    query = query.eq('days', Number(daysParam))
-  }
+  // 天數（實際可選天數=單位天數×copies）改在下方 JS 分支處理（避免巨量 IN 清單導致 URL 過長）
 
   // 篩選：流量（value 為 kind:KB；kind=d 每日 / t 總量；相容無前綴的純 KB）
   if (capacityParam) {
@@ -181,6 +183,34 @@ export async function GET(request: Request) {
       // 非國家搜尋，用名稱和 SKU
       query = query.or(`name.ilike.%${search}%,sku_id.ilike.%${search}%`)
     }
+  }
+
+  // 有選天數：撈出（其餘篩選後的）全部 → JS 過濾「有該天數」+ 算該天數結算價 + 依價格排序 + 分頁
+  if (daysParam) {
+    const target = Number(daysParam)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all: any[] = []
+    for (let f = 0; ; f += 1000) {
+      const { data: chunk, error } = await query.range(f, f + 999)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (!chunk || chunk.length === 0) break
+      all.push(...chunk)
+      if (chunk.length < 1000) break
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const withPrice = all.map((p): any => {
+      const unit = Number(p.days) || 1
+      const pr = ((p.prices || []) as { copies: string; settlementPrice: string }[])
+        .find((x) => unit * (parseInt(x.copies) || 1) === target)
+      return pr ? { ...p, _day_price: Number(pr.settlementPrice), _day_copies: pr.copies } : null
+    }).filter(Boolean)
+    if (sortPrice === 'asc' || sortPrice === 'desc') {
+      withPrice.sort((a, b) => sortPrice === 'asc' ? a._day_price - b._day_price : b._day_price - a._day_price)
+    } else {
+      withPrice.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'))
+    }
+    const start = (page - 1) * pageSize
+    return NextResponse.json({ data: withPrice.slice(start, start + pageSize), total: withPrice.length, page, pageSize })
   }
 
   // 分頁

@@ -125,5 +125,6 @@ export async function POST(
     await supabase.from('package_plan_prices').upsert(batch, { onConflict: 'package_plan_id,copies' })
   }
 
+  await supabase.from('packages').update({ updated_at: new Date().toISOString() }).eq('id', id)
   return NextResponse.json({ imported: matched.length, prices: priceRecords.length })
 }

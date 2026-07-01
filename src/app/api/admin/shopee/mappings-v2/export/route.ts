@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const options: any[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase.from('shopee_product_options_v2')
-      .select('shopee_variation_id, shopee_product_id, main_sku_code, variation_sku_code, bc_sku_id, copies, manual_price, original_price, is_listed').eq('account_id', accountId)
+      .select('shopee_variation_id, shopee_product_id, shopee_variation_name, main_sku_code, variation_sku_code, bc_sku_id, copies, manual_price, original_price, is_listed').eq('account_id', accountId)
       .range(from, from + 999)
     if (!data || data.length === 0) break
     options.push(...data)
@@ -67,27 +67,57 @@ export async function POST(request: Request) {
     stockByVar.set(vid, o.is_listed === false ? 0 : 10000)
   }
 
-  // 就地覆蓋價格欄（其餘 cell 一律不動），未設定售價的列保留原價
-  // 有選取商品時：表頭/說明列保留，資料列只留選取商品的選項
+  // 排序用：商品(首見順序) → 數據量(拖曳順序) → 天數（與 V2 詳情頁一致）
+  const specNameCol = ci['商品規格名稱']
+  const prodByVar = new Map<string, string>()
+  const nameByVar = new Map<string, string>()
+  for (const o of options || []) {
+    const vid = String(o.shopee_variation_id)
+    prodByVar.set(vid, o.shopee_product_id ? String(o.shopee_product_id) : '')
+    if (o.shopee_variation_name) nameByVar.set(vid, String(o.shopee_variation_name))
+  }
+  const { data: specRows } = await supabase.from('shopee_spec_order')
+    .select('product_id, spec_value, sort_index').eq('account_id', accountId).eq('spec_type', 'data')
+  const specIdx = new Map<string, number>() // `${pid}__${數據量}` → 拖曳序
+  for (const s of specRows || []) specIdx.set(`${s.product_id}__${s.spec_value}`, s.sort_index)
+  // 「商品規格名稱」最後一個逗號前=數據量、後=天數（與前端 splitSpec 一致）
+  const splitSpec = (name: string): [string, string] => {
+    const s = (name || '').trim()
+    const m = s.match(/^(.*)[,，]\s*([^,，]+)$/)
+    return m ? [m[1].trim(), m[2].trim()] : [s || '—', '—']
+  }
+  const dayNum = (s: string): number => { const m = String(s).match(/(\d+)/); return m ? Number(m[1]) : 9999 }
+
+  // 就地覆蓋價格/貨號/庫存欄（其餘 cell 一律不動），收集後依序排序
   const src = (batch.raw_aoa as unknown[][]).map(r => Array.isArray(r) ? [...r] : r)
   const dataStart = (typeof batch.note_row === 'number' ? batch.note_row : (batch.header_row ?? 0)) + 1
   const head = src.slice(0, dataStart)
-  const body: unknown[][] = []
+  const entries: { row: unknown[]; pIdx: number; dRank: number; dNum: number }[] = []
+  const productOrder = new Map<string, number>(); let pCounter = 0
+  const dataFirstSeen = new Map<string, Map<string, number>>() // 沒有拖曳排序時的數據量首見順序
   let changed = 0
   for (let i = dataStart; i < src.length; i++) {
     const row = src[i] as unknown[]
-    if (!Array.isArray(row)) { if (!keepVar) body.push(row as unknown[]); continue }
+    if (!Array.isArray(row)) continue // 排序模式下略過非資料列
     const vid = row[varCol] === undefined || row[varCol] === null ? '' : String(row[varCol]).trim()
-    if (keepVar && (!vid || !keepVar.has(vid))) continue
-    if (vid) {
-      const p = priceByVar.get(vid); if (p != null) { row[priceCol] = p; changed++ }
-      if (mainSkuCol !== undefined) { const ms = mainSkuByVar.get(vid); if (ms) row[mainSkuCol] = ms }
-      if (varSkuCol !== undefined) { const vs = varSkuByVar.get(vid); if (vs) row[varSkuCol] = vs }
-      if (stockCol !== undefined) { const st = stockByVar.get(vid); if (st != null) row[stockCol] = st }
-    }
-    body.push(row)
+    if (!vid) continue
+    if (keepVar && !keepVar.has(vid)) continue
+    const p = priceByVar.get(vid); if (p != null) { row[priceCol] = p; changed++ }
+    if (mainSkuCol !== undefined) { const ms = mainSkuByVar.get(vid); if (ms) row[mainSkuCol] = ms }
+    if (varSkuCol !== undefined) { const vs = varSkuByVar.get(vid); if (vs) row[varSkuCol] = vs }
+    if (stockCol !== undefined) { const st = stockByVar.get(vid); if (st != null) row[stockCol] = st }
+    // 排序鍵
+    const pid = prodByVar.get(vid) ?? ''
+    if (!productOrder.has(pid)) productOrder.set(pid, pCounter++)
+    const vname = nameByVar.get(vid) || (specNameCol !== undefined ? String(row[specNameCol] ?? '') : '')
+    const [s1, s2] = splitSpec(vname)
+    if (!dataFirstSeen.has(pid)) dataFirstSeen.set(pid, new Map())
+    const dm = dataFirstSeen.get(pid)!; if (!dm.has(s1)) dm.set(s1, dm.size)
+    const dRank = specIdx.get(`${pid}__${s1}`) ?? dm.get(s1)!
+    entries.push({ row, pIdx: productOrder.get(pid)!, dRank, dNum: dayNum(s2) })
   }
-  const aoa = [...head, ...body]
+  entries.sort((a, b) => a.pIdx - b.pIdx || a.dRank - b.dRank || a.dNum - b.dNum)
+  const aoa = [...head, ...entries.map(e => e.row)]
 
   const ws = XLSX.utils.aoa_to_sheet(aoa as unknown[][])
   const wb = XLSX.utils.book_new()

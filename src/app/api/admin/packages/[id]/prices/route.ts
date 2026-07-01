@@ -3,10 +3,16 @@ import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bumpPackage(supabase: any, id: string) {
+  await supabase.from('packages').update({ updated_at: new Date().toISOString() }).eq('id', id)
+}
+
 // PATCH — 批量更新售價 或 方案名稱/排序
-export async function PATCH(request: Request) {
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const { id } = await params
   const body = await request.json()
   const supabase = createAdminClient()
 
@@ -19,6 +25,7 @@ export async function PATCH(request: Request) {
       if (u.ref_price !== undefined) upd.ref_price = (u.ref_price === null || Number.isNaN(u.ref_price)) ? null : u.ref_price
       if (Object.keys(upd).length) await supabase.from('package_plan_prices').update(upd).eq('id', u.id)
     }
+    await bumpPackage(supabase, id)
     return NextResponse.json({ ok: true, updated: updates.length })
   }
 
@@ -33,6 +40,7 @@ export async function PATCH(request: Request) {
       if (u.bc_name_snapshot !== undefined) upd.bc_name_snapshot = u.bc_name_snapshot || null
       if (Object.keys(upd).length) await supabase.from('package_plans').update(upd).eq('id', u.id)
     }
+    await bumpPackage(supabase, id)
     return NextResponse.json({ ok: true, updated: planUpdates.length })
   }
 
@@ -40,11 +48,13 @@ export async function PATCH(request: Request) {
 }
 
 // DELETE — 移除套餐中的 BC 商品
-export async function DELETE(request: Request) {
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const { id } = await params
   const { plan_id } = await request.json()
   const supabase = createAdminClient()
   await supabase.from('package_plans').delete().eq('id', plan_id)
+  await bumpPackage(supabase, id)
   return NextResponse.json({ ok: true })
 }

@@ -4,7 +4,7 @@ import { Fragment, useState } from 'react'
 import { AlertTriangle, CheckCircle2, X } from 'lucide-react'
 
 export interface Account { id: string; name: string }
-export interface Cell { price: number | null; name: string }
+export interface Cell { price: number | null; name: string; code: string | null }
 export interface Row {
   key: string
   bc_sku_id: string | null
@@ -13,7 +13,7 @@ export interface Row {
   variation_sku: string | null
   spec: string
   byAcc: Record<string, Cell | null>
-  missing: boolean; priceDiff: boolean; nameDiff: boolean
+  missing: boolean; codeDiff: boolean; nameDiff: boolean
 }
 export interface Master {
   id: string
@@ -22,7 +22,7 @@ export interface Master {
   note: string | null
   perAcc: { id: string; name: string; count: number }[]
   rows: Row[]
-  issues: { missing: number; priceDiff: number; nameDiff: number }
+  issues: { missing: number; codeDiff: number; nameDiff: number }
   hasIssue: boolean
   empty: boolean
 }
@@ -31,7 +31,7 @@ export function issueBadges(m: Master) {
   if (m.empty) return [<span key="e" className="px-2 py-0.5 text-[11px] rounded-full bg-gray-100 text-gray-500">查無對應（主貨號未使用）</span>]
   const b = []
   if (m.issues.missing) b.push(<span key="m" className="px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">缺上架 {m.issues.missing}</span>)
-  if (m.issues.priceDiff) b.push(<span key="p" className="px-2 py-0.5 text-[11px] rounded-full bg-orange-100 text-orange-700">價格不一致 {m.issues.priceDiff}</span>)
+  if (m.issues.codeDiff) b.push(<span key="c" className="px-2 py-0.5 text-[11px] rounded-full bg-orange-100 text-orange-700">選項號不一致 {m.issues.codeDiff}</span>)
   if (m.issues.nameDiff) b.push(<span key="n" className="px-2 py-0.5 text-[11px] rounded-full bg-purple-100 text-purple-700">名稱不一致 {m.issues.nameDiff}</span>)
   return b
 }
@@ -55,7 +55,7 @@ export function CompareTable({ m, accounts }: { m: Master; accounts: Account[] }
         </thead>
         <tbody>
           {m.rows.map(r => {
-            const ok = !r.missing && !r.priceDiff && !r.nameDiff
+            const ok = !r.missing && !r.codeDiff && !r.nameDiff
             return (
               <tr key={r.key} className={`border-t border-gray-100 ${ok ? '' : 'bg-red-50/30'}`}>
                 <td className="px-4 py-2.5">
@@ -68,7 +68,10 @@ export function CompareTable({ m, accounts }: { m: Master; accounts: Account[] }
                     <td key={a.id} className="px-4 py-2.5 text-center">
                       {c ? (
                         <div>
-                          <span className={`font-medium ${r.priceDiff ? 'text-orange-600' : 'text-green-600'}`}>{c.price != null ? `NT$ ${c.price}` : '—'}</span>
+                          {c.code
+                            ? <div className={`text-[11px] font-mono truncate max-w-[170px] mx-auto ${r.codeDiff ? 'text-orange-600 font-semibold' : 'text-gray-700'}`}>{c.code}</div>
+                            : <span className="text-gray-300 text-xs">未對應</span>}
+                          <div className="text-[10px] text-gray-400">{c.price != null ? `NT$ ${c.price}` : '—'}</div>
                           {r.nameDiff && c.name && <div className="text-[10px] text-purple-500 truncate max-w-[140px] mx-auto">{c.name}</div>}
                         </div>
                       ) : <span className="text-gray-300 text-xs">未上架</span>}
@@ -85,7 +88,7 @@ export function CompareTable({ m, accounts }: { m: Master; accounts: Account[] }
                   ) : (
                     <div className="flex flex-col items-center gap-0.5">
                       {r.missing && <span className="px-2 py-0.5 text-[11px] rounded-full bg-amber-100 text-amber-700">缺上架</span>}
-                      {r.priceDiff && <span className="px-2 py-0.5 text-[11px] rounded-full bg-orange-100 text-orange-700">價格不一致</span>}
+                      {r.codeDiff && <span className="px-2 py-0.5 text-[11px] rounded-full bg-orange-100 text-orange-700">選項號不一致</span>}
                       {r.nameDiff && <span className="px-2 py-0.5 text-[11px] rounded-full bg-purple-100 text-purple-700">名稱不一致</span>}
                     </div>
                   )}
@@ -97,7 +100,7 @@ export function CompareTable({ m, accounts }: { m: Master; accounts: Account[] }
       </table>
       <div className="px-4 py-2.5 flex items-center gap-4 text-[11px] text-gray-400 border-t border-gray-100">
         <span className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-amber-500" /> 缺上架＝部分賣場未上架</span>
-        <span>價格/名稱不一致＝兩邊都上架但售價或規格名不同</span>
+        <span>選項號不一致＝兩邊都上架但對應的選項貨號不同（不比對價格）</span>
       </div>
     </div>
   )
