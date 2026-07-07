@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, QrCode, Copy, CheckCircle } from 'lucide-react'
+import { ArrowLeft, QrCode, Copy, CheckCircle, Truck, Package } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { formatPrice } from '@/lib/utils'
 import type { Order, OrderItem, EsimProfile } from '@/types'
@@ -13,6 +13,8 @@ export default function OrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null)
   const [items, setItems] = useState<OrderItem[]>([])
   const [esimProfiles, setEsimProfiles] = useState<EsimProfile[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [subOrders, setSubOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -26,6 +28,9 @@ export default function OrderDetailPage() {
 
       setOrder(orderRes.data)
       setItems(itemsRes.data || [])
+
+      const { data: subs } = await supabase.from('sub_orders').select('*').eq('order_id', orderId)
+      setSubOrders(subs || [])
 
       // 取得 eSIM profiles
       const itemIds = (itemsRes.data || []).map((i) => i.id)
@@ -61,6 +66,13 @@ export default function OrderDetailPage() {
       </div>
     )
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const o = order as any
+  const hasShipping = !!o?.shipping_address
+  const simSub = subOrders.find((s) => s.category === 'sim')
+  const SHIP_STATUS: Record<string, string> = { pending: '準備中', awaiting_card: '備貨中', card_assigned: '已配卡', shipping: '配送中', completed: '已送達' }
+  const shipLabel = SHIP_STATUS[simSub?.shipping_status || simSub?.status || ''] || '配送中'
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -141,20 +153,54 @@ export default function OrderDetailPage() {
               )}
 
               {!profile && (
-                <div className="mt-4 p-3 bg-muted rounded-lg text-sm text-muted-foreground text-center">
-                  eSIM 正在準備中，稍後將自動顯示
-                </div>
+                hasShipping ? (
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-700 flex items-center gap-2">
+                    <Package className="w-4 h-4" />實體 SIM 卡，將寄送至下方收件地址
+                  </div>
+                ) : (
+                  <div className="mt-4 p-3 bg-muted rounded-lg text-sm text-muted-foreground text-center">
+                    eSIM 正在準備中，稍後將自動顯示
+                  </div>
+                )
               )}
             </div>
           )
         })}
       </div>
 
+      {/* 實體 SIM 配送 / 物流資訊 */}
+      {hasShipping && (
+        <div className="mt-6 border border-border rounded-xl p-5">
+          <div className="font-medium flex items-center gap-2"><Truck className="w-4 h-4 text-primary" />配送資訊</div>
+          <div className="mt-3 space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">收件人</span><span>{o.shipping_name || '—'}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">聯絡電話</span><span>{o.shipping_phone || '—'}</span></div>
+            <div className="flex justify-between gap-4"><span className="text-muted-foreground shrink-0">收件地址</span><span className="text-right">{o.shipping_address || '—'}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">物流商</span><span>黑貓宅急便</span></div>
+            {simSub?.tracking_number && <div className="flex justify-between"><span className="text-muted-foreground">物流追蹤號碼</span><span className="font-mono">{simSub.tracking_number}</span></div>}
+            <div className="flex justify-between"><span className="text-muted-foreground">配送狀態</span><span className="text-primary font-medium">{shipLabel}</span></div>
+          </div>
+        </div>
+      )}
+
       {/* Total */}
       <div className="mt-6 p-4 bg-muted rounded-lg flex items-center justify-between">
         <span className="font-medium">合計</span>
         <span className="text-xl font-bold text-primary">{formatPrice(order.total_amount)}</span>
       </div>
+
+      {/* 售後 / 退款入口 */}
+      <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end">
+        <Link href={`/after-sale?order=${order.order_number}`}
+          className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-medium hover:opacity-90">
+          申請售後 / 退款
+        </Link>
+        <Link href="/contact"
+          className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
+          聯絡客服
+        </Link>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground text-right">退款依「退換貨政策」辦理；eSIM 未安裝者可於效期內申請。</p>
     </div>
   )
 }

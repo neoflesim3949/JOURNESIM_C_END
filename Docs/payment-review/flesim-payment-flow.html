@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<title>FLESIM 完整支付及交付鏈路</title>
+<style>
+  :root{ --brand:#0d9488; --brand2:#0f766e; --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --bg:#f9fafb; }
+  *{ box-sizing:border-box; font-family:-apple-system,"PingFang TC","Noto Sans TC","Segoe UI",Roboto,sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  @page{ size:A4; margin:12mm; }
+  body{ margin:0; color:var(--ink); background:#fff; }
+  .screen{ page-break-after:always; padding-bottom:8px; }
+  .screen:last-child{ page-break-after:auto; }
+  .cap{ font-size:13px; color:var(--muted); margin:0 0 8px; }
+  .cap b{ color:var(--brand2); }
+  h1.cap-title{ font-size:16px; margin:0 0 10px; color:var(--ink); }
+  /* browser chrome frame */
+  .win{ border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.05); page-break-inside:avoid; }
+  .bar{ background:#f3f4f6; border-bottom:1px solid var(--line); padding:8px 12px; display:flex; align-items:center; gap:8px; }
+  .dot{ width:10px; height:10px; border-radius:50%; }
+  .url{ flex:1; background:#fff; border:1px solid var(--line); border-radius:6px; font-size:11px; color:var(--muted); padding:3px 8px; margin-left:6px; }
+  .top{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--line); }
+  .logo{ font-weight:800; color:var(--brand); letter-spacing:.5px; font-size:18px; }
+  .nav{ display:flex; gap:16px; font-size:12px; color:var(--muted); }
+  .cur{ font-size:12px; border:1px solid var(--line); border-radius:6px; padding:3px 8px; color:var(--ink); }
+  .body{ padding:16px; background:var(--bg); }
+  .grid{ display:grid; gap:10px; }
+  .g3{ grid-template-columns:repeat(3,1fr); }
+  .g2{ grid-template-columns:repeat(2,1fr); }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .flag{ font-size:26px; }
+  .muted{ color:var(--muted); }
+  .sm{ font-size:12px; }
+  .xs{ font-size:11px; }
+  .price{ color:var(--brand2); font-weight:700; }
+  .btn{ display:inline-block; background:var(--brand); color:#fff; border-radius:8px; padding:9px 16px; font-size:13px; font-weight:600; text-align:center; }
+  .btn.block{ display:block; }
+  .btn.ghost{ background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  .pill{ display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px; }
+  .pill.teal{ background:#ccfbf1; color:#0f766e; }
+  .pill.blue{ background:#dbeafe; color:#1d4ed8; }
+  .pill.amber{ background:#fef3c7; color:#b45309; }
+  .pill.green{ background:#dcfce7; color:#15803d; }
+  .row{ display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+  .row:last-child{ border-bottom:0; }
+  .field{ margin:10px 0; }
+  .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .input{ border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-size:13px; background:#fff; }
+  .phone{ max-width:300px; margin:0 auto; border:1px solid var(--line); border-radius:18px; overflow:hidden; background:#fff; }
+  .tabs{ display:flex; gap:8px; }
+  .tab{ flex:1; text-align:center; font-size:12px; padding:7px; border-radius:8px; border:1px solid var(--line); }
+  .tab.on{ border-color:var(--brand); background:#f0fdfa; color:var(--brand2); font-weight:600; }
+  .qr{ width:150px; height:150px; }
+  .timeline{ position:relative; padding-left:16px; }
+  .tl{ position:relative; padding:0 0 12px 12px; border-left:2px solid var(--line); font-size:12px; }
+  .tl::before{ content:""; position:absolute; left:-6px; top:2px; width:10px; height:10px; border-radius:50%; background:var(--brand); }
+  .tl.off::before{ background:#d1d5db; }
+  .lock{ font-size:11px; color:#15803d; }
+  .cover{ text-align:center; padding-top:70px; }
+  .cover h1{ font-size:30px; color:var(--brand); margin:0; }
+  .cover .sub{ color:var(--muted); margin-top:10px; font-size:14px; }
+  table.meta{ margin:36px auto 0; border-collapse:collapse; font-size:13px; }
+  table.meta td{ border:1px solid var(--line); padding:8px 14px; text-align:left; }
+  table.meta td:first-child{ color:var(--muted); background:var(--bg); }
+</style>
+</head>
+<body>
+
+<!-- 封面 -->
+<section class="screen">
+  <div class="cover">
+    <h1>FLESIM</h1>
+    <div class="sub">完整支付及交付鏈路截圖（eSIM 與實體 SIM）</div>
+    <div class="sub">Payment &amp; Delivery Flow — Review Submission</div>
+    <table class="meta">
+      <tr><td>商戶</td><td>飛訊移動科技有限公司（FLESIM.COM, INC.）</td></tr>
+      <tr><td>網域</td><td>flesim.com</td></tr>
+      <tr><td>商品類型</td><td>eSIM（全球）／實體 SIM 卡（台灣境內配送）</td></tr>
+      <tr><td>金流</td><td>TapPay 信用卡收單（支援 3D Secure）</td></tr>
+      <tr><td>提交日期</td><td>2026/07/06</td></tr>
+    </table>
+    <p class="sm muted" style="margin-top:40px">本文件逐頁呈現：選擇目的地 → 選擇 eSIM／實體 SIM 套餐 → 價格與幣種 → 填寫 email／收件資料 → 訂單確認 → 卡支付 → 3DS 驗證 → 支付成功 → eSIM QR 交付／實體 SIM 物流 → 訂單查詢 → 售後與退款入口。</p>
+  </div>
+</section>
+
+<!-- 1 目的地 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 1 — 選擇目的地國家/地區</h1>
+  <p class="cap">用戶於商城首頁選擇要前往的國家或地區；右上角可切換顯示<b>幣別（TWD／USD／HKD）</b>。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/shop</span></div>
+    <div class="top"><span class="logo">FLESIM</span><div class="nav"><span>商城</span><span>訂單查詢</span><span>幫助中心</span></div><span class="cur">TWD ▾</span></div>
+    <div class="body">
+      <div class="card" style="margin-bottom:10px"><span class="muted sm">🔍 搜尋國家 / 地區…</span></div>
+      <div class="sm muted" style="margin-bottom:8px">熱門目的地　·　亞洲　·　歐洲　·　美洲　·　全球</div>
+      <div class="grid g3">
+        <div class="card"><div class="flag">🇯🇵</div><div style="font-weight:600">日本</div><div class="xs muted">eSIM · 實體SIM</div><div class="sm price">起 NT$149</div></div>
+        <div class="card"><div class="flag">🇰🇷</div><div style="font-weight:600">韓國</div><div class="xs muted">eSIM · 實體SIM</div><div class="sm price">起 NT$139</div></div>
+        <div class="card"><div class="flag">🇹🇭</div><div style="font-weight:600">泰國</div><div class="xs muted">eSIM</div><div class="sm price">起 NT$119</div></div>
+        <div class="card"><div class="flag">🇸🇬</div><div style="font-weight:600">新加坡</div><div class="xs muted">eSIM</div><div class="sm price">起 NT$129</div></div>
+        <div class="card"><div class="flag">🇺🇸</div><div style="font-weight:600">美國</div><div class="xs muted">eSIM</div><div class="sm price">起 NT$199</div></div>
+        <div class="card"><div class="flag">🇬🇧</div><div style="font-weight:600">英國</div><div class="xs muted">eSIM</div><div class="sm price">起 NT$189</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 選套餐 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 2 — 選擇 eSIM 或實體 SIM 套餐（含流量／天數）</h1>
+  <p class="cap">進入國家頁後切換 <b>eSIM／實體 SIM</b>，並選擇流量與天數方案。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/shop/JP</span></div>
+    <div class="top"><span class="logo">FLESIM</span><div class="nav"><span>商城</span><span>訂單查詢</span></div><span class="cur">TWD ▾</span></div>
+    <div class="body">
+      <div style="font-weight:700;margin-bottom:8px">🇯🇵 日本 上網方案</div>
+      <div class="tabs" style="margin-bottom:12px"><div class="tab on">eSIM（掃碼安裝）</div><div class="tab">實體 SIM 卡</div></div>
+      <div class="sm muted" style="margin-bottom:6px">天數：<span class="pill teal">3 天</span> <span class="pill" style="background:#eef2ff;color:#4338ca">5 天</span> <span class="pill" style="background:#eef2ff;color:#4338ca">7 天</span></div>
+      <div class="grid g2">
+        <div class="card"><div style="font-weight:600">每日高速 1GB 吃到飽</div><div class="xs muted">5 天 · 每日 1GB 後降速</div><div class="price" style="margin-top:6px">NT$349</div></div>
+        <div class="card" style="border-color:var(--brand)"><div style="font-weight:600">每日高速 3GB 吃到飽 <span class="pill green">熱門</span></div><div class="xs muted">5 天 · 每日 3GB 後降速</div><div class="price" style="margin-top:6px">NT$450</div></div>
+        <div class="card"><div style="font-weight:600">高速吃到飽不限速</div><div class="xs muted">5 天 · 全程高速不降速</div><div class="price" style="margin-top:6px">NT$690</div></div>
+        <div class="card"><div style="font-weight:600">總量 10GB</div><div class="xs muted">效期 30 天 · 總量 10GB</div><div class="price" style="margin-top:6px">NT$520</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 價格與幣種 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 3 — 價格及幣種展示</h1>
+  <p class="cap">商品頁清楚展示<b>價格與幣別</b>，可切換 TWD／USD／HKD，並顯示約當外幣金額。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/shop/JP/esim-daily-3gb-5d</span></div>
+    <div class="top"><span class="logo">FLESIM</span><div class="nav"><span>商城</span></div><span class="cur">TWD ▾ · USD · HKD</span></div>
+    <div class="body">
+      <div class="card">
+        <div style="font-weight:700">日本 eSIM · 每日高速 3GB 吃到飽 · 5 天</div>
+        <div class="sm muted" style="margin:4px 0 10px">🇯🇵 日本　·　eSIM 掃碼安裝　·　支援 5G/4G</div>
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <div class="price" style="font-size:26px">NT$450</div>
+          <div class="sm muted">≈ USD 13.90　/　HKD 108</div>
+        </div>
+        <div class="sm muted" style="margin:6px 0 12px">幣別：<span class="pill teal">TWD</span> <span class="pill blue">USD</span> <span class="pill amber">HKD</span>（結帳幣別以此為準）</div>
+        <div style="display:flex;gap:8px"><span class="btn ghost">加入購物車</span><span class="btn">立即購買</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4a email (eSIM) -->
+<section class="screen">
+  <h1 class="cap-title">步驟 4A — 填寫 email（eSIM 交付用）</h1>
+  <p class="cap">eSIM 商品於結帳時填寫 <b>email</b>；付款完成後 QR Code 將寄送至此信箱。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/checkout</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="cur">結帳 · TWD</span></div>
+    <div class="body">
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px">聯絡資訊（eSIM 寄送）</div>
+        <div class="field"><label>電子郵件 Email</label><div class="input">traveler@example.com</div></div>
+        <div class="xs muted">您的 eSIM 安裝 QR Code 與訂單明細將寄送至此信箱，請確認正確。</div>
+        <div class="field"><label>持有人姓名</label><div class="input">王小明</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4b shipping (SIM) -->
+<section class="screen">
+  <h1 class="cap-title">步驟 4B — 填寫收件資料（實體 SIM 配送用）</h1>
+  <p class="cap">實體 SIM 商品於結帳時填寫<b>台灣收件地址</b>（實體卡僅限台灣境內配送）。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/checkout</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="cur">結帳 · TWD</span></div>
+    <div class="body">
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px">收件資訊（實體 SIM 宅配）</div>
+        <div class="grid g2">
+          <div class="field"><label>收件人</label><div class="input">王小明</div></div>
+          <div class="field"><label>手機</label><div class="input">0912-345-678</div></div>
+        </div>
+        <div class="field"><label>收件地址（限台灣）</label><div class="input">桃園市蘆竹區南崁路 265 號 6 樓之 6</div></div>
+        <div class="field"><label>Email（訂單通知）</label><div class="input">traveler@example.com</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 訂單確認 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 5 — 訂單確認頁</h1>
+  <p class="cap">結帳前呈現<b>商品、數量、幣別、金額明細與總計</b>供用戶確認。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/checkout#confirm</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="cur">TWD</span></div>
+    <div class="body">
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px">訂單明細</div>
+        <div class="row"><span>日本 eSIM · 每日 3GB 吃到飽 · 5 天 × 1</span><span>NT$450</span></div>
+        <div class="row"><span>幣別</span><span>TWD（新台幣）</span></div>
+        <div class="row"><span>小計</span><span>NT$450</span></div>
+        <div class="row"><span>優惠折抵</span><span>- NT$0</span></div>
+        <div class="row" style="font-weight:700"><span>應付總計</span><span class="price">NT$450</span></div>
+        <div class="xs muted" style="margin-top:8px">交付方式：eSIM QR Code 寄送至 traveler@example.com</div>
+        <div class="btn block" style="margin-top:12px">前往付款</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 卡支付 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 6 — 信用卡支付頁</h1>
+  <p class="cap">透過 TapPay 安全收單，SSL 加密；輸入卡號、到期日、安全碼。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">🔒 https://flesim.com/checkout/pay</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="lock">🔒 SSL 加密 · TapPay</span></div>
+    <div class="body">
+      <div class="card" style="max-width:360px;margin:0 auto">
+        <div style="font-weight:600;margin-bottom:8px">信用卡付款　<span class="xs muted">應付 NT$450</span></div>
+        <div class="field"><label>卡號</label><div class="input">4242 4242 4242 4242　VISA</div></div>
+        <div class="grid g2">
+          <div class="field"><label>有效期限</label><div class="input">12 / 28</div></div>
+          <div class="field"><label>安全碼 CVV</label><div class="input">•••</div></div>
+        </div>
+        <div class="btn block" style="margin-top:6px">確認付款 NT$450</div>
+        <div class="xs muted" style="text-align:center;margin-top:8px">本頁不儲存完整卡號，卡片資訊由 TapPay 加密處理</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 3DS -->
+<section class="screen">
+  <h1 class="cap-title">步驟 7 — 3D Secure 驗證</h1>
+  <p class="cap">導向發卡銀行 3DS 頁面，輸入簡訊一次性驗證碼（OTP）完成身分驗證。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">🔒 https://acs.bank.example/3ds/verify</span></div>
+    <div class="top"><span style="font-weight:700">🏦 發卡銀行 3D Secure</span><span class="lock">🔒 安全驗證</span></div>
+    <div class="body">
+      <div class="card" style="max-width:360px;margin:0 auto;text-align:center">
+        <div style="font-weight:600">交易驗證</div>
+        <div class="sm muted" style="margin:6px 0">商戶：FLESIM　金額：NT$450<br>卡號末四碼：4242</div>
+        <div class="sm" style="margin:10px 0">我們已發送一次性驗證碼至您的手機 09**-***-678</div>
+        <div class="field"><label>簡訊驗證碼 (OTP)</label><div class="input" style="letter-spacing:6px;text-align:center">● ● ● ● ● ●</div></div>
+        <div class="btn block">送出驗證</div>
+        <div class="xs muted" style="margin-top:8px">請勿將驗證碼提供給任何人</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 支付成功 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 8 — 支付成功</h1>
+  <p class="cap">付款完成，顯示<b>訂單編號</b>與金額，並提示交付方式。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/payment/result?status=success</span></div>
+    <div class="top"><span class="logo">FLESIM</span></div>
+    <div class="body">
+      <div class="card" style="max-width:360px;margin:0 auto;text-align:center">
+        <div style="width:56px;height:56px;border-radius:50%;background:#dcfce7;color:#16a34a;font-size:30px;line-height:56px;margin:0 auto">✓</div>
+        <div style="font-weight:700;margin-top:8px">付款成功</div>
+        <div class="row" style="margin-top:8px"><span>訂單編號</span><span>FL2026070600123</span></div>
+        <div class="row"><span>付款金額</span><span class="price">NT$450</span></div>
+        <div class="row"><span>付款方式</span><span>信用卡 VISA ****4242</span></div>
+        <div class="xs muted" style="margin-top:8px">eSIM QR Code 已寄送至 traveler@example.com</div>
+        <div style="display:flex;gap:8px;margin-top:12px"><span class="btn ghost">查看訂單</span><span class="btn">安裝 eSIM</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 9 eSIM 交付 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 9 — eSIM 交付：QR Code 發送／訂單詳情</h1>
+  <p class="cap">訂單詳情頁展示 <b>eSIM QR Code</b>、ICCID 與安裝說明；同時寄送至 email。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/orders/FL2026070600123</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="cur">訂單詳情</span></div>
+    <div class="body">
+      <div class="card" style="display:flex;gap:16px;align-items:center">
+        <svg class="qr" viewBox="0 0 21 21" shape-rendering="crispEdges">
+          <rect width="21" height="21" fill="#fff"/>
+          <g fill="#111827">
+            <rect x="0" y="0" width="7" height="7"/><rect x="1" y="1" width="5" height="5" fill="#fff"/><rect x="2" y="2" width="3" height="3"/>
+            <rect x="14" y="0" width="7" height="7"/><rect x="15" y="1" width="5" height="5" fill="#fff"/><rect x="16" y="2" width="3" height="3"/>
+            <rect x="0" y="14" width="7" height="7"/><rect x="1" y="15" width="5" height="5" fill="#fff"/><rect x="2" y="16" width="3" height="3"/>
+            <rect x="9" y="0" width="1" height="1"/><rect x="11" y="0" width="1" height="1"/><rect x="9" y="2" width="1" height="1"/><rect x="12" y="1" width="1" height="1"/>
+            <rect x="9" y="4" width="1" height="1"/><rect x="11" y="3" width="1" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="10" y="6" width="1" height="1"/><rect x="12" y="5" width="1" height="1"/>
+            <rect x="0" y="9" width="1" height="1"/><rect x="2" y="9" width="1" height="1"/><rect x="4" y="9" width="1" height="1"/><rect x="6" y="10" width="1" height="1"/>
+            <rect x="9" y="9" width="1" height="1"/><rect x="11" y="10" width="1" height="1"/><rect x="13" y="9" width="1" height="1"/><rect x="10" y="11" width="1" height="1"/><rect x="12" y="12" width="1" height="1"/>
+            <rect x="15" y="9" width="1" height="1"/><rect x="17" y="10" width="1" height="1"/><rect x="19" y="9" width="1" height="1"/><rect x="16" y="11" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/><rect x="20" y="11" width="1" height="1"/>
+            <rect x="9" y="14" width="1" height="1"/><rect x="11" y="15" width="1" height="1"/><rect x="13" y="14" width="1" height="1"/><rect x="10" y="16" width="1" height="1"/><rect x="12" y="17" width="1" height="1"/><rect x="9" y="18" width="1" height="1"/><rect x="11" y="19" width="1" height="1"/><rect x="13" y="18" width="1" height="1"/>
+            <rect x="15" y="15" width="1" height="1"/><rect x="17" y="16" width="1" height="1"/><rect x="19" y="15" width="1" height="1"/><rect x="16" y="18" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/><rect x="20" y="17" width="1" height="1"/>
+          </g>
+        </svg>
+        <div>
+          <span class="pill green">已發送 · eSIM</span>
+          <div style="font-weight:600;margin-top:6px">日本 eSIM · 每日 3GB · 5 天</div>
+          <div class="sm muted" style="margin-top:4px">ICCID：8988 6019 0000 0123 456</div>
+          <div class="sm muted">安裝方式：掃描 QR 或手動輸入 LPA 啟用碼</div>
+          <div class="xs muted" style="margin-top:6px">QR Code 已寄至 traveler@example.com</div>
+          <div class="btn" style="margin-top:8px">安裝教學</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 實體 SIM 物流 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 10 — 實體 SIM 交付：物流資訊／出貨狀態</h1>
+  <p class="cap">實體 SIM 訂單顯示<b>出貨狀態、物流商與追蹤號碼</b>及配送進度。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/orders/FL2026070600188</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="cur">訂單詳情</span></div>
+    <div class="body">
+      <div class="card">
+        <span class="pill blue">實體 SIM · 已出貨</span>
+        <div style="font-weight:600;margin:6px 0">日本 5G SIM 卡 · 每日 3GB · 5 天 × 1</div>
+        <div class="row"><span>物流商</span><span>黑貓宅急便</span></div>
+        <div class="row"><span>追蹤號碼</span><span>9012-3456-7890</span></div>
+        <div class="row"><span>收件地址</span><span>桃園市蘆竹區南崁路 265 號 6F-6</span></div>
+        <div style="margin-top:12px">
+          <div class="tl">已下單 · 2026/07/06 10:12</div>
+          <div class="tl">已付款 · 2026/07/06 10:13</div>
+          <div class="tl">已出貨（桃園物流中心）· 2026/07/06 18:40</div>
+          <div class="tl off" style="border-color:#e5e7eb">配送中 · 預計 07/07 送達</div>
+          <div class="tl off" style="border-left:0">已送達</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 訂單查詢 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 11 — 訂單查詢入口</h1>
+  <p class="cap">會員中心「訂單查詢」列出所有訂單與狀態，可點入查看明細。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/orders</span></div>
+    <div class="top"><span class="logo">FLESIM</span><div class="nav"><span style="color:var(--brand2);font-weight:600">訂單查詢</span><span>會員中心</span></div></div>
+    <div class="body">
+      <div class="card" style="margin-bottom:10px"><div style="display:flex;justify-content:space-between"><div><div style="font-weight:600">FL2026070600123</div><div class="xs muted">日本 eSIM · 每日3GB · 5天</div></div><div style="text-align:right"><span class="pill green">已完成</span><div class="sm price">NT$450</div></div></div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between"><div><div style="font-weight:600">FL2026070600188</div><div class="xs muted">日本 5G SIM 卡 · 每日3GB · 5天</div></div><div style="text-align:right"><span class="pill blue">已出貨</span><div class="sm price">NT$490</div></div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 售後/退款 -->
+<section class="screen">
+  <h1 class="cap-title">步驟 12 — 售後申請及退款入口</h1>
+  <p class="cap">訂單詳情內提供<b>「申請售後／退款」</b>入口，選擇事由後送出申請。</p>
+  <div class="win">
+    <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span><span class="url">https://flesim.com/after-sale?order=FL2026070600123</span></div>
+    <div class="top"><span class="logo">FLESIM</span><span class="cur">售後服務</span></div>
+    <div class="body">
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px">申請售後 / 退款</div>
+        <div class="row"><span>訂單編號</span><span>FL2026070600123</span></div>
+        <div class="row"><span>商品</span><span>日本 eSIM · 每日3GB · 5天</span></div>
+        <div class="field"><label>申請類型</label><div class="input">退款申請　▾（退款 / 無法安裝 / 與描述不符 / 其他）</div></div>
+        <div class="field"><label>問題說明</label><div class="input" style="height:48px">未安裝，欲申請退款…</div></div>
+        <div style="display:flex;gap:8px"><span class="btn ghost">聯絡客服</span><span class="btn">送出申請</span></div>
+        <div class="xs muted" style="margin-top:8px">退款依「退換貨政策」辦理；eSIM 未安裝者可於效期內申請。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

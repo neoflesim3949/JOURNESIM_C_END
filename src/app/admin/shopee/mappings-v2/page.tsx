@@ -256,6 +256,17 @@ export default function ShopeeMappingsV2Page() {
     try { localStorage.removeItem('v2_alert_dismissed') } catch {}
   }
 
+  // 重設全部「已調整」標記
+  async function resetAdjusted() {
+    if (!accountId) return
+    if (!confirm('確定清除此帳號所有商品的「已調整」標記？')) return
+    await fetch('/api/admin/shopee/mappings-v2/adjusted', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId }),
+    })
+    setProductAdjusted({})
+  }
+
   // 確認 BC 變更：把該商品所有已變更選項的快照更新成現況，清除紅色警示
   async function resnapshotProduct() {
     if (!current || !accountId) return
@@ -295,7 +306,9 @@ export default function ShopeeMappingsV2Page() {
       if (ov) { const i = ov.indexOf(s1); if (i !== -1) return i }
       const saved = dataIdxByProd.get(pid)?.get(s1)
       if (saved != null) return saved
-      return firstSeen.get(pid)?.get(s1) ?? 9999
+      // 沒有已存排序（例如之後才匯入的新數據量）一律排在已排序之後，
+      // 避免與既有 0 起算的索引碰撞而打亂手動排序
+      return 1_000_000 + (firstSeen.get(pid)?.get(s1) ?? 9999)
     }
     list.sort((a, b) => {
       const pa = prodIndex.get(pidOf(a)) ?? 9999, pb = prodIndex.get(pidOf(b)) ?? 9999
@@ -472,7 +485,13 @@ export default function ShopeeMappingsV2Page() {
     for (const s of specOrders) {
       if (s.product_id === current.id && s.spec_type === 'data') savedIdx.set(s.spec_value, s.sort_index)
     }
-    const rank = (s1: string) => override ? (override.indexOf(s1) === -1 ? 9999 : override.indexOf(s1)) : (savedIdx.get(s1) ?? 9999)
+    // 新匯入、尚無排序的數據量 → 依首見順序接在已排序之後（groups 本身即首見序）
+    const firstSeenIdx = new Map(groups.map((g, i) => [g.spec1, i]))
+    const rank = (s1: string) => {
+      if (override) { const i = override.indexOf(s1); return i === -1 ? 1_000_000 + (firstSeenIdx.get(s1) ?? 0) : i }
+      const s = savedIdx.get(s1)
+      return s != null ? s : 1_000_000 + (firstSeenIdx.get(s1) ?? 0)
+    }
     return [...groups].sort((a, b) => rank(a.spec1) - rank(b.spec1))
   }, [groups, orderOverride, specOrders, current])
 
@@ -633,6 +652,10 @@ export default function ShopeeMappingsV2Page() {
                 <button onClick={resetAlerts} title="把忽略的紅卡警示全部還原"
                   className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">重設警示 ({Object.keys(dismissedAlerts).length})</button>
               )}
+              {Object.keys(productAdjusted).length > 0 && (
+                <button onClick={resetAdjusted} title="清除此帳號所有商品的「已調整」標記"
+                  className="px-3 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">重設已調整 ({Object.keys(productAdjusted).length})</button>
+              )}
               <span className="text-gray-300">|</span>
               {selectedProducts.size > 0 && (
                 <>
@@ -690,8 +713,9 @@ export default function ShopeeMappingsV2Page() {
                     {!p.id.startsWith('__') && (
                       <div className="mt-2 flex items-center gap-2" onClick={e => e.stopPropagation()}>
                         <button onClick={() => markAdjusted(p.id)}
-                          className="px-2 py-0.5 text-[11px] rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium">已調整</button>
-                        {productAdjusted[p.id] && <span className="text-[11px] text-gray-400">{new Date(productAdjusted[p.id]).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</span>}
+                          className="px-2 py-0.5 text-[11px] rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium">
+                          已調整{productAdjusted[p.id] ? ` · ${new Date(productAdjusted[p.id]).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}` : ''}
+                        </button>
                       </div>
                     )}
                     {removedCount > 0 && (

@@ -133,7 +133,7 @@ export function Footer() {
                 <li><Link href="/guide" className="hover:text-white transition-colors">安裝教學</Link></li>
                 <li><Link href="/guide#faq" className="hover:text-white transition-colors">常見問題</Link></li>
                 <li><Link href="/guide" className="hover:text-white transition-colors">幫助中心</Link></li>
-                <li><a href="mailto:support@flesim.com" className="hover:text-white transition-colors">聯絡我們</a></li>
+                <li><Link href="/contact" className="hover:text-white transition-colors">聯絡我們</Link></li>
               </ul>
               <div className="mt-4 flex flex-wrap gap-3">
                 {SOCIAL_LINKS.map((social) => (

@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="utf-8">
+  <title>FLESIM 完整支付及交付鏈路</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    @page {
+      size: A4;
+      margin: 10mm;
+    }
+
+    body {
+      margin: 0;
+      color: #111827;
+    }
+
+    .page {
+      page-break-after: always;
+      text-align: center;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+    }
+
+    .cap {
+      font-size: 13px;
+      color: #0f766e;
+      font-weight: 600;
+      margin: 0 0 6px;
+      text-align: left;
+    }
+
+    .sub {
+      font-size: 11px;
+      color: #6b7280;
+      margin: 0 0 8px;
+      text-align: left;
+    }
+
+    img.shot {
+      max-width: 100%;
+      max-height: 250mm;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      box-shadow: 0 1px 6px rgba(0, 0, 0, .06);
+    }
+
+    .cover {
+      text-align: center;
+      padding-top: 70px;
+    }
+
+    .cover h1 {
+      color: #0d9488;
+      font-size: 30px;
+      margin: 0;
+    }
+
+    .cover .s {
+      color: #6b7280;
+      margin-top: 8px;
+      font-size: 14px;
+    }
+
+    table.meta {
+      margin: 28px auto 0;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    table.meta td {
+      border: 1px solid #e5e7eb;
+      padding: 8px 14px;
+      text-align: left;
+    }
+
+    table.meta td:first-child {
+      color: #6b7280;
+      background: #f9fafb;
+    }
+
+    .note {
+      max-width: 540px;
+      margin: 24px auto 0;
+      font-size: 12px;
+      color: #6b7280;
+      text-align: left;
+      line-height: 1.7;
+    }
+
+    /* mock / note 頁 */
+    .frame {
+      max-width: 420px;
+      margin: 20px auto 0;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .fhead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .logo {
+      font-weight: 800;
+      color: #4f46e5;
+    }
+
+    .fbody {
+      padding: 28px 20px;
+    }
+
+    .icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      font-size: 34px;
+      line-height: 64px;
+      margin: 0 auto;
+    }
+
+    .ok {
+      background: #dcfce7;
+      color: #16a34a;
+    }
+
+    .no {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      padding: 7px 0;
+      border-bottom: 1px dashed #eee;
+    }
+
+    .btn {
+      display: block;
+      margin-top: 16px;
+      background: #4f46e5;
+      color: #fff;
+      border-radius: 9px;
+      padding: 11px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .btn.no {
+      background: #dc2626;
+    }
+
+    .infobox {
+      max-width: 520px;
+      margin: 16px auto 0;
+      border: 1px solid #fde68a;
+      background: #fffbeb;
+      color: #92400e;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 13px;
+      text-align: left;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+
+<body>
+
+  <section class="page">
+    <div class="cover">
+      <h1>FLESIM</h1>
+      <div class="s">完整支付及交付鏈路 — 逐頁截圖</div>
+      <div class="s">Payment &amp; Delivery Flow — Review Submission</div>
+      <table class="meta">
+        <tr>
+          <td>商戶</td>
+          <td>Flesim.com HK Limited（飛訊移動科技有限公司）</td>
+        </tr>
+        <tr>
+          <td>網域</td>
+          <td>flesim.com</td>
+        </tr>
+        <tr>
+          <td>商品</td>
+          <td>eSIM（虛擬）與實體 SIM 卡</td>
+        </tr>
+        <tr>
+          <td>金流</td>
+          <td>尚未串接真實金流</td>
+        </tr>
+        <tr>
+          <td>測試帳號</td>
+          <td>systest@flesim.com</td>
+        </tr>
+        <tr>
+          <td>截圖日期</td>
+          <td>2026/07/06</td>
+        </tr>
+      </table>
+      <div class="note">
+        本文件以測試帳號實際操作，逐頁擷取 FLESIM 網站<b>真實畫面</b>：選擇目的地 → 選擇 eSIM／實體 SIM 套餐與價格幣種 → 購物車 → 結帳（填寫 email／收件資料 + 信用卡支付）→ 支付結果 →
+        虛擬 eSIM 交付（QR）／實體 SIM 交付（物流）→ 訂單查詢 → 售後及退款入口。<br><br>
+        其中「支付成功／失敗」頁為示意（mock）；「3D Secure」因尚未串接真實金流，附說明頁替代。其餘均為真站截圖。
+      </div>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="cap">步驟 1 — 選擇目的地國家/地區</div>
+    <div class="sub">首頁選擇國家；右上角可切換幣別（USD / TWD / HKD）。</div><img class="shot" src="shots/01-shop.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">步驟 2 · 3 — 選擇 eSIM／實體 SIM 套餐（流量·天數）與價格幣種</div>
+    <div class="sub">可切換 eSIM／SIM 卡分頁，逐一列出電信商方案與起價（幣別）。</div><img class="shot" src="shots/02-packages.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">步驟 — 購物車（價格及幣種展示）</div>
+    <div class="sub">購物車依 eSIM／SIM 分區顯示商品、方案、價格與數量、合計。</div><img class="shot" src="shots/03-cart.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">步驟 4 · 6 — 填寫 email／收件資料 + 信用卡支付</div>
+    <div class="sub">結帳頁填寫 email（eSIM）與收件地址（實體 SIM），並輸入信用卡卡號、到期日、CCV。</div><img class="shot"
+      src="shots/04-checkout.png">
+  </section>
+
+  <!-- 3DS 說明頁 -->
+  <section class="page">
+    <div class="cap">步驟 7 — 3D Secure 驗證</div>
+    <div class="sub">信用卡付款送出後，導向發卡銀行 3D Secure 進行持卡人身分驗證。</div>
+    <div class="infobox">
+      <b>說明</b>：本商戶目前<b>尚未串接真實金流</b>之 3D Secure（發卡行驗證）頁面，故暫<b>無實際 3DS 頁面可供展示</b>；信用卡付款頁（含 3DS
+      導向機制）如前頁所示。待金流正式串接完成後，將補送實際 3D Secure 驗證頁截圖。
+    </div>
+  </section>
+
+  <!-- 支付成功（真站框架） -->
+  <section class="page">
+    <div class="cap">步驟 8 — 支付成功（示意）</div>
+    <div class="sub">付款完成後於網站顯示付款成功與訂單編號，可查看訂單。</div><img class="shot" src="shots/04b-pay-success.png">
+  </section>
+
+  <!-- 支付失敗（真站框架） -->
+  <section class="page">
+    <div class="cap">步驟 8b — 支付失敗（示意）</div>
+    <div class="sub">付款未成功時於網站顯示付款失敗，可返回選購重試。</div><img class="shot" src="shots/04c-pay-failed.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">交付（虛擬）— eSIM QR Code / 訂單詳情</div>
+    <div class="sub">訂單詳情展示 eSIM 安裝 QR、SM-DP+ 位址與啟用碼（並寄送至 email）。</div><img class="shot" src="shots/06-order-esim.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">交付（實體）— 實體 SIM 配送 / 物流資訊</div>
+    <div class="sub">實體 SIM 訂單展示收件資訊、物流商、追蹤號碼與配送狀態；下方含售後退款入口。</div><img class="shot" src="shots/07-order-sim.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">步驟 — 訂單查詢入口</div>
+    <div class="sub">會員中心「訂單查詢」列出所有訂單與狀態。</div><img class="shot" src="shots/05-orders.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">步驟 — 售後申請及退款入口</div>
+    <div class="sub">訂單詳情提供「申請售後 / 退款」入口，導向售後申請頁。</div><img class="shot" src="shots/08-after-sale.png">
+  </section>
+
+  <section class="page">
+    <div class="cap">會員中心 / 帳號</div>
+    <div class="sub">會員可於會員中心管理訂單、卡片與帳號。</div><img class="shot" src="shots/09-account.png">
+  </section>
+
+</body>
+
+</html>

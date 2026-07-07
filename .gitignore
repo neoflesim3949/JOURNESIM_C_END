@@ -37,3 +37,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# payment-review generated artifacts (regenerable via scripts/shoot.mjs)
+Docs/payment-review/shots/
+docs/payment-review/shots/
+Docs/payment-review/*.pdf
+docs/payment-review/*.pdf

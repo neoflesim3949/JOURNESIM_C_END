@@ -74,7 +74,7 @@ export default function AccountPage() {
     {
       items: [
         { href: '/guide', icon: HelpCircle, label: '幫助中心', desc: 'eSIM 安裝教學與常見問題' },
-        { href: 'mailto:support@flesim.com', icon: Mail, label: '聯絡我們', desc: 'support@flesim.com' },
+        { href: '/contact', icon: Mail, label: '聯絡我們', desc: '客服信箱與辦公室據點' },
         { href: '/about', icon: Info, label: '關於我們', desc: '了解 FLESIM' },
       ],
     },

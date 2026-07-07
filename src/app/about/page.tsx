@@ -55,11 +55,11 @@ export default function AboutPage() {
           <div>
             <h3 className="font-semibold text-lg">客戶服務</h3>
             <p className="mt-1 text-muted-foreground">
-              如有任何問題，歡迎透過 Email 聯繫我們的客服團隊。
+              如有任何問題，歡迎透過客服信箱、線上客服或至聯絡頁查看辦公室據點，
               我們將盡快為您提供協助。
             </p>
-            <a href="mailto:support@flesim.com" className="mt-2 inline-block text-primary hover:underline text-sm">
-              support@flesim.com
+            <a href="/contact" className="mt-2 inline-block text-primary hover:underline text-sm">
+              前往聯絡我們
             </a>
           </div>
         </div>
