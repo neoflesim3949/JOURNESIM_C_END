@@ -1,0 +1,199 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
+import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
+
+interface AntomLog {
+  id: string
+  action: string
+  endpoint: string | null
+  direction: string
+  order_number: string | null
+  payment_id: string | null
+  status: string
+  result_status: string | null
+  error_message: string | null
+  duration_ms: number | null
+  created_at: string
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  createPaymentSession: '建立付款工作階段',
+  pay: '單一方式付款',
+  inquiryPayment: '查詢付款結果',
+  refund: '退款',
+  capture: '請款',
+  cancel: '取消付款',
+  notifyPayment: '付款結果通知（webhook）',
+}
+const STATIC_ACTIONS = ['createPaymentSession', 'pay', 'inquiryPayment', 'refund', 'capture', 'cancel', 'notifyPayment']
+
+export default function AntomLogsPage() {
+  const [logs, setLogs] = useState<AntomLog[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useUrlState('page', 1)
+  const [loading, setLoading] = useState(true)
+  const [filterAction] = useUrlState('action', '')
+  const [filterDirection] = useUrlState('direction', '')
+  const [filterStatus] = useUrlState('status', '')
+  const [filterOrder, setFilterOrder] = useUrlState('order_number', '')
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [distinctActions, setDistinctActions] = useState<string[]>([])
+  const [bodyCache, setBodyCache] = useState<Map<string, { request_body: unknown; response_body: unknown }>>(new Map())
+  const setUrl = useUrlStateBatch()
+
+  async function load() {
+    setLoading(true)
+    const params = new URLSearchParams({ page: String(page), pageSize: '50' })
+    if (filterAction) params.set('action', filterAction)
+    if (filterDirection) params.set('direction', filterDirection)
+    if (filterStatus) params.set('status', filterStatus)
+    if (filterOrder) params.set('order_number', filterOrder)
+    const res = await fetch(`/api/admin/antom-logs?${params}`)
+    if (res.ok) {
+      const d = await res.json()
+      setLogs(d.data || [])
+      setTotal(d.total || 0)
+      if (Array.isArray(d.distinctActions)) setDistinctActions(d.distinctActions)
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [page, filterAction, filterDirection, filterStatus, filterOrder])
+
+  async function toggleExpand(id: string) {
+    const wasExpanded = expandedIds.has(id)
+    setExpandedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+    if (!wasExpanded && !bodyCache.has(id)) {
+      const res = await fetch(`/api/admin/antom-logs/${id}`)
+      if (res.ok) {
+        const d = await res.json()
+        setBodyCache(prev => new Map(prev).set(id, { request_body: d.request_body, response_body: d.response_body }))
+      }
+    }
+  }
+
+  const totalPages = Math.ceil(total / 50)
+  const actionOptions = Array.from(new Set([...STATIC_ACTIONS, ...distinctActions])).sort()
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Antom API Log</h1>
+          <p className="mt-1 text-sm text-gray-500">共 {total} 筆記錄 · 付款/退款/查詢/webhook 全留底</p>
+        </div>
+        <button onClick={load} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+          <RefreshCw className="w-4 h-4" /> 重新整理
+        </button>
+      </div>
+
+      <div className="mt-4 flex gap-2 items-center flex-wrap">
+        <select value={filterAction} onChange={e => setUrl({ action: e.target.value, page: 1 })}
+          className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+          <option value="">全部動作</option>
+          {actionOptions.map(a => <option key={a} value={a}>{a} {ACTION_LABELS[a] || ''}</option>)}
+        </select>
+        <select value={filterDirection} onChange={e => setUrl({ direction: e.target.value, page: 1 })}
+          className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+          <option value="">全部方向</option>
+          <option value="outgoing">發送</option>
+          <option value="incoming">接收</option>
+        </select>
+        <select value={filterStatus} onChange={e => setUrl({ status: e.target.value, page: 1 })}
+          className="px-2 py-1.5 border border-gray-300 rounded text-xs">
+          <option value="">全部狀態</option>
+          <option value="success">成功</option>
+          <option value="error">失敗</option>
+        </select>
+        <input value={filterOrder} onChange={e => setFilterOrder(e.target.value)} placeholder="訂單號查詢"
+          className="px-2 py-1.5 border border-gray-300 rounded text-xs w-40" />
+        <button onClick={() => setUrl({ action: '', direction: '', status: '', order_number: '', page: 1 })}
+          className="px-3 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">清除</button>
+        {filterAction && (
+          <button
+            onClick={async () => {
+              if (!confirm(`確定要刪除所有「${filterAction}」動作的 log？此操作無法復原。`)) return
+              const res = await fetch(`/api/admin/antom-logs?action=${filterAction}`, { method: 'DELETE' })
+              const d = await res.json()
+              if (!res.ok) { alert(d.error || '刪除失敗'); return }
+              alert(`已刪除 ${d.deleted} 筆 ${d.action} log`)
+              setPage(1); load()
+            }}
+            className="px-3 py-1.5 bg-red-600 text-white rounded text-xs hover:bg-red-700">
+            刪除「{filterAction}」
+          </button>
+        )}
+      </div>
+
+      {loading ? <p className="mt-8 text-sm text-gray-500">載入中...</p> : logs.length === 0 ? (
+        <div className="mt-8 text-center py-16 bg-white rounded-xl border border-gray-200">
+          <p className="text-gray-500">尚無 Antom API 記錄</p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {logs.map(log => {
+            const expanded = expandedIds.has(log.id)
+            return (
+              <div key={log.id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => toggleExpand(log.id)}>
+                  <span className="text-gray-400 flex-shrink-0">
+                    {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </span>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">{new Date(log.created_at).toLocaleString('zh-TW')}</span>
+                  <span className={`px-2 py-0.5 text-[10px] rounded-full flex-shrink-0 ${log.direction === 'outgoing' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                    {log.direction === 'outgoing' ? '發送' : '接收'}
+                  </span>
+                  <span className="font-mono text-xs font-semibold flex-shrink-0">{log.action}</span>
+                  <span className="text-xs text-gray-500 hidden sm:inline">{ACTION_LABELS[log.action] || '-'}</span>
+                  <span className={`px-2 py-0.5 text-[10px] rounded-full flex-shrink-0 ${log.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {log.status === 'success' ? '成功' : '失敗'}
+                  </span>
+                  {log.result_status && <span className="text-[10px] text-gray-400 flex-shrink-0">{log.result_status}</span>}
+                  {log.order_number && <span className="font-mono text-[10px] text-gray-500 truncate hidden md:inline">{log.order_number}</span>}
+                  {log.duration_ms != null && <span className="text-[10px] text-gray-400 flex-shrink-0">{log.duration_ms}ms</span>}
+                  {log.error_message && <span className="text-[10px] text-red-500 truncate">{log.error_message}</span>}
+                </div>
+                {expanded && (
+                  <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
+                    <div className="mb-2 text-[11px] text-gray-500 font-mono">{log.endpoint} {log.payment_id ? `· paymentId=${log.payment_id}` : ''}</div>
+                    {(() => {
+                      const body = bodyCache.get(log.id)
+                      if (!body) return <p className="text-xs text-gray-400">載入內容中…</p>
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-500 mb-1">Request</h4>
+                            <pre className="text-[11px] bg-white border border-gray-200 rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
+                              {body.request_body ? JSON.stringify(body.request_body, null, 2) : '-'}
+                            </pre>
+                          </div>
+                          <div>
+                            <h4 className="text-xs font-semibold text-gray-500 mb-1">Response</h4>
+                            <pre className="text-[11px] bg-white border border-gray-200 rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap font-mono">
+                              {body.response_body ? JSON.stringify(body.response_body, null, 2) : '-'}
+                            </pre>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-xs text-gray-500">共 {total} 筆</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
+              <span className="px-3 py-1 text-sm">{page} / {totalPages || 1}</span>
+              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

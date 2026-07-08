@@ -262,7 +262,7 @@ export default function AdminSettingsPage() {
               <label className="text-sm font-medium">預設付款方式（paymentMethodType）</label>
               <input value={getValue('antom_default_method')} onChange={(e) => handleChange('antom_default_method', e.target.value)}
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-xs" placeholder="CARD（或 ALIPAY_CN / GCASH / KAKAOPAY…）" />
-              <p className="text-xs text-gray-400 mt-1">pay 需指定；依你 Antom 合約啟用的方式填。預設 CARD。</p>
+              <p className="text-xs text-gray-400 mt-1">顧客未選時的預設；下方「啟用付款方式」勾選的第一個。</p>
             </div>
             <div>
               <label className="text-sm font-medium">商戶所在地（merchantRegion）</label>
@@ -270,6 +270,30 @@ export default function AdminSettingsPage() {
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="HK" />
               <p className="text-xs text-gray-400 mt-1">ISO 3166 兩碼；需與 Antom 商戶註冊地一致（例：HK）。</p>
             </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium">啟用付款方式（顧客於結帳頁自選）</label>
+            <div className="mt-2 flex flex-wrap gap-3">
+              {([
+                { id: 'CARD', label: '信用卡 / 金融卡（TWD）' },
+                { id: 'APPLEPAY', label: 'Apple Pay（TWD，限 Safari/Apple 裝置且域名已驗證）' },
+                { id: 'JKOPAY', label: '街口支付（TWD）' },
+                { id: 'ALIPAY_HK', label: 'AlipayHK（HKD）' },
+              ]).map((m) => {
+                const cur = (getValue('antom_enabled_methods') || 'CARD,JKOPAY').split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+                const checked = cur.includes(m.id)
+                return (
+                  <label key={m.id} className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={checked} onChange={() => {
+                      const next = checked ? cur.filter((x) => x !== m.id) : [...cur, m.id]
+                      handleChange('antom_enabled_methods', next.join(','))
+                    }} className="accent-primary" />
+                    {m.label}
+                  </label>
+                )
+              })}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">勾選兩個以上，結帳頁會出現選擇器；街口與卡片皆以 TWD 交易，AlipayHK 需以 HKD 換匯。</p>
           </div>
           <div>
             <label className="text-sm font-medium">您的私鑰（Merchant Private Key，簽章用）</label>

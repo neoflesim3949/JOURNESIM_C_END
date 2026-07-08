@@ -90,6 +90,7 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/logs', label: 'Log', icon: RefreshCw,
     children: [
       { href: '/admin/bc-logs', label: 'BC Log' },
+      { href: '/admin/antom-logs', label: 'Antom Log' },
       { href: '/admin/smse-logs', label: 'smse Log' },
     ],
   },

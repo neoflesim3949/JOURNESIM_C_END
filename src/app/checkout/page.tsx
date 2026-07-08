@@ -7,27 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-
-// Antom Web SDK（收銀台）
-const ANTOM_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.13.0/dist/umd/ams-checkout.min.js'
-declare global {
-  interface Window {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    AMSCashierPayment?: new (cfg: Record<string, unknown>) => { mountComponent: (opts: Record<string, unknown>, el: any) => Promise<unknown> }
-  }
-}
-function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') return resolve(null)
-    if (window.AMSCashierPayment) return resolve(window.AMSCashierPayment)
-    const s = document.createElement('script')
-    s.src = ANTOM_SDK
-    s.async = true
-    s.onload = () => resolve(window.AMSCashierPayment || null)
-    s.onerror = () => resolve(null)
-    document.body.appendChild(s)
-  })
-}
+import { loadAntomSdk } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -56,34 +36,59 @@ function CheckoutContent() {
   const [isPointsLoading, setIsPointsLoading] = useState(false)
   const [provider, setProvider] = useState<'tappay' | 'antom'>('tappay')
   const [antomMounted, setAntomMounted] = useState(false)
+  const [antomMethods, setAntomMethods] = useState<{ id: string; label: string }[]>([])
+  const [antomMethod, setAntomMethod] = useState<string>('CARD')
+  const [antomCards, setAntomCards] = useState<{ id: string; last_four: string; bin_code?: string | null; card_type: string; issuer: string; exp_month?: string | null; exp_year?: string | null }[]>([])
+  const [antomCardId, setAntomCardId] = useState<string>('')  // 選中的已綁卡；'' = 使用新卡/其他方式
+  const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
   const hasSim = simItems.length > 0
 
   useEffect(() => {
     setIsInLineApp(/Line/i.test(navigator.userAgent))
     if (totalPrice > 0) trackBeginCheckout(totalPrice)
-    fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => { if (d?.provider === 'antom') setProvider('antom') }).catch(() => {})
+    fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => {
+      if (d?.provider === 'antom') setProvider('antom')
+      if (Array.isArray(d?.antomMethods) && d.antomMethods.length) {
+        setAntomMethods(d.antomMethods)
+        const def = String(d.antomDefault || d.antomMethods[0].id).toUpperCase()
+        setAntomMethod(d.antomMethods.some((m: { id: string }) => m.id === def) ? def : d.antomMethods[0].id)
+      }
+    }).catch(() => {}).finally(() => setProviderReady(true))
   }, [])
 
-  // Antom（Alipay+）：建單(pending) → createPaymentSession → 前端 SDK 渲染收銀台（多方式）
+  // 建立 Antom pending 訂單，回 order_number
+  async function createAntomOrder() {
+    const res = await fetch('/api/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email, items, payment_method: 'antom', provider: 'antom',
+        points_to_redeem: pointsToRedeem,
+        ...(hasSim ? { shipping_name: shippingName, shipping_phone: shippingPhone, shipping_address: shippingAddress } : {}),
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '下單失敗')
+    return data.order_number as string
+  }
+
+  // Antom：建單(pending) → createPaymentSession → 前端 SDK 渲染收銀台
+  // 新卡：登入會員刷卡時收銀台顯示原生「儲存卡片」勾選（tokenizeMode），付款後 webhook 存卡
+  // 已綁卡：帶 card_id → session 以 paymentMethodId 帶出該卡（免重打卡號）
   async function handleAntom() {
     if (!email || items.length === 0) return
     if (hasSim && (!shippingName || !shippingPhone || !shippingAddress)) { alert('請填寫收件資料'); return }
     setLoading(true)
     try {
-      const res = await fetch('/api/checkout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email, items, payment_method: 'antom', provider: 'antom',
-          points_to_redeem: pointsToRedeem,
-          ...(hasSim ? { shipping_name: shippingName, shipping_phone: shippingPhone, shipping_address: shippingAddress } : {}),
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) { alert(data.error || '下單失敗'); setLoading(false); return }
+      let orderNumber: string
+      try { orderNumber = await createAntomOrder() } catch (err) { alert(err instanceof Error ? err.message : '下單失敗'); setLoading(false); return }
 
       const s = await fetch('/api/payment/antom/session', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_number: data.order_number }),
+        body: JSON.stringify({
+          order_number: orderNumber,
+          payment_method: antomCardId ? 'CARD' : antomMethod,
+          ...(antomCardId ? { card_id: antomCardId } : {}),
+        }),
       }).then((r) => r.json()).catch(() => null)
       if (!s?.paymentSessionData) { alert(s?.error || 'Antom 建立收銀台失敗（請確認後台憑證/設定）'); setLoading(false); return }
 
@@ -119,8 +124,13 @@ function CheckoutContent() {
   }
 
   useEffect(() => {
-    fetch('/api/shop/saved-cards').then((r) => r.json()).then(setSavedCards).catch(() => {})
-    
+    fetch('/api/shop/saved-cards').then((r) => r.json()).then((all) => {
+      const list = Array.isArray(all) ? all : []
+      setSavedCards(list)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setAntomCards(list.filter((c: any) => c.provider === 'antom'))
+    }).catch(() => {})
+
     // 獲取用戶點數
     setIsPointsLoading(true)
     fetch('/api/account/affiliate').then(r => r.json()).then(data => {
@@ -335,21 +345,68 @@ function CheckoutContent() {
             </div>
           )}
 
-          {/* 付款：依後台「前台金流供應商」切換 */}
-          {provider === 'antom' ? (
+          {/* 付款：依後台「前台金流供應商」切換（config 未載入前先不掛表單，避免 TapPay 誤初始化） */}
+          {!providerReady ? (
+            <div className="mt-2 py-6 text-center text-sm text-muted-foreground">載入付款方式…</div>
+          ) : provider === 'antom' ? (
             <div className="mt-2">
+              {/* 已綁定卡片：一鍵付款 */}
+              {!antomMounted && antomCards.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  <p className="text-sm font-medium">已綁定卡片</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {antomCards.map((c) => (
+                      <label key={c.id}
+                        className={`flex items-center gap-3 px-4 py-3 border rounded-lg cursor-pointer transition-colors ${antomCardId === c.id ? 'border-primary bg-primary/5' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <input type="radio" name="antomCard" checked={antomCardId === c.id} onChange={() => setAntomCardId(c.id)} className="accent-primary" />
+                        <CreditCard className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm font-medium font-mono">{c.bin_code ? `${c.bin_code}••${c.last_four}` : `•••• ${c.last_four}`}</span>
+                        <span className="text-xs text-muted-foreground">{c.issuer || '信用卡'}</span>
+                      </label>
+                    ))}
+                    <label className={`flex items-center gap-3 px-4 py-3 border rounded-lg cursor-pointer transition-colors ${antomCardId === '' ? 'border-primary bg-primary/5' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <input type="radio" name="antomCard" checked={antomCardId === ''} onChange={() => setAntomCardId('')} className="accent-primary" />
+                      <span className="text-sm font-medium">使用新卡片 / 其他付款方式</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+              {/* 付款方式選擇（顧客自選：信用卡 / 街口…）— 僅在未選已綁卡時顯示 */}
+              {!antomMounted && !antomCardId && antomMethods.length > 1 && (
+                <div className="mb-3 space-y-2">
+                  <p className="text-sm font-medium">選擇付款方式</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {antomMethods.map((m) => (
+                      <label
+                        key={m.id}
+                        className={`flex items-center gap-3 px-4 py-3 border rounded-lg cursor-pointer transition-colors ${antomMethod === m.id ? 'border-primary bg-primary/5' : 'border-gray-200 hover:border-gray-300'}`}
+                      >
+                        <input
+                          type="radio"
+                          name="antomMethod"
+                          value={m.id}
+                          checked={antomMethod === m.id}
+                          onChange={() => setAntomMethod(m.id)}
+                          className="accent-primary"
+                        />
+                        <span className="text-sm font-medium">{m.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               {!antomMounted && (
                 <button
                   onClick={handleAntom}
                   disabled={loading || !email || totalPrice <= 0 || (hasSim && (!shippingName || !shippingPhone || !shippingAddress))}
                   className="w-full py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
                 >
-                  {loading ? '載入付款頁…' : `前往付款 ${formatPrice(totalPrice)}（Antom）`}
+                  {loading ? '處理中…' : antomCardId ? `使用此卡付款 ${formatPrice(totalPrice)}` : `前往付款 ${formatPrice(totalPrice)}`}
                 </button>
               )}
               {/* Antom 收銀台掛載容器 */}
               <div id="antom-container" className="mt-3" />
-              {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">將以 Antom（Alipay+）收銀台完成付款</p>}
+              {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">{antomCardId ? '將帶出綁定卡片於收銀台完成付款' : '將以 Antom 收銀台完成付款'}</p>}
             </div>
           ) : (
             <TapPayForm

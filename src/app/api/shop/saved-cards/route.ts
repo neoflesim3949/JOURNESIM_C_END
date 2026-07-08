@@ -11,7 +11,7 @@ export async function GET() {
   const supabase = createAdminClient()
   const { data } = await supabase
     .from('member_cards')
-    .select('id, last_four, bin_code, card_type, issuer, is_default, created_at')
+    .select('id, last_four, bin_code, card_type, issuer, is_default, provider, exp_month, exp_year, created_at')
     .eq('member_id', user.id)
     .order('created_at', { ascending: false })
 

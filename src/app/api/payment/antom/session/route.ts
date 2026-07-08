@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/supabase/server'
 import { antomRequest, getAntomConfig, toAntomAmountValue } from '@/lib/antom'
 
 // POST { order_number } — 建立 Antom 收銀台 session（多方式，前端 SDK 渲染）
@@ -16,28 +17,50 @@ export async function POST(request: Request) {
 
   const cfg = await getAntomConfig()
   const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin
+
+  // 付款方式：後台預設或前端指定（CARD / JKOPAY / ALIPAY_HK…）
+  const method = String(body.payment_method || cfg.defaultMethod || 'CARD').toUpperCase()
+  // 部分方式只收特定幣別（AlipayHK 僅 HKD）；其餘用後台交易幣別（預設 TWD，卡片與街口皆可）
+  const METHOD_CURRENCY: Record<string, string> = { ALIPAY_HK: 'HKD' }
+  const payCurrency = (METHOD_CURRENCY[method] || cfg.paymentCurrency).toUpperCase()
+
   // 訂單以 TWD 計價；若交易幣別非 TWD，用匯率換算（exchange_rates: 每 1 TWD 兌多少外幣）
   let payAmount = Number(order.total_amount)
-  if (cfg.paymentCurrency.toUpperCase() !== 'TWD') {
-    const { data: r } = await supabase.from('exchange_rates').select('rate').eq('currency', cfg.paymentCurrency.toUpperCase()).maybeSingle()
+  if (payCurrency !== 'TWD') {
+    const { data: r } = await supabase.from('exchange_rates').select('rate').eq('currency', payCurrency).maybeSingle()
     const rate = r?.rate ? Number(r.rate) : 0
     if (rate > 0) payAmount = Number(order.total_amount) * rate
   }
-  const value = toAntomAmountValue(payAmount, cfg.paymentCurrency)
+  const value = toAntomAmountValue(payAmount, payCurrency)
 
-  // 付款方式：後台預設或前端指定（CARD / ALIPAY_CN / GCASH…）
-  const method = String(body.payment_method || cfg.defaultMethod || 'CARD').toUpperCase()
+  // 登入會員（供已綁卡付款 / 付款即綁卡判斷）
+  const serverSupabase = await createClient()
+  const { data: { user } } = await serverSupabase.auth.getUser()
+  const cardId = String(body.card_id || '').trim()
+
+  const paymentMethod: Record<string, unknown> = { paymentMethodType: method }
+  if (method === 'CARD' && cardId && user) {
+    // 用已綁定卡片付款：帶 paymentMethodId（cardToken），收銀台直接帶出該卡（免重打卡號）
+    const { data: card } = await supabase.from('member_cards')
+      .select('card_token').eq('id', cardId).eq('member_id', user.id).eq('provider', 'antom').single()
+    if (!card?.card_token) return NextResponse.json({ error: '找不到綁定卡片' }, { status: 404 })
+    paymentMethod.paymentMethodId = card.card_token
+  } else if (method === 'CARD' && body.save_card !== false && user) {
+    // 付款即綁卡（tokenizeMode）：收銀台顯示 Antom 原生「儲存卡片」勾選；付款後 webhook 存卡
+    paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
+  }
+
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
       orderDescription: `FLESIM 訂單 ${order.order_number}`,
-      orderAmount: { currency: cfg.paymentCurrency, value },
+      orderAmount: { currency: payCurrency, value },
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
-    paymentAmount: { currency: cfg.paymentCurrency, value },
-    paymentMethod: { paymentMethodType: method },
+    paymentAmount: { currency: payCurrency, value },
+    paymentMethod,
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }

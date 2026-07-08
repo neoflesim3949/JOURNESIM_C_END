@@ -45,5 +45,18 @@ export async function GET() {
   }
 
   const provider = nonEmpty(settings.get('payment_provider')) || 'tappay'
-  return NextResponse.json({ app_id: Number(appId || '0'), app_key: appKey, env, methods, cardTypeIcons, provider })
+
+  // Antom 可選付款方式（顧客於結帳頁自選）。後台 antom_enabled_methods 以逗號分隔，預設卡片＋街口
+  const antomAll = [
+    { id: 'CARD', label: '信用卡 / 金融卡' },
+    { id: 'APPLEPAY', label: 'Apple Pay' },
+    { id: 'JKOPAY', label: '街口支付' },
+    { id: 'ALIPAY_HK', label: 'AlipayHK' },
+  ]
+  const antomEnabledRaw = nonEmpty(settings.get('antom_enabled_methods')) || 'CARD,JKOPAY'
+  const antomEnabled = new Set(antomEnabledRaw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean))
+  const antomDefault = (nonEmpty(settings.get('antom_default_method')) || 'CARD').toUpperCase()
+  const antomMethods = antomAll.filter((m) => antomEnabled.has(m.id))
+
+  return NextResponse.json({ app_id: Number(appId || '0'), app_key: appKey, env, methods, cardTypeIcons, provider, antomMethods, antomDefault })
 }
