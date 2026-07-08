@@ -1,5 +1,6 @@
 // Antom Web SDK（ams-checkout）loader — 收銀台與綁卡共用同一顆 AMSCashierPayment
-const ANTOM_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.13.0/dist/umd/ams-checkout.min.js'
+// v2 Payment Element（新版）：Apple Pay 等錢包按鈕會依 session 設定（productScene=ELEMENT_PAYMENT）自動內嵌渲染
+const ANTOM_SDK = 'https://js.antom.com/v2/ams-checkout.js'
 
 declare global {
   interface Window {
@@ -25,7 +26,7 @@ export function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null> {
 export async function mountAntom(sessionData: string, selector: string, environment: 'prod' | 'sandbox') {
   const SDK = await loadAntomSdk()
   if (!SDK) throw new Error('無法載入 Antom SDK')
-  const inst = new SDK({ environment, locale: 'zh_TW', onEventCallback: () => {}, onError: () => {} })
+  const inst = new SDK({ environment, locale: 'zh_TW', onEventCallback: () => { }, onError: () => { } })
   const opts = { sessionData, appearance: { showSubmitButton: true } }
   if (typeof inst.mountComponent === 'function') {
     await inst.mountComponent(opts, selector)

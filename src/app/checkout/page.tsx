@@ -41,6 +41,7 @@ function CheckoutContent() {
   const [antomCards, setAntomCards] = useState<{ id: string; last_four: string; bin_code?: string | null; card_type: string; issuer: string; exp_month?: string | null; exp_year?: string | null }[]>([])
   const [antomCardId, setAntomCardId] = useState<string>('')  // 選中的已綁卡；'' = 使用新卡/其他方式
   const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
+  const [antomMsg, setAntomMsg] = useState('')                // SDK 事件/錯誤（畫面顯示，方便手機診斷）
   const hasSim = simItems.length > 0
 
   useEffect(() => {
@@ -96,18 +97,32 @@ function CheckoutContent() {
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
+      // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const cashier = new SDK({
         environment: s.environment === 'prod' ? 'prod' : 'sandbox',
         locale: 'zh_TW',
-        onEventCallback: () => {},
-        onError: () => {},
+        onEventCallback: (evt: any) => {
+          const code = evt?.code || ''
+          console.log('[antom event]', code, evt)
+          if (code === 'SDK_PAYMENT_SUCCESSFUL') setAntomMsg('付款成功，處理中…')
+          else if (code === 'SDK_PAYMENT_FAIL' || code === 'SDK_PAYMENT_ERROR') setAntomMsg(`付款未完成（${code}）：${evt?.result?.paymentResultCode || ''}`)
+          else if (code === 'SDK_PAYMENT_CANCEL') setAntomMsg('已取消付款')
+          else if (code) setAntomMsg(`SDK 事件：${code}`)
+        },
+        onError: (err: any) => {
+          console.error('[antom error]', err)
+          setAntomMsg(`SDK 錯誤：${err?.code || ''} ${err?.message || JSON.stringify(err || {})}`)
+        },
       })
       // 付款完成後 SDK 會自動導回 paymentRedirectUrl（/payment/result?provider=antom）
       // SDK 內部以 querySelector 找容器 → 需傳「字串選擇器」而非 DOM 元素
       const selector = '#antom-container'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: true } }
+      // Apple Pay 的原生按鈕即付款鍵，不需額外 submit 鍵
+      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
+      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: !isApplePay } }
       if (typeof c.mountComponent === 'function') {
         await c.mountComponent(mountOpts, selector)
       } else if (typeof c.createComponent === 'function') {
@@ -406,6 +421,7 @@ function CheckoutContent() {
               )}
               {/* Antom 收銀台掛載容器 */}
               <div id="antom-container" className="mt-3" />
+              {antomMsg && <p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
               {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">{antomCardId ? '將帶出綁定卡片於收銀台完成付款' : '將以 Antom 收銀台完成付款'}</p>}
             </div>
           ) : (

@@ -48,10 +48,14 @@ export async function POST(request: Request) {
   } else if (method === 'CARD' && body.save_card !== false && user) {
     // 付款即綁卡（tokenizeMode）：收銀台顯示 Antom 原生「儲存卡片」勾選；付款後 webhook 存卡
     paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
+  } else if (method === 'APPLEPAY') {
+    // Apple Pay：buttonsBundled 讓新版 Payment Element 自動內嵌渲染 Apple Pay 按鈕
+    paymentMethod.paymentMethodMetaData = { applePayConfiguration: { buttonsBundled: 'true' } }
   }
 
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
+    productScene: 'ELEMENT_PAYMENT',   // 新版 Payment Element（錢包按鈕自動渲染）
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
