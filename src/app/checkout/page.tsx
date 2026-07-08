@@ -93,6 +93,22 @@ function CheckoutContent() {
       }).then((r) => r.json()).catch(() => null)
       if (!s?.paymentSessionData) { alert(s?.error || 'Antom 建立收銀台失敗（請確認後台憑證/設定）'); setLoading(false); return }
 
+      // Apple Pay 環境自檢：只有支援的裝置/瀏覽器（Safari + Apple 裝置 + Wallet 有卡）才會顯示按鈕
+      if (!antomCardId && antomMethod === 'APPLEPAY') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const APS = (window as any).ApplePaySession
+        if (!APS) {
+          setAntomMsg('此瀏覽器不支援 Apple Pay。請改用 iPhone 或 Mac 的 Safari 開啟本頁（Chrome／Android 不支援）。')
+          setAntomMounted(false); setLoading(false); return
+        }
+        try {
+          if (typeof APS.canMakePayments === 'function' && !APS.canMakePayments()) {
+            setAntomMsg('此裝置尚無法使用 Apple Pay，請確認 Apple Wallet 已加入至少一張卡片。')
+            setAntomMounted(false); setLoading(false); return
+          }
+        } catch { /* 忽略 */ }
+      }
+
       const SDK = await loadAntomSdk()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
