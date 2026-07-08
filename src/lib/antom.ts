@@ -100,9 +100,16 @@ export async function antomRequest(path: string, payload: Record<string, unknown
   return { status: res.status, data, requestTime }
 }
 
-// TWD/JPY 等零小數幣別：value 直接為整數字串；其餘幣別以最小單位（分）
-const ZERO_DECIMAL = new Set(['TWD', 'JPY', 'KRW', 'VND'])
+// Antom value 為最小貨幣單位。實測 TWD 亦需 ×100（value「10500」= TWD 105.00）。
+// 真正零小數幣別（JPY/KRW/VND）才不 ×100。
+const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND'])
 export function toAntomAmountValue(amount: number, currency: string): string {
   if (ZERO_DECIMAL.has(currency.toUpperCase())) return String(Math.round(amount))
   return String(Math.round(amount * 100))
+}
+
+// Antom value（最小單位字串）→ 一般金額
+export function fromAntomAmountValue(value: string | number, currency: string): number {
+  const v = Number(value) || 0
+  return ZERO_DECIMAL.has(currency.toUpperCase()) ? v : v / 100
 }

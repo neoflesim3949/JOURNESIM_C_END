@@ -25,6 +25,8 @@ export async function POST(request: Request) {
   }
   const value = toAntomAmountValue(payAmount, cfg.paymentCurrency)
 
+  // 付款方式：後台預設或前端指定（CARD / ALIPAY_CN / GCASH…）
+  const method = String(body.payment_method || cfg.defaultMethod || 'CARD').toUpperCase()
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
     paymentRequestId: order.order_number,
@@ -33,16 +35,14 @@ export async function POST(request: Request) {
       orderDescription: `FLESIM 訂單 ${order.order_number}`,
       orderAmount: { currency: cfg.paymentCurrency, value },
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
-      goods: [{ referenceGoodsId: order.order_number, goodsName: 'FLESIM eSIM / SIM', goodsQuantity: '1', goodsUnitAmount: { currency: cfg.paymentCurrency, value } }],
-      env: { terminalType: 'WEB' },
     },
     paymentAmount: { currency: cfg.paymentCurrency, value },
-    settlementStrategy: { settlementCurrency: cfg.currency },
+    paymentMethod: { paymentMethodType: method },
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
-    env: { terminalType: 'WEB' },
   }
-  if (cfg.merchantRegion) payload.merchantRegion = cfg.merchantRegion
+  // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶
+  if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)

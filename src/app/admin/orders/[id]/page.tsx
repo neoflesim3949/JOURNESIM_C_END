@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Wifi, CreditCard, Truck, Save, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Wifi, CreditCard, Truck, Save, RefreshCw, RotateCcw } from 'lucide-react'
 
 interface Order {
   id: string; order_number: string; email: string; status: string
@@ -37,6 +37,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   paid: { label: '已付款', color: 'bg-green-100 text-green-700' },
   pending_payment: { label: '待付款', color: 'bg-yellow-100 text-yellow-700' },
   failed: { label: '失敗', color: 'bg-red-100 text-red-700' },
+  refunded: { label: '已退款', color: 'bg-gray-200 text-gray-700' },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -94,6 +95,7 @@ export default function AdminOrderDetailPage() {
   }
 
   const [syncing, setSyncing] = useState(false)
+  const [showRefund, setShowRefund] = useState(false)
 
   async function syncBC() {
     setSyncing(true)
@@ -123,12 +125,20 @@ export default function AdminOrderDetailPage() {
 
       <div className="mt-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold">訂單詳情</h1>
-        {subOrders.some((s) => s.bc_order_id) && (
-          <button onClick={syncBC} disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">
-            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> 同步 BC 狀態
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {order.payment_method === 'antom' && order.status !== 'refunded' && (
+            <button onClick={() => setShowRefund(true)}
+              className="flex items-center gap-2 px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50">
+              <RotateCcw className="w-4 h-4" /> 發起退款
+            </button>
+          )}
+          {subOrders.some((s) => s.bc_order_id) && (
+            <button onClick={syncBC} disabled={syncing}
+              className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 disabled:opacity-50">
+              <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> 同步 BC 狀態
+            </button>
+          )}
+        </div>
       </div>
 
       {/* L1: 主訂單資訊 */}
@@ -169,6 +179,98 @@ export default function AdminOrderDetailPage() {
           此訂單使用舊架構，無子訂單結構。請查看舊版訂單明細。
         </div>
       )}
+
+      {showRefund && (
+        <RefundModal orderId={id} orderNumber={order.order_number} onClose={() => setShowRefund(false)} onDone={load} />
+      )}
+    </div>
+  )
+}
+
+function RefundModal({ orderId, orderNumber, onClose, onDone }: {
+  orderId: string; orderNumber: string; onClose: () => void; onDone: () => void
+}) {
+  const [info, setInfo] = useState<{ currency: string; amount: number | null } | null>(null)
+  const [mode, setMode] = useState<'full' | 'partial'>('full')
+  const [amount, setAmount] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/admin/orders/${orderId}/antom-refund`).then((r) => r.json()).then((d) => {
+      if (d.currency) { setInfo({ currency: d.currency, amount: d.amount }); if (d.amount != null) setAmount(String(d.amount)) }
+      else setInfo({ currency: '', amount: null })
+    }).catch(() => setInfo({ currency: '', amount: null }))
+  }, [orderId])
+
+  const max = info?.amount ?? null
+  const partialInvalid = mode === 'partial' && (!amount || Number(amount) <= 0 || (max != null && Number(amount) > max))
+
+  async function submit() {
+    setSubmitting(true); setResult(null)
+    const d = await fetch(`/api/admin/orders/${orderId}/antom-refund`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mode === 'partial' ? { amount: Number(amount) } : {}),
+    }).then((r) => r.json()).catch(() => ({ error: '連線失敗' }))
+    setSubmitting(false)
+    if (d.ok) { setResult({ ok: true, msg: `退款已送出：${d.amount}${d.full ? '（全額）' : '（部分）'}` }); onDone() }
+    else setResult({ ok: false, msg: d.error || '退款失敗' })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2"><RotateCcw className="w-5 h-5 text-red-500" />發起退款</h2>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">訂單 <span className="font-mono">{orderNumber}</span></p>
+
+        {result?.ok ? (
+          <div className="py-4 text-center">
+            <div className="w-14 h-14 rounded-full bg-green-50 text-green-600 flex items-center justify-center mx-auto text-3xl">✓</div>
+            <div className="mt-3 font-semibold text-gray-800">退款已受理</div>
+            <div className="mt-1 text-sm text-gray-500">{result.msg}</div>
+            <div className="mt-1 text-xs text-gray-400">款項將由 Antom 處理，狀態以退款通知為準。</div>
+            <button onClick={onClose} className="mt-5 w-full py-2.5 rounded-lg bg-green-600 text-white text-sm hover:bg-green-700">關閉</button>
+          </div>
+        ) : !info ? <div className="py-6 text-center text-gray-400 text-sm">讀取付款資訊…</div> : (
+          <>
+            <div className="rounded-lg bg-gray-50 p-3 text-sm mb-4">
+              <div className="flex justify-between"><span className="text-gray-500">原付款金額</span>
+                <span className="font-semibold">{info.currency && info.amount != null ? `${info.currency} ${info.amount}` : '無法取得'}</span></div>
+            </div>
+
+            <div className="flex gap-2 mb-3">
+              {(['full', 'partial'] as const).map((m) => (
+                <button key={m} onClick={() => setMode(m)}
+                  className={`flex-1 px-3 py-2 text-sm rounded-lg border ${mode === m ? 'border-red-400 bg-red-50 text-red-600' : 'border-gray-200 text-gray-500'}`}>
+                  {m === 'full' ? '全額退款' : '部分退款'}
+                </button>
+              ))}
+            </div>
+
+            {mode === 'partial' && (
+              <div className="mb-3">
+                <label className="block text-xs text-gray-500 mb-1">退款金額（{info.currency || '原幣別'}）</label>
+                <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} step="0.01" min="0" max={max ?? undefined}
+                  className={`w-full border rounded-lg px-3 py-2 text-sm ${partialInvalid ? 'border-red-400' : 'border-gray-200'}`} placeholder={max != null ? `最多 ${max}` : ''} />
+                {partialInvalid && <div className="text-xs text-red-500 mt-1">金額須介於 0 與 {max} 之間</div>}
+              </div>
+            )}
+
+            {result && !result.ok && <div className="text-sm mb-3 px-3 py-2 rounded-lg bg-red-50 text-red-600">{result.msg}</div>}
+
+            <div className="flex justify-end gap-2 mt-2">
+              <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">取消</button>
+              <button onClick={submit} disabled={submitting || partialInvalid || (mode === 'full' && info.amount == null)}
+                className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40">
+                {submitting ? '退款中…' : '確認退款'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

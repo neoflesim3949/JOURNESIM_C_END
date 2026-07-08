@@ -23,8 +23,23 @@ function PaymentResultContent() {
   const orderNo = searchParams.get('order_number')
   const tappayStatus = searchParams.get('status')
 
+  const provider = searchParams.get('provider')
+
   useEffect(() => {
     async function verify() {
+      // Antom（Alipay+）：以訂單編號向後端覆核付款狀態
+      if (provider === 'antom') {
+        try {
+          const res = await fetch(`/api/payment/antom/verify?order_number=${encodeURIComponent(orderNo || '')}`)
+          const data = await res.json()
+          if (res.ok && data.status === 'success') {
+            setOrderId(data.order_id); setOrderNumber(data.order_number)
+            try { localStorage.removeItem('flesim_cart') } catch {}
+            setStatus('success'); return
+          }
+        } catch { /* fallthrough */ }
+        setStatus('failed'); return
+      }
       if (tappayStatus === '0' && recTradeId) {
         // 付款成功，查詢訂單
         const res = await fetch(`/api/payment/verify?order_number=${orderNo}&rec_trade_id=${recTradeId}`)
@@ -41,7 +56,7 @@ function PaymentResultContent() {
       }
     }
     verify()
-  }, [recTradeId, orderNo, tappayStatus])
+  }, [recTradeId, orderNo, tappayStatus, provider])
 
   if (status === 'loading') {
     return (

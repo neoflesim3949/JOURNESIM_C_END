@@ -43,3 +43,12 @@ Docs/payment-review/shots/
 docs/payment-review/shots/
 Docs/payment-review/*.pdf
 docs/payment-review/*.pdf
+Docs/payment-review/**/*.pdf
+docs/payment-review/**/*.pdf
+# review screenshots / html (large, regenerable)
+Docs/payment-review/**/*.png
+docs/payment-review/**/*.png
+Docs/payment-review/*.png
+docs/payment-review/*.png
+Docs/payment-review/**/*.html
+docs/payment-review/**/*.html

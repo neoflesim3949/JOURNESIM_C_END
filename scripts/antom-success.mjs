@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core'
+const b = await chromium.launch({ channel: 'chrome', headless: true })
+const ctx = await b.newContext({ viewport: { width: 900, height: 900 }, deviceScaleFactor: 2, locale: 'zh-TW' })
+const page = await ctx.newPage()
+page.on('console', m => { const t = m.text(); if (/antom|verify|error/i.test(t)) console.log('P>', t.slice(0,120)) })
+await page.goto('http://localhost:3000/payment/result?provider=antom&order_number=FL260708M5ASR2', { waitUntil: 'networkidle' })
+await page.waitForTimeout(6000)
+await page.screenshot({ path: 'docs/payment-review/antom/p8-success.png', fullPage: true })
+console.log('shot p8-success')
+await b.close()

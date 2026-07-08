@@ -102,10 +102,11 @@ function CheckoutContent() {
       const selector = '#antom-container'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
+      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: true } }
       if (typeof c.mountComponent === 'function') {
-        await c.mountComponent({ sessionData: s.paymentSessionData }, selector)
+        await c.mountComponent(mountOpts, selector)
       } else if (typeof c.createComponent === 'function') {
-        const comp = await c.createComponent({ sessionData: s.paymentSessionData })
+        const comp = await c.createComponent(mountOpts)
         if (comp?.mount) await comp.mount(selector)
       } else {
         throw new Error('SDK 無 mountComponent/createComponent 方法')
