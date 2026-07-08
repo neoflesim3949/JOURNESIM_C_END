@@ -15,7 +15,7 @@ export default function PaymentResultPage() {
 
 function PaymentResultContent() {
   const searchParams = useSearchParams()
-  const [status, setStatus] = useState<'loading' | 'success' | 'failed'>('loading')
+  const [status, setStatus] = useState<'loading' | 'success' | 'failed' | 'processing'>('loading')
   const [orderId, setOrderId] = useState('')
   const [orderNumber, setOrderNumber] = useState('')
 
@@ -27,18 +27,24 @@ function PaymentResultContent() {
 
   useEffect(() => {
     async function verify() {
-      // Antom（Alipay+）：以訂單編號向後端覆核付款狀態
+      // Antom：以訂單編號覆核付款狀態。付款可能短暫 PROCESSING → 輪詢數次；
+      // 仍未成功則顯示「處理中」（不誤報成功，也不誤報失敗；webhook 之後會補上）
       if (provider === 'antom') {
-        try {
-          const res = await fetch(`/api/payment/antom/verify?order_number=${encodeURIComponent(orderNo || '')}`)
-          const data = await res.json()
-          if (res.ok && data.status === 'success') {
-            setOrderId(data.order_id); setOrderNumber(data.order_number)
-            try { localStorage.removeItem('flesim_cart') } catch {}
-            setStatus('success'); return
-          }
-        } catch { /* fallthrough */ }
-        setStatus('failed'); return
+        for (let i = 0; i < 5; i++) {
+          try {
+            const res = await fetch(`/api/payment/antom/verify?order_number=${encodeURIComponent(orderNo || '')}`)
+            const data = await res.json()
+            if (res.ok && data.status === 'success') {
+              setOrderId(data.order_id); setOrderNumber(data.order_number)
+              try { localStorage.removeItem('flesim_cart') } catch {}
+              setStatus('success'); return
+            }
+            if (data.status === 'failed') { setStatus('failed'); return }
+          } catch { /* 重試 */ }
+          await new Promise((r) => setTimeout(r, 2000))
+        }
+        setOrderNumber(orderNo || '')
+        setStatus('processing'); return
       }
       if (tappayStatus === '0' && recTradeId) {
         // 付款成功，查詢訂單
@@ -76,6 +82,27 @@ function PaymentResultContent() {
         <Link href="/shop" className="mt-6 inline-block px-6 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover">
           返回選購
         </Link>
+      </div>
+    )
+  }
+
+  if (status === 'processing') {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <Loader2 className="mx-auto w-14 h-14 text-primary animate-spin" />
+        <h1 className="mt-4 text-2xl font-bold">付款處理中</h1>
+        <p className="mt-2 text-muted-foreground">
+          {orderNumber && <>訂單編號：<span className="font-mono font-medium text-foreground">{orderNumber}</span><br /></>}
+          我們正在確認你的付款，完成後訂單會自動更新。可稍後至「我的訂單」查看。
+        </p>
+        <div className="mt-6 flex flex-col gap-3">
+          <Link href="/orders" className="px-6 py-2.5 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover">
+            查看我的訂單
+          </Link>
+          <Link href="/shop" className="px-6 py-2.5 border border-border font-medium rounded-lg hover:bg-muted">
+            返回選購
+          </Link>
+        </div>
       </div>
     )
   }

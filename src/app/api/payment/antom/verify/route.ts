@@ -24,9 +24,10 @@ export async function GET(request: Request) {
     const inq = await antomRequest('/ams/api/v1/payments/inquiryPayment', { paymentRequestId: orderNumber })
     const d = inq.data as Record<string, unknown>
     inqData = d
+    // 只認 paymentStatus===SUCCESS 為付款成功。
+    // result.resultStatus==='S' 只代表 inquiryPayment「查詢 API 成功」，付款可能仍 PROCESSING/FAIL。
     const ps = String(d.paymentStatus || '')
-    const rs = String((d.result as Record<string, string> | undefined)?.resultStatus || '')
-    paid = ps === 'SUCCESS' || rs === 'S'
+    paid = ps === 'SUCCESS'
     paymentId = String(d.paymentId || '')
   } catch { /* 憑證/連線問題時視為未確認 */ }
 
