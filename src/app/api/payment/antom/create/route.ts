@@ -26,6 +26,8 @@ export async function POST(request: Request) {
       referenceOrderId: order.order_number,
       orderDescription: `FLESIM 訂單 ${order.order_number}`,
       orderAmount: { currency: cfg.paymentCurrency, value },
+      buyer: { referenceBuyerId: String(order.email || order.order_number) },
+      env: { terminalType: 'WEB' },
     },
     paymentAmount: { currency: cfg.paymentCurrency, value },
     paymentMethod: { paymentMethodType: String(body.payment_method || cfg.defaultMethod) },
@@ -34,6 +36,7 @@ export async function POST(request: Request) {
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
     env: { terminalType: 'WEB' },
   }
+  if (cfg.merchantRegion) payload.merchantRegion = cfg.merchantRegion
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/pay', payload)

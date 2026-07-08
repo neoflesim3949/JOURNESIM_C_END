@@ -14,6 +14,7 @@ export interface AntomConfig {
   currency: string          // 結算幣別（settlementCurrency）
   paymentCurrency: string   // 交易/計價幣別（paymentAmount，訂單以此計價，預設 TWD）
   defaultMethod: string     // pay 需指定 paymentMethodType（如 CARD / ALIPAY_CN…）
+  merchantRegion: string    // 商戶所在地（ISO 3166 2 碼，如 HK）
 }
 
 export async function getAntomConfig(): Promise<AntomConfig> {
@@ -32,6 +33,7 @@ export async function getAntomConfig(): Promise<AntomConfig> {
     currency: g('antom_currency', 'ANTOM_CURRENCY') || 'TWD',
     paymentCurrency: g('antom_payment_currency', 'ANTOM_PAYMENT_CURRENCY') || 'TWD',
     defaultMethod: g('antom_default_method', 'ANTOM_DEFAULT_METHOD') || 'CARD',
+    merchantRegion: g('antom_merchant_region', 'ANTOM_MERCHANT_REGION') || 'HK',
   }
 }
 

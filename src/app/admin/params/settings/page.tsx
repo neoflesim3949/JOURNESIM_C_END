@@ -264,6 +264,12 @@ export default function AdminSettingsPage() {
                 className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-xs" placeholder="CARD（或 ALIPAY_CN / GCASH / KAKAOPAY…）" />
               <p className="text-xs text-gray-400 mt-1">pay 需指定；依你 Antom 合約啟用的方式填。預設 CARD。</p>
             </div>
+            <div>
+              <label className="text-sm font-medium">商戶所在地（merchantRegion）</label>
+              <input value={getValue('antom_merchant_region')} onChange={(e) => handleChange('antom_merchant_region', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="HK" />
+              <p className="text-xs text-gray-400 mt-1">ISO 3166 兩碼；需與 Antom 商戶註冊地一致（例：HK）。</p>
+            </div>
           </div>
           <div>
             <label className="text-sm font-medium">您的私鑰（Merchant Private Key，簽章用）</label>
