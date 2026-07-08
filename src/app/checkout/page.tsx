@@ -8,6 +8,27 @@ import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
 
+// Antom Web SDK（收銀台）
+const ANTOM_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.13.0/dist/umd/ams-checkout.min.js'
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    AMSCashierPayment?: new (cfg: Record<string, unknown>) => { mountComponent: (opts: Record<string, unknown>, el: any) => Promise<unknown> }
+  }
+}
+function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') return resolve(null)
+    if (window.AMSCashierPayment) return resolve(window.AMSCashierPayment)
+    const s = document.createElement('script')
+    s.src = ANTOM_SDK
+    s.async = true
+    s.onload = () => resolve(window.AMSCashierPayment || null)
+    s.onerror = () => resolve(null)
+    document.body.appendChild(s)
+  })
+}
+
 export default function CheckoutPage() {
   return (
     <Suspense fallback={<div className="max-w-lg mx-auto px-4 py-16 text-center text-muted-foreground">載入中...</div>}>
@@ -34,6 +55,7 @@ function CheckoutContent() {
   const [availablePoints, setAvailablePoints] = useState<number>(0)
   const [isPointsLoading, setIsPointsLoading] = useState(false)
   const [provider, setProvider] = useState<'tappay' | 'antom'>('tappay')
+  const [antomMounted, setAntomMounted] = useState(false)
   const hasSim = simItems.length > 0
 
   useEffect(() => {
@@ -42,7 +64,7 @@ function CheckoutContent() {
     fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => { if (d?.provider === 'antom') setProvider('antom') }).catch(() => {})
   }, [])
 
-  // Antom（Alipay+）：建單(pending) → 建立 Antom 支付 → 跳轉收銀台
+  // Antom（Alipay+）：建單(pending) → createPaymentSession → 前端 SDK 渲染收銀台（多方式）
   async function handleAntom() {
     if (!email || items.length === 0) return
     if (hasSim && (!shippingName || !shippingPhone || !shippingAddress)) { alert('請填寫收件資料'); return }
@@ -58,15 +80,40 @@ function CheckoutContent() {
       })
       const data = await res.json()
       if (!res.ok) { alert(data.error || '下單失敗'); setLoading(false); return }
-      const created = await fetch('/api/payment/antom/create', {
+
+      const s = await fetch('/api/payment/antom/session', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_number: data.order_number }),
       }).then((r) => r.json()).catch(() => null)
-      if (created?.redirectUrl) { clearCart(); window.location.href = created.redirectUrl; return }
-      alert(created?.error || 'Antom 建立支付失敗（請確認後台已填入 Antom 憑證）')
+      if (!s?.paymentSessionData) { alert(s?.error || 'Antom 建立收銀台失敗（請確認後台憑證/設定）'); setLoading(false); return }
+
+      const SDK = await loadAntomSdk()
+      if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
+
+      setAntomMounted(true)
+      clearCart()
+      const cashier = new SDK({
+        environment: s.environment === 'prod' ? 'prod' : 'sandbox',
+        locale: 'zh_TW',
+        onEventCallback: () => {},
+        onError: () => {},
+      })
+      // 付款完成後 SDK 會自動導回 paymentRedirectUrl（/payment/result?provider=antom）
+      const el = document.getElementById('antom-container')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = cashier as any
+      if (typeof c.mountComponent === 'function') {
+        await c.mountComponent({ sessionData: s.paymentSessionData }, el)
+      } else if (typeof c.createComponent === 'function') {
+        const comp = await c.createComponent({ sessionData: s.paymentSessionData })
+        if (comp?.mount) await comp.mount(el || '#antom-container')
+      } else {
+        throw new Error('SDK 無 mountComponent/createComponent 方法')
+      }
       setLoading(false)
-    } catch {
-      alert('下單失敗，請稍後再試'); setLoading(false)
+    } catch (e) {
+      console.error('[antom] mount error', e)
+      alert('付款初始化失敗：' + (e instanceof Error ? e.message : String(e))); setLoading(false)
     }
   }
 
@@ -290,14 +337,18 @@ function CheckoutContent() {
           {/* 付款：依後台「前台金流供應商」切換 */}
           {provider === 'antom' ? (
             <div className="mt-2">
-              <button
-                onClick={handleAntom}
-                disabled={loading || !email || totalPrice <= 0 || (hasSim && (!shippingName || !shippingPhone || !shippingAddress))}
-                className="w-full py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
-              >
-                {loading ? '前往付款中…' : `前往付款 ${formatPrice(totalPrice)}（Antom）`}
-              </button>
-              <p className="mt-2 text-xs text-muted-foreground text-center">將導向 Antom（Alipay+）收銀台完成付款</p>
+              {!antomMounted && (
+                <button
+                  onClick={handleAntom}
+                  disabled={loading || !email || totalPrice <= 0 || (hasSim && (!shippingName || !shippingPhone || !shippingAddress))}
+                  className="w-full py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
+                >
+                  {loading ? '載入付款頁…' : `前往付款 ${formatPrice(totalPrice)}（Antom）`}
+                </button>
+              )}
+              {/* Antom 收銀台掛載容器 */}
+              <div id="antom-container" className="mt-3" />
+              {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">將以 Antom（Alipay+）收銀台完成付款</p>}
             </div>
           ) : (
             <TapPayForm
