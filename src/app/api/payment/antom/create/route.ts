@@ -16,8 +16,14 @@ export async function POST(request: Request) {
 
   const cfg = await getAntomConfig()
   const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin
-  // 交易金額用訂單計價幣別（預設 TWD）；結算幣別另設，Antom 自動換匯
-  const value = toAntomAmountValue(Number(order.total_amount), cfg.paymentCurrency)
+  // 訂單以 TWD 計價；若交易幣別非 TWD，用匯率換算
+  let payAmount = Number(order.total_amount)
+  if (cfg.paymentCurrency.toUpperCase() !== 'TWD') {
+    const { data: r } = await supabase.from('exchange_rates').select('rate').eq('currency', cfg.paymentCurrency.toUpperCase()).maybeSingle()
+    const rate = r?.rate ? Number(r.rate) : 0
+    if (rate > 0) payAmount = Number(order.total_amount) * rate
+  }
+  const value = toAntomAmountValue(payAmount, cfg.paymentCurrency)
 
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
@@ -27,6 +33,7 @@ export async function POST(request: Request) {
       orderDescription: `FLESIM 訂單 ${order.order_number}`,
       orderAmount: { currency: cfg.paymentCurrency, value },
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
+      goods: [{ referenceGoodsId: order.order_number, goodsName: 'FLESIM eSIM / SIM', goodsQuantity: '1', goodsUnitAmount: { currency: cfg.paymentCurrency, value } }],
       env: { terminalType: 'WEB' },
     },
     paymentAmount: { currency: cfg.paymentCurrency, value },

@@ -91,7 +91,6 @@ function CheckoutContent() {
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
-      clearCart()
       const cashier = new SDK({
         environment: s.environment === 'prod' ? 'prod' : 'sandbox',
         locale: 'zh_TW',
@@ -99,14 +98,15 @@ function CheckoutContent() {
         onError: () => {},
       })
       // 付款完成後 SDK 會自動導回 paymentRedirectUrl（/payment/result?provider=antom）
-      const el = document.getElementById('antom-container')
+      // SDK 內部以 querySelector 找容器 → 需傳「字串選擇器」而非 DOM 元素
+      const selector = '#antom-container'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
       if (typeof c.mountComponent === 'function') {
-        await c.mountComponent({ sessionData: s.paymentSessionData }, el)
+        await c.mountComponent({ sessionData: s.paymentSessionData }, selector)
       } else if (typeof c.createComponent === 'function') {
         const comp = await c.createComponent({ sessionData: s.paymentSessionData })
-        if (comp?.mount) await comp.mount(el || '#antom-container')
+        if (comp?.mount) await comp.mount(selector)
       } else {
         throw new Error('SDK 無 mountComponent/createComponent 方法')
       }
