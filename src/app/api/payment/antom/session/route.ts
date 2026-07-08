@@ -64,6 +64,11 @@ export async function POST(request: Request) {
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }
+  // 多結算幣別合約：需明確指定結算幣別（settlementCurrency，取自後台 antom_currency）
+  // 否則 Antom 無法推斷 → PROCESS_FAIL。顧客仍付 paymentAmount 幣別，此為撥款幣別。
+  if (cfg.currency) payload.settlementStrategy = { settlementCurrency: cfg.currency.toUpperCase() }
+  // 網頁整合須指定終端類型；Apple Pay 缺此欄會 PROCESS_FAIL（實測），卡片/其他方式帶著也正常
+  payload.env = { terminalType: 'WEB' }
   // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶
   if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
 
