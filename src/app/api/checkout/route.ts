@@ -149,7 +149,6 @@ export async function POST(request: Request) {
       order_number: orderNumber,
       status: paymentStatus === 'paid' ? 'paid' : 'pending_payment',
       total_amount: totalAmount,
-      redeem_points: redeemAmount, // 儲存抵扣點數
       payment_method,
       tappay_trade_id: tappayTradeId,
       cart_items: items,

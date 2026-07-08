@@ -207,6 +207,83 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
+      {/* 前台金流供應商切換 */}
+      <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
+        <h2 className="flex items-center gap-2 font-semibold"><CreditCard className="w-5 h-5" />前台金流供應商</h2>
+        <p className="text-xs text-gray-500 mt-1">決定結帳頁使用哪個金流；可先搭建 Antom，稍後再切換。</p>
+        <select value={getValue('payment_provider') || 'tappay'} onChange={(e) => handleChange('payment_provider', e.target.value)}
+          className="mt-3 w-64 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+          <option value="tappay">TapPay（現行）</option>
+          <option value="antom">Antom（Alipay+ / 多國支付）</option>
+        </select>
+      </div>
+
+      {/* Antom Settings */}
+      <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
+        <h2 className="flex items-center gap-2 font-semibold"><CreditCard className="w-5 h-5" />Antom 金流設定</h2>
+        <p className="text-xs text-gray-500 mt-1">Antom（Ant International / Alipay+）Cashier Payment；憑證取自 Antom Dashboard。</p>
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">Client-Id</label>
+              <input value={getValue('antom_client_id')} onChange={(e) => handleChange('antom_client_id', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-xs" placeholder="SANDBOX_xxx 或 正式 Client-Id" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">環境</label>
+              <select value={getValue('antom_env') || 'sandbox'} onChange={(e) => handleChange('antom_env', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <option value="sandbox">Sandbox（測試）</option>
+                <option value="production">Production（正式）</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">閘道網址（Gateway URL）</label>
+              <input value={getValue('antom_gateway_url')} onChange={(e) => handleChange('antom_gateway_url', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-xs" placeholder="https://open-sea-global.alipay.com" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">交易幣別（訂單計價）</label>
+              <input value={getValue('antom_payment_currency')} onChange={(e) => handleChange('antom_payment_currency', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="TWD" />
+              <p className="text-xs text-gray-400 mt-1">FLESIM 訂單以此計價，通常 TWD。</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium">結算幣別（Settlement）</label>
+              <input value={getValue('antom_currency')} onChange={(e) => handleChange('antom_currency', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" placeholder="USD / TWD" />
+              <p className="text-xs text-gray-400 mt-1">Antom 撥款給你的幣別，與交易幣別不同時會自動換匯。</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">預設付款方式（paymentMethodType）</label>
+              <input value={getValue('antom_default_method')} onChange={(e) => handleChange('antom_default_method', e.target.value)}
+                className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-xs" placeholder="CARD（或 ALIPAY_CN / GCASH / KAKAOPAY…）" />
+              <p className="text-xs text-gray-400 mt-1">pay 需指定；依你 Antom 合約啟用的方式填。預設 CARD。</p>
+            </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium">您的私鑰（Merchant Private Key，簽章用）</label>
+            <textarea value={getValue('antom_merchant_private_key')} onChange={(e) => handleChange('antom_merchant_private_key', e.target.value)}
+              rows={3} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono" placeholder="您的私钥（RSA，PEM 或 base64）" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">您的公鑰（Merchant Public Key，上傳給 Antom 用，系統僅保存備查）</label>
+            <textarea value={getValue('antom_merchant_public_key')} onChange={(e) => handleChange('antom_merchant_public_key', e.target.value)}
+              rows={3} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono" placeholder="您的公钥（RSA，PEM 或 base64）" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Antom 公鑰（Antom Public Key，驗簽用）</label>
+            <textarea value={getValue('antom_alipay_public_key')} onChange={(e) => handleChange('antom_alipay_public_key', e.target.value)}
+              rows={3} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono" placeholder="Antom公钥（RSA，PEM 或 base64）" />
+          </div>
+          <p className="text-xs text-gray-400">私鑰僅存於後端資料庫、前端不會取得。三把金鑰對應：您的私鑰＝簽章、Antom 公鑰＝驗 webhook、您的公鑰＝上傳給 Antom（保存備查）。細節見 docs/Antom_API.md。</p>
+        </div>
+      </div>
+
       {/* Merchant IDs per payment method */}
       <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
         <h2 className="flex items-center gap-2 font-semibold">

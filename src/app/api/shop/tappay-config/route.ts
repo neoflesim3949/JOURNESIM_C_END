@@ -44,5 +44,6 @@ export async function GET() {
     if (url) cardTypeIcons[t] = url
   }
 
-  return NextResponse.json({ app_id: Number(appId || '0'), app_key: appKey, env, methods, cardTypeIcons })
+  const provider = nonEmpty(settings.get('payment_provider')) || 'tappay'
+  return NextResponse.json({ app_id: Number(appId || '0'), app_key: appKey, env, methods, cardTypeIcons, provider })
 }
