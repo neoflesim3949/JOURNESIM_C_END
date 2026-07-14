@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomSdk } from '@/lib/antom-sdk'
+import { loadAntomElement } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -91,6 +91,8 @@ function CheckoutContent() {
           ...(antomCardId ? { card_id: antomCardId } : {}),
         }),
       }).then((r) => r.json()).catch(() => null)
+      // Apple Pay：後端回 redirect_url（託管頁）→ 直接跳轉
+      if (s?.redirect_url) { window.location.href = s.redirect_url; return }
       if (!s?.paymentSessionData) { alert(s?.error || 'Antom 建立收銀台失敗（請確認後台憑證/設定）'); setLoading(false); return }
 
       // Apple Pay 環境自檢：只有支援的裝置/瀏覽器（Safari + Apple 裝置 + Wallet 有卡）才會顯示按鈕
@@ -109,28 +111,36 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      const SDK = await loadAntomSdk()
+      const SDK = await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
       // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
+      let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const cashier = new SDK({
         environment: s.environment === 'prod' ? 'prod' : 'sandbox',
         locale: 'zh_TW',
         onEventCallback: (evt: any) => {
           const code = evt?.code || ''
-          console.log('[antom event]', code, evt)
-          if (code === 'SDK_PAYMENT_SUCCESSFUL') setAntomMsg('付款成功，處理中…')
-          else if (code === 'SDK_PAYMENT_FAIL' || code === 'SDK_PAYMENT_ERROR') setAntomMsg(`付款未完成（${code}）：${evt?.result?.paymentResultCode || ''}`)
-          else if (code === 'SDK_PAYMENT_CANCEL') setAntomMsg('已取消付款')
-          else if (code) setAntomMsg(`SDK 事件：${code}`)
+          const message = evt?.message || evt?.result?.paymentResultCode || ''
+          console.log('[antom event]', code, message, evt)
+          if (code === 'SDK_END_OF_LOADING' || code === 'SDK_READY') { elementDone = true; setAntomMsg('') }
+          else if (code === 'SDK_PAYMENT_SUCCESSFUL') { elementDone = true; setAntomMsg('付款成功，處理中…') }
+          else if (code === 'SDK_PAYMENT_FAIL' || code === 'SDK_PAYMENT_ERROR') { elementDone = true; setAntomMsg(`付款未完成（${code}）${message ? '：' + message : ''}`) }
+          else if (code === 'SDK_PAYMENT_CANCEL') { elementDone = true; setAntomMsg('已取消付款') }
+          else if (code) setAntomMsg(`SDK 事件：${code}${message ? '｜' + message : ''}`)
         },
         onError: (err: any) => {
+          elementDone = true
           console.error('[antom error]', err)
           setAntomMsg(`SDK 錯誤：${err?.code || ''} ${err?.message || JSON.stringify(err || {})}`)
         },
       })
+      // 元件載入逾時偵測：8 秒內未完成載入（多為 clientIp/域名驗證/嵌入式權限問題）
+      setTimeout(() => {
+        if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成）。多為 clientIp／Apple Pay 域名驗證／嵌入式權限問題，請截圖此畫面回報。')
+      }, 8000)
       // 付款完成後 SDK 會自動導回 paymentRedirectUrl（/payment/result?provider=antom）
       // SDK 內部以 querySelector 找容器 → 需傳「字串選擇器」而非 DOM 元素
       const selector = '#antom-container'

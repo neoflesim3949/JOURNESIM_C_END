@@ -1,25 +1,47 @@
-// Antom Web SDK（ams-checkout）loader — 收銀台與綁卡共用同一顆 AMSCashierPayment
-// v2 Payment Element（新版）：Apple Pay 等錢包按鈕會依 session 設定（productScene=ELEMENT_PAYMENT）自動內嵌渲染
+// Antom Web SDK（ams-checkout v2）loader
+// - productScene=ELEMENT_PAYMENT（嵌入式收銀台）→ 需用 AMSPaymentElement 類別（Antom 官方確認）
+// - 傳統模式 / 綁卡 vaulting → AMSCashierPayment
 const ANTOM_SDK = 'https://js.antom.com/v2/ams-checkout.js'
 
 declare global {
   interface Window {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     AMSCashierPayment?: new (cfg: Record<string, unknown>) => any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    AMSPaymentElement?: new (cfg: Record<string, unknown>) => any
   }
 }
 
-export function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') return resolve(null)
-    if (window.AMSCashierPayment) return resolve(window.AMSCashierPayment)
+// 載入 SDK <script>（只載一次）
+function ensureScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return reject(new Error('no window'))
+    if (window.AMSCashierPayment || window.AMSPaymentElement) return resolve()
+    const existing = document.querySelector(`script[src="${ANTOM_SDK}"]`)
+    if (existing) {
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', () => reject(new Error('sdk load fail')))
+      return
+    }
     const s = document.createElement('script')
     s.src = ANTOM_SDK
     s.async = true
-    s.onload = () => resolve(window.AMSCashierPayment || null)
-    s.onerror = () => resolve(null)
+    s.onload = () => resolve()
+    s.onerror = () => reject(new Error('sdk load fail'))
     document.body.appendChild(s)
   })
+}
+
+// 傳統收銀台 / 綁卡（AMSCashierPayment）
+export async function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null> {
+  try { await ensureScript() } catch { return null }
+  return window.AMSCashierPayment || null
+}
+
+// Payment Element（productScene=ELEMENT_PAYMENT 專用）：優先新版 AMSPaymentElement，退回舊版
+export async function loadAntomElement(): Promise<Window['AMSPaymentElement'] | null> {
+  try { await ensureScript() } catch { return null }
+  return window.AMSPaymentElement || window.AMSCashierPayment || null
 }
 
 // 掛載 Antom 元件（收銀台 sessionData 或綁卡 vaultingSessionData）到指定容器選擇器

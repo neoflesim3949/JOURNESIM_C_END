@@ -3,6 +3,15 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { antomRequest, getAntomConfig, toAntomAmountValue } from '@/lib/antom'
 
+// 取得買方公網 IP（Apple Pay 需要 env.clientIp，缺失或內網 IP 會靜默失敗）
+function getClientIp(request: Request): string {
+  const xff = (request.headers.get('x-forwarded-for') || '').split(',')[0].trim()
+  const ip = xff || request.headers.get('x-real-ip') || request.headers.get('cf-connecting-ip') || ''
+  // 過濾內網/回環位址（Apple Pay 不接受）
+  if (!ip || ip === '::1' || ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('172.16.')) return ''
+  return ip
+}
+
 // POST { order_number } — 建立 Antom 收銀台 session（多方式，前端 SDK 渲染）
 // 用 createPaymentSession（不指定 paymentMethod）；詳見 docs/Antom_API.md
 export async function POST(request: Request) {
@@ -49,13 +58,14 @@ export async function POST(request: Request) {
     // 付款即綁卡（tokenizeMode）：收銀台顯示 Antom 原生「儲存卡片」勾選；付款後 webhook 存卡
     paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
   } else if (method === 'APPLEPAY') {
-    // Apple Pay：buttonsBundled 讓新版 Payment Element 自動內嵌渲染 Apple Pay 按鈕
-    paymentMethod.paymentMethodMetaData = { applePayConfiguration: { buttonsBundled: 'true' } }
+    // Apple Pay：applePayConfiguration 需為 paymentMethod【頂層】欄位（與 paymentMethodType 平級），
+    // 非包在 paymentMethodMetaData 內（Antom 官方確認）→ buttonsBundled 讓元件自動渲染 Apple Pay 按鈕
+    paymentMethod.applePayConfiguration = { buttonsBundled: 'true' }
   }
 
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    productScene: 'ELEMENT_PAYMENT',   // 新版 Payment Element（錢包按鈕自動渲染）
+    productScene: 'ELEMENT_PAYMENT',   // 新版 Payment Element（嵌入式，錢包按鈕自動渲染）
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -71,14 +81,16 @@ export async function POST(request: Request) {
   // 多結算幣別合約：需明確指定結算幣別（settlementCurrency，取自後台 antom_currency）
   // 否則 Antom 無法推斷 → PROCESS_FAIL。顧客仍付 paymentAmount 幣別，此為撥款幣別。
   if (cfg.currency) payload.settlementStrategy = { settlementCurrency: cfg.currency.toUpperCase() }
-  // 網頁整合須指定終端類型；Apple Pay 缺此欄會 PROCESS_FAIL（實測），卡片/其他方式帶著也正常
-  payload.env = { terminalType: 'WEB' }
+  // 網頁整合須指定終端類型；Apple Pay 另需 clientIp（真實公網 IP），缺失會靜默失敗（Antom 確認）
+  const clientIp = getClientIp(request)
+  payload.env = { terminalType: 'WEB', ...(clientIp ? { clientIp } : {}) }
   // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶
   if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
+    // 嵌入式：回 paymentSessionData 供 SDK 掛載
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
