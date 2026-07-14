@@ -59,11 +59,16 @@ export async function POST(request: Request) {
     paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
   }
 
-  // 全部走【彈窗模式】（CASHIER_PAYMENT，不設 productScene / applePayConfiguration；
-  // 前端 AMSCashierPayment.createComponent 完整 UI、自帶送出鍵，Apple Pay 自動渲染，無需嵌入式白名單）
-  // ——嚴格對齊 Antom 官方實際範例。
+  // 混合模式：
+  //  - 卡片/街口 → 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 createComponent 完整 UI、
+  //    自帶送出鍵、無需嵌入式白名單，保留原生體驗。
+  //  - Apple Pay → 【全托管收銀台】(productScene=CHECKOUT_PAYMENT)：回 normalUrl 整頁跳轉 Antom 託管頁，
+  //    這是本商戶唯一能穩定喚起 Apple Pay 的模式（嵌入式白名單未開通）。
+  //    註：Antom 客服口中的「HOSTED_CKP」對應 API 合法值為 CHECKOUT_PAYMENT。
+  const useHosted = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
+    ...(useHosted ? { productScene: 'CHECKOUT_PAYMENT' } : {}),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -88,14 +93,20 @@ export async function POST(request: Request) {
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
-    // 嵌入式：回 paymentSessionData 供 SDK 掛載
+    const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
+    // 全托管（Apple Pay）：回 normalUrl → 前端整頁跳轉託管頁
+    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
+    if (useHosted && normalUrl) {
+      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
+    }
+    // 彈窗（卡片/街口）：回 paymentSessionData 供 SDK createComponent
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
         ok: true,
         paymentSessionData,
         paymentSessionId: res.data.paymentSessionId,
-        environment: cfg.env === 'production' ? 'prod' : 'sandbox',
+        environment,
       })
     }
     return NextResponse.json({ error: result.resultMessage || '建立收銀台失敗', raw: res.data }, { status: 400 })
