@@ -57,15 +57,13 @@ export async function POST(request: Request) {
   } else if (method === 'CARD' && body.save_card !== false && user) {
     // 付款即綁卡（tokenizeMode）：收銀台顯示 Antom 原生「儲存卡片」勾選；付款後 webhook 存卡
     paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
-  } else if (method === 'APPLEPAY') {
-    // Apple Pay：applePayConfiguration 需為 paymentMethod【頂層】欄位（與 paymentMethodType 平級），
-    // 非包在 paymentMethodMetaData 內（Antom 官方確認）→ buttonsBundled 讓元件自動渲染 Apple Pay 按鈕
-    paymentMethod.applePayConfiguration = { buttonsBundled: 'true' }
   }
 
+  // 全部走【彈窗模式】（CASHIER_PAYMENT，不設 productScene / applePayConfiguration；
+  // 前端 AMSCashierPayment.createComponent 完整 UI、自帶送出鍵，Apple Pay 自動渲染，無需嵌入式白名單）
+  // ——嚴格對齊 Antom 官方實際範例。
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    productScene: 'ELEMENT_PAYMENT',   // 新版 Payment Element（嵌入式，錢包按鈕自動渲染）
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,

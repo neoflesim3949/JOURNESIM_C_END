@@ -44,6 +44,29 @@ export async function loadAntomElement(): Promise<Window['AMSPaymentElement'] | 
   return window.AMSPaymentElement || window.AMSCashierPayment || null
 }
 
+// 彈窗模式 SDK（Apple Pay 用）：使用 Antom 官方範例確切版本 marmot-cloud 1.19.0 + AMSCashierPayment.createComponent
+const ANTOM_POPUP_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.19.0/dist/umd/ams-checkout.min.js'
+export async function loadAntomPopup(): Promise<Window['AMSCashierPayment'] | null> {
+  if (typeof window === 'undefined') return null
+  await new Promise<void>((resolve) => {
+    const existing = document.querySelector('script[data-antom-popup]')
+    if (existing) {
+      if (window.AMSCashierPayment) return resolve()
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', () => resolve())
+      return
+    }
+    const s = document.createElement('script')
+    s.src = ANTOM_POPUP_SDK
+    s.async = true
+    s.setAttribute('data-antom-popup', '1')
+    s.onload = () => resolve()
+    s.onerror = () => resolve()
+    document.body.appendChild(s)
+  })
+  return window.AMSCashierPayment || null
+}
+
 // 掛載 Antom 元件（收銀台 sessionData 或綁卡 vaultingSessionData）到指定容器選擇器
 export async function mountAntom(sessionData: string, selector: string, environment: 'prod' | 'sandbox') {
   const SDK = await loadAntomSdk()

@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomElement } from '@/lib/antom-sdk'
+import { loadAntomPopup } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -111,7 +111,9 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      const SDK = await loadAntomElement()
+      // 全部走【彈窗模式】（marmot-cloud 1.19.0 AMSCashierPayment.createComponent，官方範例做法）
+      // 完整 UI、自帶送出鍵；Apple Pay 自動渲染；無需嵌入式白名單
+      const SDK = await loadAntomPopup()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
@@ -137,27 +139,15 @@ function CheckoutContent() {
           setAntomMsg(`SDK 錯誤：${err?.code || ''} ${err?.message || JSON.stringify(err || {})}`)
         },
       })
-      // 元件載入逾時偵測：8 秒內未完成載入（多為 clientIp/域名驗證/嵌入式權限問題）
+      // 載入逾時偵測：8 秒內未完成
       setTimeout(() => {
-        if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成）。多為 clientIp／Apple Pay 域名驗證／嵌入式權限問題，請截圖此畫面回報。')
+        if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成），請截圖此畫面回報。')
       }, 8000)
-      // 付款完成後 SDK 會自動導回 paymentRedirectUrl（/payment/result?provider=antom）
-      // SDK 內部以 querySelector 找容器 → 需傳「字串選擇器」而非 DOM 元素
-      const selector = '#antom-container'
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      // Apple Pay 的原生按鈕即付款鍵，不需額外 submit 鍵
-      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
-      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: !isApplePay } }
-      if (typeof c.mountComponent === 'function') {
-        await c.mountComponent(mountOpts, selector)
-      } else if (typeof c.createComponent === 'function') {
-        const comp = await c.createComponent(mountOpts)
-        if (comp?.mount) await comp.mount(selector)
-      } else {
-        throw new Error('SDK 無 mountComponent/createComponent 方法')
-      }
-      // 掛載完成即視為元件就緒（卡片/街口不一定發 END_OF_LOADING 事件）→ 關閉逾時誤報並清空載入訊息
+      // 彈窗模式（官方範例）：createComponent 喚起完整付款彈窗（含送出鍵/Apple Pay），完成後導回 paymentRedirectUrl
+      await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
+      // 掛載完成即視為就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
       setAntomMsg('')
       setLoading(false)
