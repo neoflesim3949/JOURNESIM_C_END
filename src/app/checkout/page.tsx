@@ -157,6 +157,8 @@ function CheckoutContent() {
       } else {
         throw new Error('SDK 無 mountComponent/createComponent 方法')
       }
+      // 掛載完成即視為元件就緒（卡片/街口不一定發 END_OF_LOADING 事件）→ 關閉逾時誤報
+      elementDone = true
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
