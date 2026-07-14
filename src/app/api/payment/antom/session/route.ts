@@ -88,7 +88,13 @@ export async function POST(request: Request) {
   const clientIp = getClientIp(request)
   payload.env = { terminalType: 'WEB', ...(clientIp ? { clientIp } : {}) }
   // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶
-  if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
+  if (method === 'CARD') {
+    // 新卡（首次輸入/首次綁卡，非已綁定舊卡）強制 3DS 驗證：發卡行 OTP，成功後「未授權」類拒付
+    // 由發卡行承擔（liability shift）—— 降低盜刷/拒付風險（見 docs/RiskManagementPlan.md）。
+    // 已綁定舊卡回購（帶 paymentMethodId）憑證已於綁卡時驗證，維持免驗以利轉換。
+    const isNewCard = !cardId
+    payload.paymentFactor = { isAuthorization: true, ...(isNewCard ? { is3DSAuthentication: true } : {}) }
+  }
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
