@@ -129,7 +129,7 @@ function CheckoutContent() {
           else if (code === 'SDK_PAYMENT_SUCCESSFUL') { elementDone = true; setAntomMsg('付款成功，處理中…') }
           else if (code === 'SDK_PAYMENT_FAIL' || code === 'SDK_PAYMENT_ERROR') { elementDone = true; setAntomMsg(`付款未完成（${code}）${message ? '：' + message : ''}`) }
           else if (code === 'SDK_PAYMENT_CANCEL') { elementDone = true; setAntomMsg('已取消付款') }
-          else if (code) setAntomMsg(`SDK 事件：${code}${message ? '｜' + message : ''}`)
+          // 其餘（SDK_START_OF_LOADING 等載入中事件）不顯示於畫面，僅記 console
         },
         onError: (err: any) => {
           elementDone = true
@@ -157,8 +157,9 @@ function CheckoutContent() {
       } else {
         throw new Error('SDK 無 mountComponent/createComponent 方法')
       }
-      // 掛載完成即視為元件就緒（卡片/街口不一定發 END_OF_LOADING 事件）→ 關閉逾時誤報
+      // 掛載完成即視為元件就緒（卡片/街口不一定發 END_OF_LOADING 事件）→ 關閉逾時誤報並清空載入訊息
       elementDone = true
+      setAntomMsg('')
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
