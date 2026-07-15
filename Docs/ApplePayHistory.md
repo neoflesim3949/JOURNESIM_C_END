@@ -1,227 +1,189 @@
-# Antom Apple Pay 串接解決歷程
+# Antom Apple Pay 串接歷程與最終解法
 
 | 項目 | 內容 |
 |---|---|
 | 商戶 | Flesim.com HK Limited |
-| 平台 | FLESIM（www.flesim.com）|
-| 金流 | Antom（Ant International / Alipay+）Cashier Payment |
-| 目的 | 完整記錄 Apple Pay 於 Web 端串接的所有嘗試、錯誤與結論，避免重複試錯 |
-| 相關文件 | [[Antom_ApplePay_Modes]]（三模式對照）、`docs/RiskManagementPlan.md`（3DS）|
+| 平台 | FLESIM（www.flesim.com）｜Next.js App Router |
+| 金流 | Antom（Ant International / Alipay+）One-time Payments · **Payment Element** |
+| 狀態 | ✅ **嵌入式 Apple Pay 已可用**（2026-07-15 實測付款成功，TWD 計價 / USD 結算）|
+| 相關 | `Docs/Antom_ApplePay_Modes.md`（模式對照）、`docs/RiskManagementPlan.md`（3DS）|
 
-> **核心原則**：**「代碼是唯一的真相」**。Antom 客服的文字建議在此案中前後改口 5+ 次，最終皆以**官方範例 / 官方 SDK model / 實測事件序列**為準。
-
----
-
-## 一、最終結論（TL;DR）
-
-- **卡片 / 街口** → **嵌入式** `ELEMENT_PAYMENT`（v2 `AMSPaymentElement.mountComponent`）**實測可用**。
-- **Apple Pay** → **全托管** `CHECKOUT_PAYMENT`（回 `normalUrl` 整頁跳轉）—— **本專案唯一實測可穩定喚起 Apple Pay 的模式**。
-- **Apple Pay 嵌入式（不跳轉）在前端渲染層走不通**，兩支 SDK 都失敗（見下表），且**與後端 payload 無關**（payload 已由官方 Java SDK model 驗證正確）。推斷卡點在 **Antom 側 Apple Pay 商戶/網域資源設定**。
+> 核心原則：**「代碼是唯一的真相」**。本案 Antom 客服建議前後改口 5+ 次、文檔散落十餘頁且範例新舊混雜；最終解法來自「官方 Payment Element 完整文檔的實際範例碼」+ 對 SDK 原始碼與 sessionData 的逐層解剖。
 
 ---
 
-## 二、嘗試與結果總表
+## 一、現行可用整合（最終解法）
 
-### 後端 `productScene` 模式
+### 架構總覽
 
-| 模式 | `productScene` | 前端 | Apple Pay 結果 |
-|---|---|---|---|
-| 全托管 Hosted | `CHECKOUT_PAYMENT` → `normalUrl` | 整頁跳轉 | ✅ **可喚起 Apple Pay**（最終採用）|
-| 嵌入式 Payment Element | `ELEMENT_PAYMENT` | `mountComponent` 內嵌 | ❌ 前端渲染失敗（見下）|
-| 彈窗 Popup | 不設 `productScene` | `createComponent` overlay | ❌ marmot SDK 資源載入失敗 |
-
-### 前端 SDK × 方法（嵌入式/彈窗）
-
-| SDK | 類別 / 方法 | 卡片 | Apple Pay |
-|---|---|:---:|---|
-| `js.antom.com/v2/ams-checkout.js` | `AMSPaymentElement.mountComponent` | ✅ 可渲染 | ❌ 卡 `SDK_START_OF_LOADING`（永不結束、無 `onError`）|
-| `sdk.marmot-cloud.com/.../1.19.0/ams-checkout.min.js` | `AMSCashierPayment.mountComponent` | ❌ `Failed to create iframe` | ❌ `SDK_INTERNAL_ERROR: Failed to create iframe` → `SDK_CREATECOMPONENT_ERROR: Load resource timeout` |
-
-**觀察到的前端事件序列（Apple Pay）**
 ```
-v2    ：SDK_START_OF_LOADING → （靜默卡死，無後續、無 onError）
-marmot：SDK_START_OF_LOADING → onError:SDK_INTERNAL_ERROR(Failed to create iframe)
-                             → onError:SDK_CREATECOMPONENT_ERROR(Load resource timeout)
+結帳頁載入（不等 Email）
+  → POST /api/checkout            建 pending 訂單（email 未填先用訪客佔位）
+  → POST /api/payment/antom/session   createPaymentSession（ELEMENT_PAYMENT + 全部方式）
+  → 前端 new AMSElement({sessionData}) → element.mount(...) 嵌入 #antom-container
+  → SDK 渲染付款方式列表（信用卡 / Apple Pay / 街口 + 已綁定卡片）
+  → 顧客選方式 → 點我方「確認付款」鈕（使用者手勢）→ element.submitPayment()
+      · Apple Pay → 喚起 Wallet 付款表（顯示「付給 FLESIM.COM」）
+      · 卡片    → 3DS 驗證（新卡強制）
+  → SDK 自動導回 /payment/result → webhook(notifyPayment) + inquiryPayment 覆核
 ```
 
+- Email／金額／點數／收件資料**變更時自動銷毀重建**元件（簽章比對 + 0.9s debounce）。
+- 未填有效 Email 前「確認付款」禁用（訂單/eSIM 以 Email 交付）。
+
+### 後端範例（`src/app/api/payment/antom/session/route.ts` 節錄）
+
+```ts
+// createPaymentSession —— Payment Element（嵌入式）正解
+const payload = {
+  productCode: 'CASHIER_PAYMENT',
+  productScene: 'ELEMENT_PAYMENT',          // Payment Element 固定值（必填）
+  paymentRequestId: order.order_number,
+  order: {
+    referenceOrderId: order.order_number,
+    orderDescription: `FLESIM 訂單 ${order.order_number}`,
+    orderAmount: { currency: 'TWD', value },
+    merchant: { referenceMerchantId: 'FLESIM', merchantName: 'FLESIM.COM', merchantDisplayName: 'FLESIM.COM' },
+    goods: [{ referenceGoodsId, goodsName, goodsQuantity: '1', goodsUnitAmount: { currency: 'TWD', value } }],
+    buyer: { referenceBuyerId: email },
+  },
+  paymentAmount: { currency: 'TWD', value },
+  // 付款方式列表：由 Payment Element 渲染（Apple Pay 不可用單一 paymentMethod 送）
+  availablePaymentMethod: {
+    paymentMethodTypeList: [
+      { paymentMethodType: 'CARD' },
+      { paymentMethodType: 'APPLEPAY' },
+      { paymentMethodType: 'JKOPAY' },
+    ],
+    // 卡片參數放這層 metadata（applePayConfiguration 官方建議留空）
+    paymentMethodMetaData: {
+      is3DSAuthentication: true,            // 新卡強制 3DS（liability shift）
+      tokenizeMode: 'ASKFORCONSENT',        // 登入會員顯示「儲存卡片」勾選
+    },
+  },
+  // 會員已綁卡 → 元件內渲染「已儲存卡片」（paymentMethodType 必填，缺了報 not CARD）
+  savedPaymentMethods: cards.map(c => ({ paymentMethodType: 'CARD', paymentMethodId: c.card_token })),
+  settlementStrategy: { settlementCurrency: 'USD' },  // 多幣別合約必填，缺了 PROCESS_FAIL
+  env: { terminalType: 'WEB', deviceLanguage: 'zh_TW', clientIp },  // clientIp 必填（Apple Pay 缺會靜默失敗）
+  paymentRedirectUrl: `${origin}/payment/result?...`,
+  paymentNotifyUrl: `${origin}/api/webhooks/antom`,
+}
+const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
+// 回傳 res.data.paymentSessionData 給前端（勿加工——僅本專案的 displayName 改寫例外，見五）
+```
+
+### 前端範例（`src/app/checkout/page.tsx` 節錄）
+
+```ts
+// SDK：js.antom.com/v2（v2.0.20+），類別用 AMSElement（不是 AMSCashierPayment！）
+const ANTOM_SDK = 'https://js.antom.com/v2/ams-checkout.js'
+const SDK = window.AMSElement
+
+// 1) 建立元件（sessionData 在建構子傳入）
+const element = new SDK({
+  environment: 'prod',
+  locale: 'zh_TW',
+  sessionData,          // 後端回傳的 paymentSessionData
+})
+
+// 2) 嵌入結帳頁（type:'payment'；singleOption 用 'list'——'skip' 會非手勢喚起 Apple Pay → 空白+心跳逾時）
+const r = await element.mount(
+  { type: 'payment', appearance: { theme: 'default' }, notRedirectAfterComplete: false,
+    merchantAppointParam: { singleOption: 'list' } },
+  '#antom-container',
+).catch(e => ({ error: e }))
+if (r?.error) showError(r.error)
+
+// 3) 顧客點「確認付款」（必須是使用者手勢——Apple Pay Wallet 的硬性要求）
+const { status, userCanceled3D, session, error } = await element.submitPayment()
+if (error) {
+  if (userCanceled3D || status === 'PROCESSING') redirectToResultPageAndPoll()  // 結果未定 → 輪詢
+  else if (error.code === 'FORM_INVALID') { /* SDK 已提示，忽略 */ }
+  else showError(error)
+} else if (session?.nextAction?.normalUrl) {
+  window.location.href = session.nextAction.normalUrl   // 掃碼/APM 跳轉
+} else if (status === 'SUCCESS' || status === 'PROCESSING') {
+  redirectToResultPage()
+}
+```
+
+### 關鍵參數速查
+
+| 參數 | 值 | 為什麼 |
+|---|---|---|
+| `productScene` | `ELEMENT_PAYMENT` | Payment Element 必填固定值 |
+| 方式指定 | `availablePaymentMethod.paymentMethodTypeList` | Apple Pay **不可**用單一 `paymentMethod` 送 |
+| `applePayConfiguration` | **留空** | 官方：Payment Element 場景建議留空/預設 |
+| SDK | **`AMSElement`** @ js.antom.com/v2 | `AMSCashierPayment` 是另一套（收銀台/drop-in），Apple Pay 在自架網域走不通 |
+| 渲染 | `element.mount({type:'payment', singleOption:'list'})` | `'skip'` 非手勢喚起 → 空白 + `appHeartBeatTimeout` |
+| 送出 | 使用者點按鈕 → `element.submitPayment()` | Wallet 必須由**新鮮手勢**觸發；mount 後自動呼叫會被 Safari 擋 |
+| `settlementStrategy` | `{ settlementCurrency: 'USD' }` | 多幣別合約必填；計價幣別 TWD 可用 |
+| `env.clientIp` | 真實公網 IP | 缺失 → Apple Pay **靜默失敗** |
+| `savedPaymentMethods[]` | `{ paymentMethodType:'CARD', paymentMethodId }` | 型別必填，缺了報 `not CARD` |
+
 ---
 
-## 三、逐項排查與排除
+## 二、從「不能用」到「能用」——歷程時間軸
 
-| # | 假設 / 嘗試 | 動作 | 結果 |
+| # | 階段（皆實測）| 症狀 | 學到什麼 |
 |---|---|---|---|
-| 1 | `applePayConfiguration` 放 `paymentMethodMetaData` 內 | 依早期 Antom 建議 | ❌ 仍卡 loading |
-| 2 | `applePayConfiguration` 放 `paymentMethod` 頂層 | 依 Antom「改口」建議 | ❌ 仍卡 loading |
-| 3 | 需開通「Web 嵌入式白名單」權限 | 請 Antom 開通 | ❌ **開通後仍卡 loading**（排除權限）|
-| 4 | Apple Pay 該用 `availablePaymentMethod.paymentMethodTypeList` 指定 | 依官方文檔截圖修正 payload | ❌ 仍卡 loading（但**確認 payload 結構正確**）|
-| 5 | 官方 Java SDK model 驗證 payload | clone `alipay/global-open-sdk-java` 對照 | ✅ 證實 `AvailablePaymentMethod.paymentMethodTypeList`、`PaymentMethod` **無** 頂層 `applePayConfiguration` 欄位 → payload 已正確、非 payload 問題 |
-| 6 | 網域不符（`flesim.com` vs `www.flesim.com`）| 改用 www 測 | ❌ www 也卡 loading（排除網域）|
-| 7 | SDK 類別錯（該用 `AMSCashierPayment`）| 換 marmot `AMSCashierPayment.mountComponent` | ❌ 改報 `Failed to create iframe` / `Load resource timeout`（marmot SDK 環境載不出資源）|
+| 1 | 托管 `CHECKOUT_PAYMENT` 跳轉 | ✅ Apple Pay 可用但整頁跳轉、體驗差 | 反證商戶合約/憑證本身 OK |
+| 2 | 嵌入式 `AMSPaymentElement.mountComponent`（v2 舊認知）| ❌ 卡 `SDK_START_OF_LOADING` 靜默死 | 後端 SUCCESS ≠ 前端能渲染 |
+| 3 | 各種 payload 排列（applePayConfiguration 頂層/metadata、白名單開通、www/apex）| ❌ 全部一樣卡 | 逐一排除參數/權限/網域 |
+| 4 | 彈窗 marmot 1.19 `createComponent` | ⚠️ 表能跳但 `SDK_PAYMENT_ERROR`；後改 `Failed to create iframe` | marmot 1.19 太舊 |
+| 5 | **升級 SDK 1.47**（官方要求 ≥1.46）+ `createComponent` + 單一 paymentMethod + 無 productScene | ✅ **Wallet 表第一次跳出**；❌ 授權瞬間 `SDK_PAYMENT_CANCEL` | 舊 SDK 無 APPLEPAY plugin 是前期卡死主因 |
+| 6 | 解剖 merchant session：`domainName:"checkout.antom.com"` ≠ 頁面 `www.flesim.com` | ❌ Apple 網域不符 → 關表 | 該流程把 Apple Pay 跑在 Antom 跨網域 iframe |
+| 7 | 窮舉客戶端修法：API 無 domain 參數（Java SDK 30 欄全掃）、SDK v1/v2 `initiativeContext`=0、攔改請求（在跨網域 iframe 攔不到）| ❌ 全數證死 | AMSCashierPayment 流程在自架網域**架構上走不通** |
+| 8 | **發現官方 Payment Element 完整文檔：正解類別是 `AMSElement`**（`new AMSElement({sessionData})` → `mount()` → `submitPayment()`）| 🔑 整套重寫 | 前面全程用錯類別（AMSCashierPayment ≠ AMSElement）|
+| 9 | AMSElement + `singleOption:'skip'` | ❌ 空白 + `appHeartBeatTimeout` | Wallet 不可非手勢喚起 |
+| 10 | AMSElement + **`singleOption:'list'`** + 手勢按鈕 → submitPayment | ✅ **Apple Pay 付款成功！**（USD 2.46）| 2026-07-15 突破 |
+| 11 | 幣別改回 TWD | ✅ 照樣成功 | 當初「TWD 不行」是錯流程的假象 |
+| 12 | displayName 顯示 "Merchant" → sessionData metadata 改寫 | ✅ 顯示「付給 FLESIM.COM」 | Antom 伺服器寫死，API 參數不生效（見五）|
+| 13 | 全方式列表 + 已綁卡 + 進頁即載（第一層嵌入）| ✅ 現行版 | 照官方 UX：一層選方式、一鍵確認 |
 
-**結論**：payload、權限、網域、兩支 SDK 類別全數排除/試過，Apple Pay 嵌入式前端渲染仍失敗 → 問題不在我方可控範圍，指向 **Antom 側 Apple Pay 設定**。托管模式可用，故採之。
+**歷程中曾誤判的根因**（記錄以免重蹈）：嵌入式白名單權限、支付证书（Payment Processing Certificate）未配置、網域驗證檔過期、TWD 幣別、瀏覽器不支援。**真正的根因是第 5、8、9 步的三件事：SDK 版本過舊、SDK 類別用錯、非手勢喚起。**（支付证书至今未配置，Apple Pay 照樣可收款——Antom 的預置商戶認證已涵蓋。）
 
 ---
 
-## 四、Apple Pay 必備前置（皆已完成，與模式無關）
+## 三、六把鑰匙（缺一不可）
+
+1. **SDK ≥ 1.46**（實用 js.antom.com/v2 = 2.0.20）——舊版無 APPLEPAY plugin。
+2. **類別用 `AMSElement`**——Antom Web SDK 有兩套長很像的流程：`AMSCashierPayment`（收銀台/drop-in，Apple Pay 商戶驗證簽 checkout.antom.com、自架網域必死）vs **`AMSElement`（Payment Element，正解）**。
+3. **`productScene: ELEMENT_PAYMENT` + `availablePaymentMethod`**（Apple Pay 不可用單一 paymentMethod）。
+4. **`mount({type:'payment', singleOption:'list'})`**——'skip' 會在載入當下非手勢喚起 Apple Pay。
+5. **`submitPayment()` 必須由使用者手勢觸發**（點擊當下呼叫；mount 後自動呼叫會被 Safari 擋）。
+6. **前置齊備**：網域驗證檔（`.well-known/`）、Antom 後台域名管理註冊 www.flesim.com、`settlementCurrency: USD`、`env.clientIp`。
+
+---
+
+## 四、Apple Pay 前置條件（一次性設定）
 
 | 前置 | 說明 | 狀態 |
 |---|---|:---:|
-| 網域驗證檔 | `public/.well-known/apple-developer-merchantid-domain-association`（www.flesim.com 回 200 text/plain 不轉址；`next.config.ts` 強制 Content-Type）| ✅ |
-| `settlementStrategy.settlementCurrency` | 多幣別合約需指定結算幣別 = **USD**；TWD 未簽約 → `SETTLE_CONTRACT_NOT_MATCH` / `PROCESS_FAIL` | ✅ |
-| `env.terminalType: WEB` | 網頁整合必填 | ✅ |
-| `env.clientIp` | 真實公網 IP，內網/回環或缺失 → **靜默失敗** | ✅ |
-| 裝置 | Safari + Apple Wallet 已加卡（`ApplePaySession` 自檢通過）| ✅ 測試端 |
+| 網域驗證檔 | `public/.well-known/apple-developer-merchantid-domain-association`（www.flesim.com 回 200 text/plain 不轉址）| ✅ |
+| Antom 後台域名管理 | Apple Pay → 域名管理 → 註冊 `www.flesim.com`（Payment Element 必要；托管模式不需）| ✅ |
+| 結算幣別 | `settlementStrategy.settlementCurrency = USD`（多幣別合約必填；計價可 TWD）| ✅ |
+| Apple Pay 開通 | Antom 後台 Apple Pay 狀態「已开通」（預置商戶認證，無需自備 Apple Developer 憑證）| ✅ |
 
 ---
 
-## 五、最終線上設定（2026-07）
+## 五、殘留事項與 Workaround
 
-**後端** `src/app/api/payment/antom/session/route.ts`
-```
-productScene = isApplePay ? 'CHECKOUT_PAYMENT' : 'ELEMENT_PAYMENT'
-Apple Pay：availablePaymentMethod.paymentMethodTypeList = [{ paymentMethodType: 'APPLEPAY' }]
-           → 回應取 normalUrl，回傳 { redirect_url }
-卡片/街口：paymentMethod（新卡帶 paymentMethodMetaData.is3DSAuthentication:true 強制 3DS；
-           save_card 另帶 tokenizeMode 綁卡）→ 回傳 { paymentSessionData }
-```
-
-**前端** `src/app/checkout/page.tsx`
-```
-若回應有 redirect_url（Apple Pay）→ window.location = redirect_url（整頁跳轉托管頁）
-否則（卡片/街口）→ loadAntomElement()（v2 AMSPaymentElement）.mountComponent('#antom-container')
-                  → 自建「確認付款」鍵呼叫 inst.submitPayment()
-畫面顯示 SDK 事件序列（antomEvents）便於手機診斷
-```
+| 事項 | 說明 |
+|---|---|
+| **displayName 改寫**（`checkout/page.tsx`）| Antom 產 session 時把 metadata 的 `merchantName` 寫死 `"Merchant"`（`order.merchant.*` API 參數不生效）。我方於傳入 SDK 前將 sessionData 第 4 段（base64 JSON、未簽章）中 `"merchantName":"Merchant"` 改寫為 `FLESIM.COM`，Wallet 表即顯示「付給 FLESIM.COM」。**正解**：工單請 Antom 於後台設定商戶顯示名稱，設妥後此改寫自然閒置（有 try/catch fallback，無風險）。|
+| `appHeartBeatTimeout` log | SDK 與 iframe 的內部心跳重試訊息，於慢網路（閘道查詢 3~5s）常見，**不影響付款**，可忽略。|
+| ALIPAY_HK 排除於列表 | AlipayHK 僅收 HKD，與 TWD 列表混用衝突；列表模式自動排除（要用需走單一方式流程）。|
+| 訪客佔位訂單 | 進頁即建單：email 未填先以 `guest@flesim.com` 建 pending 單，填妥後自動重建正確訂單；棄單累積於後台屬預期。|
+| 診斷碼待移除 | 畫面 SDK log 面板、console/fetch 攔截器為除錯期工具，穩定後應移除（sessionData displayName 改寫為功能性，保留）。|
 
 ---
 
-## 六、待辦 / 對 Antom 的訴求
+## 六、關鍵教訓
 
-- ⏳ **請 Antom 檢查後台 Apple Pay 商戶/網域資源設定**（嵌入式渲染卡在 SDK 初始化 / 資源載入）。證據：
-  - 後端 `createPaymentSession` 成功（貴方已確認），payload 經官方 Java SDK model 驗證正確。
-  - 前端 v2 `AMSPaymentElement`：卡片正常，Apple Pay 卡 `SDK_START_OF_LOADING`、無 `onError`。
-  - 前端 marmot `AMSCashierPayment`：`Failed to create iframe` → `Load resource timeout`。
-  - 「Web 嵌入式白名單」已開通；www / apex 網域皆試；網域驗證檔、USD 結算、clientIp、terminalType 皆備。
-- ⏳ 若 Antom 修復嵌入式 Apple Pay，前端可切回嵌入式（不跳轉）—— 切換點在 route.ts 的 `productScene` 與 checkout 的 SDK 載入。
-
----
-
-## 六之一、彈窗模式最終結果（2026-07-15）
-
-改用彈窗 `AMSCashierPayment.createComponent`（`CASHIER_PAYMENT`，不設 productScene）後：
-
-- ✅ **彈窗成功開啟**（createComponent 有效，不再有 iframe / Load resource timeout）。
-- ❌ **Apple Pay** 進入付款處理即報 `SDK_PAYMENT_ERROR`，Antom 彈窗顯示 *"Looks like there is an issue! Please return to checkout page and place the order again."*，加 `availablePaymentMethod.expressCheckout:true` 亦無效。
-- 卡片 / 街口在同一 session/SDK 正常。
-
-**跨模式一致結論**：Apple Pay 在**嵌入式（卡死）／彈窗（SDK_PAYMENT_ERROR）**皆於「商戶驗證 / 付款處理」階段失敗，而卡片全程正常 → 問題不在前端渲染或 payload，指向 **Antom 側未完成 www.flesim.com 的 Apple Pay 商戶/網域註冊綁定**（我方僅上傳 domain association 檔，Antom 端尚需於後台註冊）。
-
-**現行處置**：卡片 / 街口以彈窗上線可用；Apple Pay 暫緩（或自後台 `antom_enabled_methods` 移除 APPLEPAY），待 Antom 修復後端註冊。
-
----
-
-## 六之二、給 Antom 的工單（可直接複製）
-
-```
-【商戶】Flesim.com HK Limited｜正式環境｜網域 www.flesim.com
-【問題】Web Cashier Payment：信用卡正常，惟 Apple Pay 於所有集成模式皆失敗。
-
-【已確認正常】
-- createPaymentSession 皆回 result S / SUCCESS（範例 paymentRequestId：FL260715NM8NDX）。
-- 同一整合下，信用卡（paymentMethod=CARD）可正常渲染與付款。
-
-【Apple Pay 失敗現象（依模式）】
-1) 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，AMSPaymentElement.mountComponent）：
-   前端事件停在 SDK_START_OF_LOADING，永不進展、無 onError。
-2) 嵌入式（marmot 1.19.0 AMSCashierPayment.mountComponent）：
-   onError SDK_INTERNAL_ERROR(Failed to create iframe) → SDK_CREATECOMPONENT_ERROR(Load resource timeout)。
-3) 彈窗（CASHIER_PAYMENT 不設 productScene，AMSCashierPayment.createComponent）：
-   彈窗可開，Apple Pay 進付款處理即 SDK_PAYMENT_ERROR，頁面顯示
-   「Looks like there is an issue, please place the order again」。加 expressCheckout:true 無效。
-
-【我方已備妥的前置】
-- .well-known/apple-developer-merchantid-domain-association（www.flesim.com 回 200 text/plain 不轉址）。
-- settlementStrategy.settlementCurrency=USD、env.terminalType=WEB、env.clientIp（真實公網 IP）。
-- Apple Pay 以 availablePaymentMethod.paymentMethodTypeList=[{paymentMethodType:APPLEPAY}] 指定（經官方 Java SDK model 驗證結構正確）。
-- 「Web 嵌入式白名單」已請貴方開通。裝置為 Safari + Apple Wallet 已加卡（ApplePaySession 自檢通過）。
-
-【請協助確認】
-貴方後台是否已完成 www.flesim.com 的 Apple Pay 商戶/網域註冊綁定？
-Apple Pay 於各模式皆在「商戶驗證/付款處理」階段失敗、信用卡全程正常，研判為後端 Apple Pay 設定未完成。
-```
-
----
-
-## 六之三、確定根因（2026-07-15，查官方文檔後定案）
-
-依 Antom 官方文檔 `ac/cashierpay/element` 與 `ac/antomop/applepay`：
-
-- Apple Pay Web 需 **「Apple Pay domain name configuration（網域/憑證設定）」**——**Antom 為商戶自架結帳頁設定憑證，Apple 以此憑證於「發起 payment session 前」驗證交易**。
-- `applePayConfiguration` 位於 `paymentMethod.paymentMethodMetaData`，須含 `requiredShippingContactFields` / `requiredBillingContactFields` / `buttonsBundled`（本專案已補齊，對齊官方 Payment Element 範例）。
-
-**定案根因**：前端 `SDK_START_OF_LOADING` 卡死＝SDK 進行 Apple Pay **商戶驗證**時，因 **www.flesim.com 未於 Antom 後台完成 Apple Pay 網域/憑證設定** 而卡住。我方僅上傳 `.well-known` domain association 檔（Apple 端一半），**Antom 後台的網域註冊＋憑證配置（另一半）尚未完成**。
-
-**我方 code 已正確**（Payment Element + productScene=ELEMENT_PAYMENT + paymentMethod.paymentMethodType=APPLEPAY + paymentMethodMetaData.applePayConfiguration 含 contact fields + paymentFactor.captureMode=AUTOMATIC）。
-
-**解鎖行動（非程式，商戶於 Antom 端）**：
-1. Antom Dashboard →「Apple Pay domain name configuration」→ 加入並驗證 `www.flesim.com`、完成憑證設定。
-2. 或寄 **TechnicalService@antom.com** 請其完成 www.flesim.com 的 Apple Pay 網域註冊與憑證配置。
-3. 完成前，建議自後台 `antom_enabled_methods` 暫時移除 APPLEPAY，避免顧客撞到 loading。
-
----
-
-## 六之四、最終確定根因（2026-07-15，查 Antom 後台後定案）
-
-Antom Dashboard → Apple Pay → 分頁狀態：
-- **域名管理**：`www.flesim.com`、`journesim-c-end.vercel.app` 已註冊 ✅
-- **支付证书（Payment Processing Certificate）**：**尚未配置** ❌——對話框仍停在第一步「下載 CSR 文件」，代表未完成與 Apple 的憑證交換。
-
-**確定根因**：Apple Pay 於載入時需以**支付處理憑證**完成商戶驗證；此憑證未配置 → 驗證卡住 → 前端永遠停在 `SDK_START_OF_LOADING`。域名驗證僅證明網域擁有權，**支付憑證才是授權實際收款的關鍵**。
-
-**解鎖步驟（Antom 後台 + Apple Developer，非程式）**：
-1. 支付证书配置對話框 →「下載」取得 Antom 產生的 **CSR**。
-2. Apple Developer（需會員 + Merchant ID）→ Certificates → 建立 **Apple Pay Payment Processing Certificate** → 上傳 CSR → 下載 Apple 產生之 `.cer`。
-3. 回 Antom →「继续」上傳 `.cer` 完成配置。
-4. 無 Apple Developer 帳號者，可洽 Antom「联系销售开通」詢問是否提供**代管憑證**方案。
-
-配置完成後 Apple Pay 載入即通過；本專案前端 code 已正確（Payment Element + productScene=ELEMENT_PAYMENT + paymentMethod.paymentMethodMetaData.applePayConfiguration 含 contact fields + paymentFactor.captureMode=AUTOMATIC）。
-
----
-
-## 六之五、嵌入式 + submitPayment 最終狀態（2026-07-15）
-
-依 Antom 真人客服指示（「嵌入式不需支付憑證，前端須自建按鈕呼叫 `submitPayment()`」）完成整合：
-- 後端 `productScene=ELEMENT_PAYMENT`；前端 `AMSPaymentElement.mountComponent` 內嵌 `#antom-container`。
-- 卡片/街口：自建送出鍵 → `inst.submitPayment().then({status,error,userCanceled3D})`，依官方處理回傳。
-- Apple Pay：`applePayConfiguration.buttonsBundled` 原生按鈕。
-
-**實測結果**：
-- ✅ **卡片 / 街口：完全正常**（內嵌表單 + 送出鍵 + 3DS，可完成付款）。
-- ❌ **Apple Pay：仍停在 `SDK_START_OF_LOADING`**（無 `SDK_END_OF_LOADING`、無 `onError`、按鈕未渲染）。
-
-**決定性結論**：`submitPayment()` 是「送出階段」，而 Apple Pay 卡在更前面的「載入階段」，按鈕從未渲染 → 根本到不了 submitPayment。**同一 session/SDK/mountComponent，卡片可載入、唯 Apple Pay 載入卡死** → 確認為 Antom 端 Apple Pay「商戶/憑證驗證」（官方文檔：憑證用於「發起 payment session 前」驗證）未就緒，非前端整合問題。客服「不需憑證」之說與證據不符。
-
-**現行處置**：卡片/街口以嵌入式上線可用；Apple Pay 待 Antom 端修復（優先確認「支付证书」——目前停在「下載 CSR」未完成）。上線前建議自後台 `antom_enabled_methods` 移除 APPLEPAY，避免顧客撞 loading。
-
----
-
-## 六之六、Apple Pay 表成功跳出（2026-07-15）— 前端全通，僅剩支付憑證
-
-依官方「Accept payments with Apple Pay」文檔逐一修正後，**Apple Pay Wallet 付款表已成功跳出**。四塊拼圖：
-1. **SDK 版本 ≥ 1.46.0**：升級 marmot 1.19.0 → **1.47.0**（舊版無 APPLEPAY 外掛 → plugin unregistered / Failed to create iframe）。
-2. **API 用 `createComponent`**（= CARD_APPLE_PAY plugin）取得元件 → `element.mount({selector})` → `element.submitPayment()`；**`mountComponent` 是 PayPal 專用**（用它拿不到 submitPayment）。
-3. **單一 `paymentMethod`（非 availablePaymentMethod）**：availablePaymentMethod 會使 category=ALL。
-4. **不帶 `productScene=ELEMENT_PAYMENT`**：ELEMENT_PAYMENT 會令 `paymentMethodCategoryType=ALL`，而 CARD_APPLE_PAY plugin 僅支援 **category=CARD**（無 productScene + 單一 paymentMethod → category=CARD）。
-
-**最終卡點**：Apple Pay 表跳出、按下付款後**在客戶端授權階段即 `SDK_PAYMENT_CANCEL`，伺服器端零紀錄**（無 pay/notify/inquiry）。→ Apple 於授權時向 Antom 要「商戶驗證（merchant session）」，**此步需「支付证书（Payment Processing Certificate）」**；憑證未配（後台仍停在「下載 CSR」）→ 商戶驗證失敗 → 表取消。
-
-**結論**：**前端／後端 payload 已全部正確、Apple Pay 表已可跳出**；唯一待辦＝完成 Antom 後台「支付证书」（下載 CSR → Apple Developer 產生 .cer → 回傳 Antom）。客服「不需憑證」僅適用於「渲染」；「實際扣款的商戶驗證」必須此憑證。
-
----
-
-## 七、關鍵教訓
-
-1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` 成功只代表 session 建立，Apple Pay 出不出來是**前端 SDK 階段**，兩者需分開診斷。
-2. **把 SDK 事件顯示到畫面**（手機無 console）是定位前端卡點的關鍵手段。
-3. **以官方 SDK model / 官方範例為準**，勿盲信客服文字（本案客服建議多次自相矛盾）。
-4. Apple Pay 的必備前置（網域、結算幣別、clientIp、terminalType）**任一缺失都可能靜默失敗、無錯誤訊息**。
+1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` SUCCESS 只代表 session 建立；Apple Pay 的成敗在前端 SDK 階段，需分開診斷。
+2. **Antom Web SDK 有兩套流程**：`AMSCashierPayment`（收銀台）與 `AMSElement`（Payment Element）名字像、內部完全不同——**Apple Pay 在自架網域只有後者能用**。認錯類別會浪費以「週」計的時間。
+3. **以官方完整範例碼為準**：客服口頭與零散文檔片段多次自相矛盾；本案每個突破都來自實際範例碼或 SDK 原始碼解剖。
+4. **Apple Pay Wallet 必須由使用者手勢觸發**：任何 async 之後的自動 `submitPayment()` 都會被 Safari 擋（表不跳、心跳逾時）。
+5. **把 SDK 事件/console 顯示到畫面**是手機（無 console）診斷的關鍵手段；解碼 sessionData / merchant session 則是定位「簽了什麼網域、什麼名稱」的決定性證據。
+6. Apple Pay 前置（網域、結算幣別、clientIp）**任一缺失都可能靜默失敗、無錯誤訊息**。

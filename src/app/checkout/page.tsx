@@ -53,12 +53,15 @@ function CheckoutContent() {
     }).catch(() => {}).finally(() => setProviderReady(true))
   }, [])
 
-  // 建立 Antom pending 訂單，回 order_number
+  // 建立 Antom pending 訂單，回 order_number。
+  // 進頁即載：email 未填時以訪客佔位信箱建單（元件先渲染）；填妥後簽章變更 → 自動重建為正確 email 的新單。
+  const isEmailValid = (e: string) => /.+@.+\..+/.test(e)
   async function createAntomOrder() {
     const res = await fetch('/api/checkout', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email, items, payment_method: 'antom', provider: 'antom',
+        email: isEmailValid(email) ? email : 'guest@flesim.com',
+        items, payment_method: 'antom', provider: 'antom',
         points_to_redeem: pointsToRedeem,
         ...(hasSim ? { shipping_name: shippingName, shipping_phone: shippingPhone, shipping_address: shippingAddress } : {}),
       }),
@@ -71,7 +74,7 @@ function CheckoutContent() {
   // Antom：建單(pending) → createPaymentSession(ALL) → Payment Element 直接嵌入結帳頁第一層
   // 由 SDK 渲染付款方式列表（卡片/Apple Pay/街口 + 已綁卡），顧客選好按「確認付款」→ submitPayment()
   async function handleAntom() {
-    if (!email || items.length === 0) return
+    if (items.length === 0) return
     if (hasSim && (!shippingName || !shippingPhone || !shippingAddress)) return
     setLoading(true)
     try {
@@ -207,14 +210,16 @@ function CheckoutContent() {
     }
   }
 
-  // 結帳頁第一層自動嵌入：聯絡資訊備妥後自動建單+掛載 Payment Element；關鍵輸入變更時重建
+  // 結帳頁第一層自動嵌入：進頁即建單+掛載 Payment Element（email 未填先用訪客佔位）；
+  // Email/金額/點數/收件資料變更時自動銷毀重建（簽章比對）。未填 Email 前「確認付款」不可按。
   const antomPrepSigRef = useRef('')
   useEffect(() => {
     if (provider !== 'antom' || !providerReady || orderComplete) return
-    const emailOk = /.+@.+\..+/.test(email)
     const shipOk = !hasSim || (!!shippingName && !!shippingPhone && !!shippingAddress)
-    if (!emailOk || !shipOk || items.length === 0 || totalPrice <= 0) return
-    const sig = [email, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
+    if (!shipOk || items.length === 0 || totalPrice <= 0) return
+    // email 未有效前一律視為訪客佔位（避免每敲一字重建一次）
+    const emailKey = isEmailValid(email) ? email : ''
+    const sig = [emailKey, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
     if (sig === antomPrepSigRef.current) return
     const t = setTimeout(() => {
       antomPrepSigRef.current = sig
@@ -228,8 +233,13 @@ function CheckoutContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, providerReady, orderComplete, email, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress, items.length, hasSim])
 
-  // 卡片/街口 送出付款：呼叫 Payment Element 的 submitPayment() 並依 Antom 官方回傳處理
+  // 送出付款：呼叫 Payment Element 的 submitPayment() 並依 Antom 官方回傳處理
   async function handleAntomSubmit() {
+    // 防呆：未填有效 Email 不給付款（訂單/eSIM 以 Email 交付）
+    if (!isEmailValid(email)) { setAntomMsg('請先填寫有效的 Email（訂單與 eSIM 將寄送至此信箱）'); return }
+    // 防呆：Email 剛填好、元件仍在以正確 Email 重建中 → 請稍候
+    const curSig = [email, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
+    if (curSig !== antomPrepSigRef.current) { setAntomMsg('資料更新中，請稍候一下再按「確認付款」'); return }
     const inst = antomInstanceRef.current
     if (!inst || typeof inst.submitPayment !== 'function') { setAntomMsg('付款元件尚未就緒，請稍候再試'); return }
     setAntomSubmitting(true); setAntomMsg('')
@@ -486,19 +496,19 @@ function CheckoutContent() {
               <p className="text-sm font-medium mb-1">付款方式</p>
               {!antomMounted && (
                 <p className="text-xs text-muted-foreground py-4 text-center border border-dashed border-gray-200 rounded-lg">
-                  {loading ? '載入付款方式…' : '填寫 Email 後自動載入付款方式'}
+                  載入付款方式…
                 </p>
               )}
               {/* 嵌入式 Payment Element 掛載容器 */}
               <div id="antom-container" className="mt-1" />
-              {/* 單一送出鍵 → submitPayment()（於元件內選好方式後付款）*/}
+              {/* 單一送出鍵 → submitPayment()（於元件內選好方式後付款）；未填 Email 不可按 */}
               {antomShowSubmit && (
                 <button
                   onClick={handleAntomSubmit}
-                  disabled={antomSubmitting}
+                  disabled={antomSubmitting || !isEmailValid(email)}
                   className="w-full mt-3 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
                 >
-                  {antomSubmitting ? '付款送出中…' : `確認付款 ${formatPrice(totalPrice)}`}
+                  {antomSubmitting ? '付款送出中…' : (!isEmailValid(email) ? '請先填寫 Email' : `確認付款 ${formatPrice(totalPrice)}`)}
                 </button>
               )}
               {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
