@@ -205,6 +205,20 @@ Antom Dashboard → Apple Pay → 分頁狀態：
 
 ---
 
+## 六之六、Apple Pay 表成功跳出（2026-07-15）— 前端全通，僅剩支付憑證
+
+依官方「Accept payments with Apple Pay」文檔逐一修正後，**Apple Pay Wallet 付款表已成功跳出**。四塊拼圖：
+1. **SDK 版本 ≥ 1.46.0**：升級 marmot 1.19.0 → **1.47.0**（舊版無 APPLEPAY 外掛 → plugin unregistered / Failed to create iframe）。
+2. **API 用 `createComponent`**（= CARD_APPLE_PAY plugin）取得元件 → `element.mount({selector})` → `element.submitPayment()`；**`mountComponent` 是 PayPal 專用**（用它拿不到 submitPayment）。
+3. **單一 `paymentMethod`（非 availablePaymentMethod）**：availablePaymentMethod 會使 category=ALL。
+4. **不帶 `productScene=ELEMENT_PAYMENT`**：ELEMENT_PAYMENT 會令 `paymentMethodCategoryType=ALL`，而 CARD_APPLE_PAY plugin 僅支援 **category=CARD**（無 productScene + 單一 paymentMethod → category=CARD）。
+
+**最終卡點**：Apple Pay 表跳出、按下付款後**在客戶端授權階段即 `SDK_PAYMENT_CANCEL`，伺服器端零紀錄**（無 pay/notify/inquiry）。→ Apple 於授權時向 Antom 要「商戶驗證（merchant session）」，**此步需「支付证书（Payment Processing Certificate）」**；憑證未配（後台仍停在「下載 CSR」）→ 商戶驗證失敗 → 表取消。
+
+**結論**：**前端／後端 payload 已全部正確、Apple Pay 表已可跳出**；唯一待辦＝完成 Antom 後台「支付证书」（下載 CSR → Apple Developer 產生 .cer → 回傳 Antom）。客服「不需憑證」僅適用於「渲染」；「實際扣款的商戶驗證」必須此憑證。
+
+---
+
 ## 七、關鍵教訓
 
 1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` 成功只代表 session 建立，Apple Pay 出不出來是**前端 SDK 階段**，兩者需分開診斷。

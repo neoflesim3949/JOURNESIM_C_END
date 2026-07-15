@@ -115,6 +115,24 @@ function CheckoutContent() {
       setAntomMounted(true)
       setAntomShowSubmit(false)
       setAntomEvents([])
+      // Safari 手機看不到 console → 攔截 SDK 內部 console.log/error 顯示到畫面（診斷 Apple Pay merchant validation）
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any
+      if (!w.__antomLogPatched) {
+        w.__antomLogPatched = true
+        const o = { log: console.log.bind(console), error: console.error.bind(console), warn: console.warn.bind(console) }
+        const cap = (tag: string) => (...args: unknown[]) => {
+          try {
+            const msg = args.map((a) => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
+            if (/merchant|validat|apple|createcomponent|submitpayment|error|fail|cancel|unsupported|session|plugin/i.test(msg)) {
+              setAntomEvents((prev) => [...prev, `${tag}｜${msg.slice(0, 180)}`].slice(-24))
+            }
+          } catch { /* ignore */ }
+        }
+        console.log = (...a: unknown[]) => { cap('log')(...a); o.log(...a) }
+        console.error = (...a: unknown[]) => { cap('ERR')(...a); o.error(...a) }
+        console.warn = (...a: unknown[]) => { cap('warn')(...a); o.warn(...a) }
+      }
       // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
       let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -519,7 +537,11 @@ function CheckoutContent() {
                 </button>
               )}
               {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
-              {antomEvents.length > 0 && <p className="mt-2 text-[11px] text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 break-words font-mono">SDK: {antomEvents.join(' → ')}</p>}
+              {antomEvents.length > 0 && (
+                <div className="mt-2 text-[10px] text-left text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono space-y-0.5 max-h-72 overflow-auto">
+                  {antomEvents.map((e, i) => <div key={i} className="break-all leading-tight">{e}</div>)}
+                </div>
+              )}
               {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">{antomCardId ? '將帶出綁定卡片於收銀台完成付款' : '將以 Antom 收銀台完成付款'}</p>}
             </div>
           ) : (
