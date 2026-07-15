@@ -107,8 +107,7 @@ function CheckoutContent() {
 
       // 註：不在前端擋非 Safari 瀏覽器（不擋 Chrome）；能否顯示 Apple Pay 交由 SDK 自行判斷。
 
-      // 渲染模式（展示用）：popup=彈窗 createComponent；element=嵌入式 mountComponent（hosted 已於上方 redirect_url 跳轉）
-      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
+      // 渲染模式（展示用）：popup=彈窗 createComponent；element=嵌入式 createComponent+mount（hosted 已於上方 redirect_url 跳轉）
       const usePopup = antomRenderMode === 'popup'
       const SDK = usePopup ? await loadAntomPopup() : await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
@@ -150,29 +149,24 @@ function CheckoutContent() {
         // 彈窗：createComponent 開 overlay（含表單/Apple Pay 按鈕與送出鍵），付款完成 SDK 自動導回
         await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
       } else {
-        // 嵌入式：mountComponent 掛到 #antom-container；Apple Pay 靠 buttonsBundled 原生按鈕；
-        // 卡片/街口 showSubmitButton:false → 自建送出鍵呼叫 submitPayment()
+        // 嵌入式（官方 Payment Element 流程）：createComponent 取得元件 → element.mount() 嵌入 →
+        // 自訂按鈕點擊後呼叫 element.submitPayment()。Apple Pay 不需採集要素，一樣用自訂按鈕 → submitPayment()。
         const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let inst: any = c
-        if (typeof c.mountComponent === 'function') {
+        let element: any = c
+        if (typeof c.createComponent === 'function') {
+          element = await c.createComponent(mountOpts)
+          if (element?.mount) await element.mount('#antom-container')
+        } else if (typeof c.mountComponent === 'function') {
           const r = await c.mountComponent(mountOpts, '#antom-container')
-          if (r) inst = r
-        } else if (typeof c.createComponent === 'function') {
-          const comp = await c.createComponent(mountOpts)
-          if (comp?.mount) await comp.mount('#antom-container')
-          if (comp) inst = comp
+          if (r) element = r
         } else {
-          throw new Error('SDK 無 mountComponent/createComponent 方法')
+          throw new Error('SDK 無 createComponent/mountComponent 方法')
         }
-        antomInstanceRef.current = inst
-        // mount 成功後：無需填表的情境（Apple Pay / 已綁定卡片）自動執行 submitPayment；
-        // 新卡/街口仍顯示自建送出鍵（避免對空表單直接送出 → FORM_INVALID）
-        if (isApplePay || antomCardId) {
-          void handleAntomSubmit()
-        } else {
-          setAntomShowSubmit(true)
-        }
+        antomInstanceRef.current = (typeof element?.submitPayment === 'function') ? element : c
+        // 已綁定卡片自動送出；其餘（新卡/街口/Apple Pay）顯示自訂送出鍵 → submitPayment()
+        if (antomCardId) void handleAntomSubmit()
+        else setAntomShowSubmit(true)
       }
       // 就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
@@ -519,14 +513,14 @@ function CheckoutContent() {
               )}
               {/* 嵌入式 Payment Element 掛載容器 */}
               <div id="antom-container" className="mt-3" />
-              {/* 卡片/街口自建送出鍵 → submitPayment()（Apple Pay 用 buttonsBundled 原生按鈕，不顯示此鍵）*/}
+              {/* 自訂送出鍵 → submitPayment()（官方 Payment Element：含 Apple Pay 皆用自訂按鈕）*/}
               {antomShowSubmit && (
                 <button
                   onClick={handleAntomSubmit}
                   disabled={antomSubmitting}
-                  className="w-full mt-3 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
+                  className={`w-full mt-3 py-3 font-medium rounded-lg transition-colors disabled:opacity-50 ${!antomCardId && antomMethod === 'APPLEPAY' ? 'bg-black text-white hover:bg-gray-800' : 'bg-primary text-white hover:bg-primary-hover'}`}
                 >
-                  {antomSubmitting ? '付款送出中…' : `確認付款 ${formatPrice(totalPrice)}`}
+                  {antomSubmitting ? '付款送出中…' : (!antomCardId && antomMethod === 'APPLEPAY' ? ` Pay 付款` : `確認付款 ${formatPrice(totalPrice)}`)}
                 </button>
               )}
               {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}

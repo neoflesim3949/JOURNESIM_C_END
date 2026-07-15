@@ -84,6 +84,12 @@ export async function POST(request: Request) {
     element: 'ELEMENT_PAYMENT', popup: undefined, hosted: 'CHECKOUT_PAYMENT',
   }
   const productScene = sceneByMode[renderMode] ?? 'ELEMENT_PAYMENT'
+  // 彈窗(drop-in)需「可用付款方式列表」availablePaymentMethod；送單一 paymentMethod 會讓 SDK 對 undefined
+  // 做 .find() → Failed to create iframe。故 popup 用 availablePaymentMethod，element/hosted 用 paymentMethod。
+  const pmMeta = paymentMethod.paymentMethodMetaData as Record<string, unknown> | undefined
+  const methodField: Record<string, unknown> = renderMode === 'popup'
+    ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: method }], ...(pmMeta ? { paymentMethodMetaData: pmMeta } : {}) } }
+    : { paymentMethod }
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
     ...(productScene ? { productScene } : {}),
@@ -95,7 +101,7 @@ export async function POST(request: Request) {
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
     paymentAmount: { currency: payCurrency, value },
-    paymentMethod,
+    ...methodField,
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }
