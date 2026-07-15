@@ -48,57 +48,42 @@ export async function POST(request: Request) {
   const { data: { user } } = await serverSupabase.auth.getUser()
   const cardId = String(body.card_id || '').trim()
 
-  const paymentMethod: Record<string, unknown> = { paymentMethodType: method }
+  // 官方 Payment Element：所有方式以 availablePaymentMethod.paymentMethodTypeList 指定，
+  // 卡別參數放 availablePaymentMethod.paymentMethodMetaData；已綁卡用 savedPaymentMethods.paymentMethodId。
+  const pmMeta: Record<string, unknown> = {}
+  let savedPaymentMethodId: string | null = null
   if (method === 'CARD' && cardId && user) {
-    // 用已綁定卡片付款：帶 paymentMethodId（cardToken），收銀台直接帶出該卡（免重打卡號）
+    // 已綁定卡片：savedPaymentMethods.paymentMethodId + isCardOnFile
     const { data: card } = await supabase.from('member_cards')
       .select('card_token').eq('id', cardId).eq('member_id', user.id).eq('provider', 'antom').single()
     if (!card?.card_token) return NextResponse.json({ error: '找不到綁定卡片' }, { status: 404 })
-    paymentMethod.paymentMethodId = card.card_token
+    savedPaymentMethodId = card.card_token
+    pmMeta.isCardOnFile = true
   } else if (method === 'CARD') {
-    // 新卡（含首次綁卡，非已綁定舊卡）：
-    //  - is3DSAuthentication:true 強制 3DS 驗證（正確位置在 paymentMethodMetaData，非 paymentFactor）；
-    //    3DS 成功後「未授權」類拒付由發卡行承擔（liability shift）——見 docs/RiskManagementPlan.md。
-    //  - save_card 時另加 tokenizeMode 綁卡（收銀台顯示「儲存卡片」勾選，付款後 webhook 存卡）。
-    const meta: Record<string, unknown> = { is3DSAuthentication: true }
-    if (body.save_card !== false && user) meta.tokenizeMode = 'ASKFORCONSENT'
-    paymentMethod.paymentMethodMetaData = meta
-  } else if (method === 'APPLEPAY') {
-    // 照官方 Payment Element Apple Pay 範例補齊 applePayConfiguration（先前缺，表驗證後被關疑與此有關）
-    paymentMethod.paymentMethodMetaData = {
-      applePayConfiguration: {
-        requiredShippingContactFields: ['email', 'name', 'phone', 'postalAddress'],
-        requiredBillingContactFields: ['name', 'postalAddress'],
-        buttonsBundled: 'true',
-      },
-    }
+    // 新卡：3DS 強制驗證（liability shift，見 docs/RiskManagementPlan.md）；save_card 時 tokenizeMode 綁卡
+    pmMeta.is3DSAuthentication = true
+    if (body.save_card !== false && user) pmMeta.tokenizeMode = 'ASKFORCONSENT'
   }
-  // Apple Pay 不在此設 paymentMethod：官方要求以 availablePaymentMethod 指定，applePayConfiguration 建議留空（見下）。
+  // Apple Pay：applePayConfiguration 官方建議於 Payment Element 場景留空（不設）
 
-  // 渲染模式（前端可選，供展示三種模式）：
-  //   element = 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，前端 mountComponent，原生按鈕 inline）
-  //   popup   = 彈窗（不設 productScene，前端 createComponent，開 overlay）
-  //   hosted  = 全托管（productScene=CHECKOUT_PAYMENT，回 normalUrl 整頁跳轉）
+  // 渲染模式：element = 官方 Payment Element（productScene=ELEMENT_PAYMENT，前端 AMSElement.mount/submitPayment）；
+  //           hosted = 全托管（productScene=CHECKOUT_PAYMENT，回 normalUrl 整頁跳轉）
   const renderMode = String(body.render_mode || 'element').toLowerCase()
-  // 註：productScene=ELEMENT_PAYMENT 會令 sessionData 之 paymentMethodCategoryType=ALL，
-  // 而 SDK createComponent 的 CARD_APPLE_PAY plugin 僅支援 category=CARD（單一方式）。
-  // 故嵌入式(element)【不帶 productScene】→ 單一 paymentMethod → category=CARD → plugin 才認得。
-  const sceneByMode: Record<string, string | undefined> = {
-    element: undefined, popup: undefined, hosted: 'CHECKOUT_PAYMENT',
-  }
-  const productScene = sceneByMode[renderMode]
-  // 方式欄位：
-  //  - 嵌入/托管（含 Apple Pay）→ 單一 paymentMethod。Apple Pay 用 paymentMethodType=APPLEPAY，
-  //    使 sessionData 的 paymentMethodCategoryType=CARD（SDK createComponent 之 CARD_APPLE_PAY plugin 才支援）；
-  //    若送 availablePaymentMethod 會變 category=ALL → SDK 回 "unsupported payment method"。
-  //  - 彈窗(drop-in) → availablePaymentMethod（送單一 paymentMethod 會 .find on undefined → Failed to create iframe）。
-  const pmMeta = paymentMethod.paymentMethodMetaData as Record<string, unknown> | undefined
-  const methodField: Record<string, unknown> = renderMode === 'popup'
-    ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: method }], ...(pmMeta ? { paymentMethodMetaData: pmMeta } : {}) } }
-    : { paymentMethod }
+  const useHosted = renderMode === 'hosted'
+  const productScene = useHosted ? 'CHECKOUT_PAYMENT' : 'ELEMENT_PAYMENT'
+  const hasMeta = Object.keys(pmMeta).length > 0
+  const methodField: Record<string, unknown> = useHosted
+    ? { paymentMethod: { paymentMethodType: method, ...(hasMeta ? { paymentMethodMetaData: pmMeta } : {}), ...(savedPaymentMethodId ? { paymentMethodId: savedPaymentMethodId } : {}) } }
+    : {
+        availablePaymentMethod: {
+          paymentMethodTypeList: [{ paymentMethodType: method }],
+          ...(hasMeta ? { paymentMethodMetaData: pmMeta } : {}),
+        },
+        ...(savedPaymentMethodId ? { savedPaymentMethods: [{ paymentMethodId: savedPaymentMethodId }] } : {}),
+      }
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    ...(productScene ? { productScene } : {}),
+    productScene,
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,

@@ -1,10 +1,13 @@
-// Antom Web SDK（ams-checkout）loader
-// 改用 v2（js.antom.com/v2，v2.0.20+）：含 plugin_CARD_APPLE_PAY_createComponent + AMSCashierPayment。
-// 測試 v2 是否對 Apple Pay merchant validation 之 domain 處理與 v1 不同。
+// Antom Web SDK（ams-checkout v2，js.antom.com/v2 v2.0.20+）
+// 官方 Payment Element 正解：用 AMSElement 類別（new AMSElement({environment,locale,sessionData})
+//  → element.mount({type:'payment',...}, selector) → element.submitPayment()）。
+// AMSCashierPayment 是「收銀台/drop-in」，非 Payment Element。
 const ANTOM_SDK = 'https://js.antom.com/v2/ams-checkout.js'
 
 declare global {
   interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    AMSElement?: new (cfg: Record<string, unknown>) => any
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     AMSCashierPayment?: new (cfg: Record<string, unknown>) => any
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -16,7 +19,7 @@ declare global {
 function ensureScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') return reject(new Error('no window'))
-    if (window.AMSCashierPayment || window.AMSPaymentElement) return resolve()
+    if (window.AMSElement || window.AMSCashierPayment || window.AMSPaymentElement) return resolve()
     const existing = document.querySelector(`script[src="${ANTOM_SDK}"]`)
     if (existing) {
       existing.addEventListener('load', () => resolve())
@@ -38,10 +41,10 @@ export async function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null
   return window.AMSCashierPayment || null
 }
 
-// Payment Element（嵌入式）：1.47.0 統一用 AMSCashierPayment（.mountComponent + .submitPayment）
-export async function loadAntomElement(): Promise<Window['AMSCashierPayment'] | null> {
+// Payment Element（官方正解）：AMSElement（new AMSElement({sessionData}) → mount() → submitPayment()）
+export async function loadAntomElement(): Promise<Window['AMSElement'] | null> {
   try { await ensureScript() } catch { return null }
-  return window.AMSCashierPayment || null
+  return window.AMSElement || null
 }
 
 // 彈窗模式（保留介面；目前前台不提供彈窗選項）：同一支 1.47.0 SDK

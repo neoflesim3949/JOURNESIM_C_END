@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomElement, loadAntomPopup } from '@/lib/antom-sdk'
+import { loadAntomElement } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -107,9 +107,8 @@ function CheckoutContent() {
 
       // 註：不在前端擋非 Safari 瀏覽器（不擋 Chrome）；能否顯示 Apple Pay 交由 SDK 自行判斷。
 
-      // 渲染模式（展示用）：popup=彈窗 createComponent；element=嵌入式 createComponent+mount（hosted 已於上方 redirect_url 跳轉）
-      const usePopup = antomRenderMode === 'popup'
-      const SDK = usePopup ? await loadAntomPopup() : await loadAntomElement()
+      // 官方 Payment Element：AMSElement（hosted 已於上方 redirect_url 跳轉，不會到這）
+      const SDK = await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
@@ -173,58 +172,33 @@ function CheckoutContent() {
           return origSend.call(this, nextBody as XMLHttpRequestBodyInit)
         }
       }
-      // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
-      let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
+      let elementDone = false
+      // 官方 Payment Element 正解：new AMSElement({environment,locale,sessionData}) → element.mount({type:'payment',…}, selector)
+      //   → 自訂按鈕點擊呼叫 element.submitPayment()。sessionData 在建構子傳（勿改動 paymentSessionData）。
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cashier = new SDK({
+      const element: any = new SDK({
         environment: s.environment === 'prod' ? 'prod' : 'sandbox',
         locale: 'zh_TW',
-        onEventCallback: (evt: any) => {
-          const code = evt?.code || ''
-          const message = evt?.message || evt?.result?.paymentResultCode || ''
-          console.log('[antom event]', code, message, evt)
-          // 診斷：所有事件累積顯示於畫面（手機無 console，便於截圖判斷卡在哪個階段）
-          setAntomEvents((prev) => [...prev, code || '(no-code)'].slice(-10))
-          if (code === 'SDK_END_OF_LOADING' || code === 'SDK_READY') { elementDone = true }
-          else if (code === 'SDK_PAYMENT_SUCCESSFUL') { elementDone = true; setAntomMsg('付款成功，處理中…') }
-          else if (code === 'SDK_PAYMENT_FAIL' || code === 'SDK_PAYMENT_ERROR') { elementDone = true; setAntomMsg(`付款未完成（${code}）${message ? '：' + message : ''}`) }
-          else if (code === 'SDK_PAYMENT_CANCEL') { elementDone = true; setAntomMsg('已取消付款') }
-        },
-        onError: (err: any) => {
-          elementDone = true
-          console.error('[antom error]', err)
-          setAntomEvents((prev) => [...prev, `onError:${err?.code || ''}`].slice(-10))
-          setAntomMsg(`SDK 錯誤：${err?.code || ''} ${err?.message || JSON.stringify(err || {})}`)
-        },
+        sessionData: s.paymentSessionData,
       })
+      antomInstanceRef.current = element
       // 載入逾時偵測：8 秒內未完成
-      setTimeout(() => {
-        if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成），請截圖此畫面回報。')
-      }, 8000)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const c = cashier as any
-      if (usePopup) {
-        // 彈窗：createComponent 開 overlay（含表單/Apple Pay 按鈕與送出鍵），付款完成 SDK 自動導回
-        await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
-      } else {
-        // 嵌入式（官方 Payment Element 流程）：createComponent 取得元件 → element.mount() 嵌入 →
-        // 自訂按鈕點擊後呼叫 element.submitPayment()。Apple Pay 不需採集要素，一樣用自訂按鈕 → submitPayment()。
-        // SDK 1.47.0：卡片/Apple Pay 用 createComponent 取得元件（mountComponent 是 PayPal 專用）。
-        // 元件 → element.mount({selector}) 嵌入 → element.submitPayment() 送出。
+      setTimeout(() => { if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成），請截圖此畫面回報。') }, 8000)
+      // mount：type=payment、singleOption=skip（單一方式跳過列表直接進付款流程）
+      await element.mount(
+        { type: 'payment', appearance: { theme: 'default' }, notRedirectAfterComplete: false, merchantAppointParam: { singleOption: 'skip' } },
+        '#antom-container',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const element: any = await c.createComponent({ sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } })
-        if (element?.mount) {
-          try { await element.mount({ selector: '#antom-container' }) }
-          catch { await element.mount('#antom-container') }
-        }
-        antomInstanceRef.current = element
-        // 已綁定卡片自動送出；其餘（新卡/街口/Apple Pay）顯示自訂送出鍵 → submitPayment()
-        if (antomCardId) void handleAntomSubmit()
-        else setAntomShowSubmit(true)
-      }
-      // 就緒 → 關閉逾時誤報並清空載入訊息
+      ).then((r: any) => {
+        const err = r?.error
+        if (err?.code) { setAntomEvents((prev) => [...prev, `mount error:${err.code}`].slice(-24)); setAntomMsg(`載入失敗：${err.message || err.code}`) }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }).catch((e: any) => { setAntomEvents((prev) => [...prev, `mount catch:${e?.code || e?.message || e}`].slice(-24)); setAntomMsg(`載入失敗：${e?.message || e}`) })
       elementDone = true
       setAntomMsg('')
+      // 已綁定卡片自動送出；其餘（新卡/街口/Apple Pay）顯示自訂送出鍵 → submitPayment()
+      if (antomCardId) void handleAntomSubmit()
+      else setAntomShowSubmit(true)
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
@@ -239,7 +213,8 @@ function CheckoutContent() {
     setAntomSubmitting(true); setAntomMsg('')
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { status, userCanceled3D, error } = (await inst.submitPayment()) as any
+      const { status, userCanceled3D, session, error } = (await inst.submitPayment()) as any
+      setAntomEvents((prev) => [...prev, `submit｜status=${status}${error ? ' err=' + (error.code || '') : ''}`].slice(-24))
       const toResult = () => { window.location.href = `/payment/result?provider=antom&order_number=${encodeURIComponent(orderNumber)}` }
       if (error) {
         const code = error?.code || ''
@@ -248,6 +223,9 @@ function CheckoutContent() {
         setAntomMsg(`付款未完成：${error?.message || code}`)
         return
       }
+      // 官方：若 session.nextAction 有跳轉連結（掃碼/APM），依裝置導向
+      const next = session?.nextAction
+      if (next?.normalUrl || next?.schemeUrl || next?.appLinkUrl) { window.location.href = next.normalUrl || next.schemeUrl || next.appLinkUrl; return }
       if (status === 'SUCCESS' || status === 'PROCESSING') { toResult(); return }
       if (status === 'CANCELLED') { setAntomMsg('已取消付款'); return }
       toResult()
