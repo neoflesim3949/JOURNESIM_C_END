@@ -152,6 +152,24 @@ Apple Pay 於各模式皆在「商戶驗證/付款處理」階段失敗、信用
 
 ---
 
+## 六之三、確定根因（2026-07-15，查官方文檔後定案）
+
+依 Antom 官方文檔 `ac/cashierpay/element` 與 `ac/antomop/applepay`：
+
+- Apple Pay Web 需 **「Apple Pay domain name configuration（網域/憑證設定）」**——**Antom 為商戶自架結帳頁設定憑證，Apple 以此憑證於「發起 payment session 前」驗證交易**。
+- `applePayConfiguration` 位於 `paymentMethod.paymentMethodMetaData`，須含 `requiredShippingContactFields` / `requiredBillingContactFields` / `buttonsBundled`（本專案已補齊，對齊官方 Payment Element 範例）。
+
+**定案根因**：前端 `SDK_START_OF_LOADING` 卡死＝SDK 進行 Apple Pay **商戶驗證**時，因 **www.flesim.com 未於 Antom 後台完成 Apple Pay 網域/憑證設定** 而卡住。我方僅上傳 `.well-known` domain association 檔（Apple 端一半），**Antom 後台的網域註冊＋憑證配置（另一半）尚未完成**。
+
+**我方 code 已正確**（Payment Element + productScene=ELEMENT_PAYMENT + paymentMethod.paymentMethodType=APPLEPAY + paymentMethodMetaData.applePayConfiguration 含 contact fields + paymentFactor.captureMode=AUTOMATIC）。
+
+**解鎖行動（非程式，商戶於 Antom 端）**：
+1. Antom Dashboard →「Apple Pay domain name configuration」→ 加入並驗證 `www.flesim.com`、完成憑證設定。
+2. 或寄 **TechnicalService@antom.com** 請其完成 www.flesim.com 的 Apple Pay 網域註冊與憑證配置。
+3. 完成前，建議自後台 `antom_enabled_methods` 暫時移除 APPLEPAY，避免顧客撞到 loading。
+
+---
+
 ## 七、關鍵教訓
 
 1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` 成功只代表 session 建立，Apple Pay 出不出來是**前端 SDK 階段**，兩者需分開診斷。
