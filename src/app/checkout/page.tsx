@@ -125,7 +125,9 @@ function CheckoutContent() {
           try {
             const msg = args.map((a) => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
             if (/merchant|validat|apple|createcomponent|submitpayment|error|fail|cancel|unsupported|session|plugin|network|capabilit|countr|currenc|dismiss|abort/i.test(msg)) {
-              setAntomEvents((prev) => [...prev, `${tag}｜${msg.slice(0, 320)}`].slice(-24))
+              // merchant session 那行放長，以便看 domainName / initiativeContext（診斷網域不符）
+              const len = /merchantsessionobjectstring|domainname|initiativecontext|validatemerchant/i.test(msg) ? 900 : 320
+              setAntomEvents((prev) => [...prev, `${tag}｜${msg.slice(0, len)}`].slice(-24))
             }
           } catch { /* ignore */ }
         }
