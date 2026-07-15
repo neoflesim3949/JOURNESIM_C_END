@@ -27,8 +27,17 @@ export async function POST(request: Request) {
   const cfg = await getAntomConfig()
   const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin
 
-  // 付款方式：後台預設或前端指定（CARD / JKOPAY / ALIPAY_HK…）
-  const method = String(body.payment_method || cfg.defaultMethod || 'CARD').toUpperCase()
+  // 付款方式：'ALL' = 由 Payment Element 渲染全部啟用方式（結帳頁第一層嵌入）；或指定單一方式
+  const method = String(body.payment_method || 'ALL').toUpperCase()
+  let methodList: string[]
+  if (method === 'ALL') {
+    const { data: st } = await supabase.from('system_settings').select('value').eq('key', 'antom_enabled_methods').maybeSingle()
+    methodList = String(st?.value || 'CARD,JKOPAY').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean)
+      .filter((m) => m !== 'ALIPAY_HK')   // AlipayHK 僅收 HKD，與 TWD 列表混用會衝突，列表模式排除
+    if (methodList.length === 0) methodList = ['CARD']
+  } else {
+    methodList = [method]
+  }
   // 部分方式只收特定幣別（AlipayHK 僅 HKD）；其餘用後台交易幣別（預設 TWD，卡片/街口/Apple Pay 皆可）
   const METHOD_CURRENCY: Record<string, string> = { ALIPAY_HK: 'HKD' }
   const payCurrency = (METHOD_CURRENCY[method] || cfg.paymentCurrency).toUpperCase()
@@ -50,18 +59,26 @@ export async function POST(request: Request) {
   // 官方 Payment Element：所有方式以 availablePaymentMethod.paymentMethodTypeList 指定，
   // 卡別參數放 availablePaymentMethod.paymentMethodMetaData；已綁卡用 savedPaymentMethods.paymentMethodId。
   const pmMeta: Record<string, unknown> = {}
-  let savedPaymentMethodId: string | null = null
-  if (method === 'CARD' && cardId && user) {
-    // 已綁定卡片：savedPaymentMethods.paymentMethodId + isCardOnFile
-    const { data: card } = await supabase.from('member_cards')
-      .select('card_token').eq('id', cardId).eq('member_id', user.id).eq('provider', 'antom').single()
-    if (!card?.card_token) return NextResponse.json({ error: '找不到綁定卡片' }, { status: 404 })
-    savedPaymentMethodId = card.card_token
-    pmMeta.isCardOnFile = true
-  } else if (method === 'CARD') {
-    // 新卡：3DS 強制驗證（liability shift，見 docs/RiskManagementPlan.md）；save_card 時 tokenizeMode 綁卡
+  const savedTokens: string[] = []
+  const includesCard = methodList.includes('CARD')
+  if (includesCard) {
+    // 新卡：3DS 強制驗證（liability shift，見 docs/RiskManagementPlan.md）；登入會員 tokenizeMode 綁卡勾選
     pmMeta.is3DSAuthentication = true
     if (body.save_card !== false && user) pmMeta.tokenizeMode = 'ASKFORCONSENT'
+    if (user) {
+      if (cardId) {
+        // 指定單一已綁卡
+        const { data: card } = await supabase.from('member_cards')
+          .select('card_token').eq('id', cardId).eq('member_id', user.id).eq('provider', 'antom').single()
+        if (!card?.card_token) return NextResponse.json({ error: '找不到綁定卡片' }, { status: 404 })
+        savedTokens.push(card.card_token)
+      } else {
+        // 列表模式：帶會員全部已綁卡，由 Payment Element 渲染「已儲存卡片」供選
+        const { data: cards } = await supabase.from('member_cards')
+          .select('card_token').eq('member_id', user.id).eq('provider', 'antom')
+        for (const c of cards || []) if (c.card_token) savedTokens.push(c.card_token)
+      }
+    }
   }
   // Apple Pay：applePayConfiguration 官方建議於 Payment Element 場景留空（不設）
 
@@ -72,13 +89,13 @@ export async function POST(request: Request) {
   const productScene = useHosted ? 'CHECKOUT_PAYMENT' : 'ELEMENT_PAYMENT'
   const hasMeta = Object.keys(pmMeta).length > 0
   const methodField: Record<string, unknown> = useHosted
-    ? { paymentMethod: { paymentMethodType: method, ...(hasMeta ? { paymentMethodMetaData: pmMeta } : {}), ...(savedPaymentMethodId ? { paymentMethodId: savedPaymentMethodId } : {}) } }
+    ? { paymentMethod: { paymentMethodType: methodList[0], ...(hasMeta ? { paymentMethodMetaData: pmMeta } : {}), ...(savedTokens[0] ? { paymentMethodId: savedTokens[0] } : {}) } }
     : {
         availablePaymentMethod: {
-          paymentMethodTypeList: [{ paymentMethodType: method }],
+          paymentMethodTypeList: methodList.map((m) => ({ paymentMethodType: m })),
           ...(hasMeta ? { paymentMethodMetaData: pmMeta } : {}),
         },
-        ...(savedPaymentMethodId ? { savedPaymentMethods: [{ paymentMethodId: savedPaymentMethodId }] } : {}),
+        ...(savedTokens.length ? { savedPaymentMethods: savedTokens.map((t) => ({ paymentMethodId: t })) } : {}),
       }
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
