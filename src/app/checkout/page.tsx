@@ -42,6 +42,7 @@ function CheckoutContent() {
   const [antomCardId, setAntomCardId] = useState<string>('')  // 選中的已綁卡；'' = 使用新卡/其他方式
   const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
   const [antomMsg, setAntomMsg] = useState('')                // SDK 事件/錯誤（畫面顯示，方便手機診斷）
+  const [antomEvents, setAntomEvents] = useState<string[]>([]) // SDK 事件序列（診斷用）
   const [antomShowSubmit, setAntomShowSubmit] = useState(false) // 嵌入式卡片/街口需自建送出鍵
   const [antomSubmitting, setAntomSubmitting] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +123,7 @@ function CheckoutContent() {
 
       setAntomMounted(true)
       setAntomShowSubmit(false)
+      setAntomEvents([])
       // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
       let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,15 +134,17 @@ function CheckoutContent() {
           const code = evt?.code || ''
           const message = evt?.message || evt?.result?.paymentResultCode || ''
           console.log('[antom event]', code, message, evt)
-          if (code === 'SDK_END_OF_LOADING' || code === 'SDK_READY') { elementDone = true; setAntomMsg('') }
+          // 診斷：所有事件累積顯示於畫面（手機無 console，便於截圖判斷卡在哪個階段）
+          setAntomEvents((prev) => [...prev, code || '(no-code)'].slice(-10))
+          if (code === 'SDK_END_OF_LOADING' || code === 'SDK_READY') { elementDone = true }
           else if (code === 'SDK_PAYMENT_SUCCESSFUL') { elementDone = true; setAntomMsg('付款成功，處理中…') }
           else if (code === 'SDK_PAYMENT_FAIL' || code === 'SDK_PAYMENT_ERROR') { elementDone = true; setAntomMsg(`付款未完成（${code}）${message ? '：' + message : ''}`) }
           else if (code === 'SDK_PAYMENT_CANCEL') { elementDone = true; setAntomMsg('已取消付款') }
-          // 其餘（SDK_START_OF_LOADING 等載入中事件）不顯示於畫面，僅記 console
         },
         onError: (err: any) => {
           elementDone = true
           console.error('[antom error]', err)
+          setAntomEvents((prev) => [...prev, `onError:${err?.code || ''}`].slice(-10))
           setAntomMsg(`SDK 錯誤：${err?.code || ''} ${err?.message || JSON.stringify(err || {})}`)
         },
       })
@@ -493,6 +497,7 @@ function CheckoutContent() {
                 </button>
               )}
               {antomMsg && <p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
+              {antomEvents.length > 0 && <p className="mt-2 text-[11px] text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 break-words font-mono">SDK: {antomEvents.join(' → ')}</p>}
               {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">{antomCardId ? '將帶出綁定卡片於收銀台完成付款' : '將以 Antom 收銀台完成付款'}</p>}
             </div>
           ) : (
