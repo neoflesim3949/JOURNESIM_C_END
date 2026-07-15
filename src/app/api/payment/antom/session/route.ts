@@ -89,6 +89,8 @@ export async function POST(request: Request) {
       referenceOrderId: order.order_number,
       orderDescription: `FLESIM 訂單 ${order.order_number}`,
       orderAmount: { currency: payCurrency, value },
+      // Apple Pay 付款表顯示的商家名稱（未設時 SDK 顯示預設 "merchant"）
+      merchant: { referenceMerchantId: 'FLESIM', merchantName: 'FLESIM.COM', merchantDisplayName: 'FLESIM.COM' },
       // 照官方範例補 goods 明細（Apple Pay 表建立 line items 需要）
       goods: [{
         referenceGoodsId: order.order_number,
