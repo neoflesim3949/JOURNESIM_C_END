@@ -54,9 +54,14 @@ export async function POST(request: Request) {
       .select('card_token').eq('id', cardId).eq('member_id', user.id).eq('provider', 'antom').single()
     if (!card?.card_token) return NextResponse.json({ error: '找不到綁定卡片' }, { status: 404 })
     paymentMethod.paymentMethodId = card.card_token
-  } else if (method === 'CARD' && body.save_card !== false && user) {
-    // 付款即綁卡（tokenizeMode）：收銀台顯示 Antom 原生「儲存卡片」勾選；付款後 webhook 存卡
-    paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
+  } else if (method === 'CARD') {
+    // 新卡（含首次綁卡，非已綁定舊卡）：
+    //  - is3DSAuthentication:true 強制 3DS 驗證（正確位置在 paymentMethodMetaData，非 paymentFactor）；
+    //    3DS 成功後「未授權」類拒付由發卡行承擔（liability shift）——見 docs/RiskManagementPlan.md。
+    //  - save_card 時另加 tokenizeMode 綁卡（收銀台顯示「儲存卡片」勾選，付款後 webhook 存卡）。
+    const meta: Record<string, unknown> = { is3DSAuthentication: true }
+    if (body.save_card !== false && user) meta.tokenizeMode = 'ASKFORCONSENT'
+    paymentMethod.paymentMethodMetaData = meta
   } else if (method === 'APPLEPAY') {
     // Apple Pay：applePayConfiguration 需為 paymentMethod【頂層】欄位（與 paymentMethodType 平級，Antom 確認）
     // buttonsBundled 讓 Payment Element 自動渲染 Apple Pay 原生按鈕
@@ -86,14 +91,9 @@ export async function POST(request: Request) {
   // 網頁整合須指定終端類型；Apple Pay 另需 clientIp（真實公網 IP），缺失會靜默失敗（Antom 確認）
   const clientIp = getClientIp(request)
   payload.env = { terminalType: 'WEB', ...(clientIp ? { clientIp } : {}) }
-  // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶
-  if (method === 'CARD') {
-    // 新卡（首次輸入/首次綁卡，非已綁定舊卡）強制 3DS 驗證：發卡行 OTP，成功後「未授權」類拒付
-    // 由發卡行承擔（liability shift）—— 降低盜刷/拒付風險（見 docs/RiskManagementPlan.md）。
-    // 已綁定舊卡回購（帶 paymentMethodId）憑證已於綁卡時驗證，維持免驗以利轉換。
-    const isNewCard = !cardId
-    payload.paymentFactor = { isAuthorization: true, ...(isNewCard ? { is3DSAuthentication: true } : {}) }
-  }
+  // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶。
+  // 註：3DS 由 paymentMethodMetaData.is3DSAuthentication 控制（見上），不在 paymentFactor。
+  if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
