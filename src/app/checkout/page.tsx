@@ -134,6 +134,44 @@ function CheckoutContent() {
         console.log = (...a: unknown[]) => { cap('log')(...a); o.log(...a) }
         console.error = (...a: unknown[]) => { cap('ERR')(...a); o.error(...a) }
         console.warn = (...a: unknown[]) => { cap('warn')(...a); o.warn(...a) }
+
+        // 攔截 fetch / XHR：把 SDK 打去 alipay/antom 的 merchant validation 請求 body 顯示到畫面
+        // 並嘗試把 body 內的 checkout.antom.com → www.flesim.com（若 Antom 依 body 網域簽發，即可修正）
+        const isApayHost = (u: string) => /alipay\.com|antom/i.test(u) && /merchant|apay|apple|payment_session|validate|risk_client|open/i.test(u)
+        const rewriteBody = (b: string) => {
+          if (typeof b !== 'string' || b.indexOf('checkout.antom.com') === -1) return b
+          const nb = b.split('checkout.antom.com').join('www.flesim.com')
+          setAntomEvents((prev) => [...prev, `REWRITE｜checkout.antom.com→www.flesim.com`].slice(-24))
+          return nb
+        }
+        const origFetch = window.fetch.bind(window)
+        window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+          let nextInit = init
+          try {
+            const url = typeof input === 'string' ? input : (input as Request)?.url || String(input)
+            const body = init?.body
+            if (isApayHost(url) && typeof body === 'string') {
+              setAntomEvents((prev) => [...prev, `FETCH｜${url.slice(0, 60)}｜${body.slice(0, 400)}`].slice(-24))
+              nextInit = { ...(init as RequestInit), body: rewriteBody(body) }
+            }
+          } catch { /* ignore */ }
+          return origFetch(input, nextInit)
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const XHR = XMLHttpRequest.prototype as any
+        const origOpen = XHR.open, origSend = XHR.send
+        XHR.open = function (m: string, u: string, ...rest: unknown[]) { this.__antomUrl = u; return origOpen.call(this, m, u, ...rest) }
+        XHR.send = function (body?: unknown) {
+          let nextBody = body
+          try {
+            const u = this.__antomUrl || ''
+            if (isApayHost(u) && typeof body === 'string') {
+              setAntomEvents((prev) => [...prev, `XHR｜${String(u).slice(0, 60)}｜${(body as string).slice(0, 400)}`].slice(-24))
+              nextBody = rewriteBody(body as string)
+            }
+          } catch { /* ignore */ }
+          return origSend.call(this, nextBody as XMLHttpRequestBodyInit)
+        }
       }
       // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
       let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
