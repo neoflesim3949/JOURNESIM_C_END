@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomElement } from '@/lib/antom-sdk'
+import { loadAntomElement, loadAntomPopup } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -116,9 +116,10 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      // 嵌入式 Payment Element：AMSPaymentElement.mountComponent 內嵌 #antom-container（小視窗）
+      // 卡片/街口 → 嵌入式 Payment Element（AMSPaymentElement.mountComponent 內嵌 #antom-container）
+      // Apple Pay → 照官方範例（無 productScene）→ AMSCashierPayment.createComponent
       const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
-      const SDK = await loadAntomElement()
+      const SDK = isApplePay ? await loadAntomPopup() : await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
@@ -154,26 +155,30 @@ function CheckoutContent() {
       }, 8000)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      // 嵌入式：mountComponent 掛到 #antom-container。Apple Pay 用 buttonsBundled 原生按鈕（不加送出鍵）；
-      // 卡片/街口 showSubmitButton:false → 由自建送出鍵呼叫 submitPayment()（Antom 官方 Payment Element 做法）
-      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let inst: any = c
-      if (typeof c.mountComponent === 'function') {
-        const r = await c.mountComponent(mountOpts, '#antom-container')
-        if (r) inst = r
-      } else if (typeof c.createComponent === 'function') {
-        const comp = await c.createComponent(mountOpts)
-        if (comp?.mount) await comp.mount('#antom-container')
-        if (comp) inst = comp
+      if (isApplePay) {
+        // Apple Pay（照官方範例，無 productScene）：createComponent 由 SDK 渲染 Apple Pay 原生按鈕
+        await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
       } else {
-        throw new Error('SDK 無 mountComponent/createComponent 方法')
+        // 卡片/街口 嵌入式：mountComponent 掛到 #antom-container；showSubmitButton:false → 自建送出鍵呼叫 submitPayment()
+        const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let inst: any = c
+        if (typeof c.mountComponent === 'function') {
+          const r = await c.mountComponent(mountOpts, '#antom-container')
+          if (r) inst = r
+        } else if (typeof c.createComponent === 'function') {
+          const comp = await c.createComponent(mountOpts)
+          if (comp?.mount) await comp.mount('#antom-container')
+          if (comp) inst = comp
+        } else {
+          throw new Error('SDK 無 mountComponent/createComponent 方法')
+        }
+        antomInstanceRef.current = inst
+        setAntomShowSubmit(true)   // 卡片/街口顯示自建送出鍵
       }
-      antomInstanceRef.current = inst
       // 就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
       setAntomMsg('')
-      if (!isApplePay) setAntomShowSubmit(true)   // 卡片/街口顯示自建送出鍵
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)

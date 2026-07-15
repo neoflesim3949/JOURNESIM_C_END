@@ -68,21 +68,20 @@ export async function POST(request: Request) {
     //（依 Antom 官方 Payment Element 範例；先前缺這些 contact fields 導致 SDK 初始化卡死）。
     paymentMethod.paymentMethodMetaData = {
       applePayConfiguration: {
-        requiredShippingContactFields: ['email', 'name', 'phone', 'postalAddress'],
-        requiredBillingContactFields: ['name', 'postalAddress'],
-        // Boolean（非字串）；false = Apple Pay 按鈕獨立置頂。本 session 僅 Apple Pay 一種方式，
-        // 設 true（與其他方式捆綁）會讓 SDK 湊不出方法列表 → 疑為 SDK_START_OF_LOADING 卡死主因。
-        buttonsBundled: false,
+        requiredShippingContactFields: ['postalAddress'],
+        requiredBillingContactFields: ['postalAddress'],
+        buttonsBundled: true,   // 完全照 Antom 官方 Apple Pay 範例（Boolean true）
       },
     }
   }
 
-  // 三種方式統一【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent
-  // 內嵌本站 #antom-container（小視窗、不整頁覆蓋、不跳轉託管）。卡片/街口自建按鈕呼叫 submitPayment()；
-  // Apple Pay 以 applePayConfiguration.buttonsBundled 原生按鈕。（Antom 真人客服：嵌入式不需支付憑證）
+  // 卡片/街口 → 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，前端 mountComponent + submitPayment）。
+  // Apple Pay → 完全照 Antom 官方 Apple Pay 範例：【不帶 productScene】+ paymentMethod.paymentMethodType=APPLEPAY
+  //   + applePayConfiguration(buttonsBundled:true) + paymentFactor.isAuthorization；前端走 createComponent。
+  const isApplePay = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    productScene: 'ELEMENT_PAYMENT',
+    ...(isApplePay ? {} : { productScene: 'ELEMENT_PAYMENT' }),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -104,7 +103,7 @@ export async function POST(request: Request) {
   // isAuthorization 為卡片/Apple Pay 授權專用；APM（Alipay 等）不帶。
   // 註：3DS 由 paymentMethodMetaData.is3DSAuthentication 控制（見上），不在 paymentFactor。
   if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
-  else if (method === 'APPLEPAY') payload.paymentFactor = { isAuthorization: true, captureMode: 'AUTOMATIC' }
+  else if (method === 'APPLEPAY') payload.paymentFactor = { isAuthorization: true }  // 照官方範例，僅 isAuthorization
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
