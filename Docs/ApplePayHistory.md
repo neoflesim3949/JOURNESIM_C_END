@@ -170,6 +170,24 @@ Apple Pay 於各模式皆在「商戶驗證/付款處理」階段失敗、信用
 
 ---
 
+## 六之四、最終確定根因（2026-07-15，查 Antom 後台後定案）
+
+Antom Dashboard → Apple Pay → 分頁狀態：
+- **域名管理**：`www.flesim.com`、`journesim-c-end.vercel.app` 已註冊 ✅
+- **支付证书（Payment Processing Certificate）**：**尚未配置** ❌——對話框仍停在第一步「下載 CSR 文件」，代表未完成與 Apple 的憑證交換。
+
+**確定根因**：Apple Pay 於載入時需以**支付處理憑證**完成商戶驗證；此憑證未配置 → 驗證卡住 → 前端永遠停在 `SDK_START_OF_LOADING`。域名驗證僅證明網域擁有權，**支付憑證才是授權實際收款的關鍵**。
+
+**解鎖步驟（Antom 後台 + Apple Developer，非程式）**：
+1. 支付证书配置對話框 →「下載」取得 Antom 產生的 **CSR**。
+2. Apple Developer（需會員 + Merchant ID）→ Certificates → 建立 **Apple Pay Payment Processing Certificate** → 上傳 CSR → 下載 Apple 產生之 `.cer`。
+3. 回 Antom →「继续」上傳 `.cer` 完成配置。
+4. 無 Apple Developer 帳號者，可洽 Antom「联系销售开通」詢問是否提供**代管憑證**方案。
+
+配置完成後 Apple Pay 載入即通過；本專案前端 code 已正確（Payment Element + productScene=ELEMENT_PAYMENT + paymentMethod.paymentMethodMetaData.applePayConfiguration 含 contact fields + paymentFactor.captureMode=AUTOMATIC）。
+
+---
+
 ## 七、關鍵教訓
 
 1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` 成功只代表 session 建立，Apple Pay 出不出來是**前端 SDK 階段**，兩者需分開診斷。
