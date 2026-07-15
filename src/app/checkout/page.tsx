@@ -154,14 +154,15 @@ function CheckoutContent() {
         const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let element: any = c
-        if (typeof c.createComponent === 'function') {
-          element = await c.createComponent(mountOpts)
-          if (element?.mount) await element.mount('#antom-container')
-        } else if (typeof c.mountComponent === 'function') {
+        if (typeof c.mountComponent === 'function') {
           const r = await c.mountComponent(mountOpts, '#antom-container')
           if (r) element = r
+        } else if (typeof c.createComponent === 'function') {
+          const comp = await c.createComponent(mountOpts)
+          if (comp?.mount) await comp.mount('#antom-container')
+          if (comp) element = comp
         } else {
-          throw new Error('SDK 無 createComponent/mountComponent 方法')
+          throw new Error('SDK 無 mountComponent/createComponent 方法')
         }
         antomInstanceRef.current = (typeof element?.submitPayment === 'function') ? element : c
         // 已綁定卡片自動送出；其餘（新卡/街口/Apple Pay）顯示自訂送出鍵 → submitPayment()
@@ -479,10 +480,9 @@ function CheckoutContent() {
               {!antomMounted && (
                 <div className="mb-3 space-y-1.5">
                   <p className="text-xs font-medium text-muted-foreground">收銀台模式（展示用）</p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {([
                       { id: 'element', label: '嵌入式' },
-                      { id: 'popup', label: '彈窗' },
                       { id: 'hosted', label: '托管跳轉' },
                     ] as const).map((m) => (
                       <button

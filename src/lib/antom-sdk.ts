@@ -1,7 +1,7 @@
-// Antom Web SDK（ams-checkout v2）loader
-// - productScene=ELEMENT_PAYMENT（嵌入式收銀台）→ 需用 AMSPaymentElement 類別（Antom 官方確認）
-// - 傳統模式 / 綁卡 vaulting → AMSCashierPayment
-const ANTOM_SDK = 'https://js.antom.com/v2/ams-checkout.js'
+// Antom Web SDK（ams-checkout）loader
+// 官方要求 SDK 版本 ≥ 1.46.0，否則 Apple Pay 外掛未註冊（plugin unregistered / Failed to create iframe）。
+// 1.47.0 為最新版，已確認含 ELEMENT_PAYMENT + APPLEPAY 外掛；新版統一用 AMSCashierPayment 類別。
+const ANTOM_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.47.0/dist/umd/ams-checkout.min.js'
 
 declare global {
   interface Window {
@@ -38,33 +38,15 @@ export async function loadAntomSdk(): Promise<Window['AMSCashierPayment'] | null
   return window.AMSCashierPayment || null
 }
 
-// Payment Element（productScene=ELEMENT_PAYMENT 專用）：優先新版 AMSPaymentElement，退回舊版
-export async function loadAntomElement(): Promise<Window['AMSPaymentElement'] | null> {
+// Payment Element（嵌入式）：1.47.0 統一用 AMSCashierPayment（.mountComponent + .submitPayment）
+export async function loadAntomElement(): Promise<Window['AMSCashierPayment'] | null> {
   try { await ensureScript() } catch { return null }
-  return window.AMSPaymentElement || window.AMSCashierPayment || null
+  return window.AMSCashierPayment || null
 }
 
-// 彈窗模式（createComponent）：用官方彈窗 SDK marmot-cloud 1.19.0（v2 的 AMSCashierPayment.createComponent
-// 非官方彈窗，會 Failed to create iframe）。獨立 <script>，與 v2 分開，避免污染 window。
-const ANTOM_POPUP_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.19.0/dist/umd/ams-checkout.min.js'
+// 彈窗模式（保留介面；目前前台不提供彈窗選項）：同一支 1.47.0 SDK
 export async function loadAntomPopup(): Promise<Window['AMSCashierPayment'] | null> {
-  if (typeof window === 'undefined') return null
-  await new Promise<void>((resolve) => {
-    const existing = document.querySelector('script[data-antom-popup]')
-    if (existing) {
-      if (window.AMSCashierPayment) return resolve()
-      existing.addEventListener('load', () => resolve())
-      existing.addEventListener('error', () => resolve())
-      return
-    }
-    const s = document.createElement('script')
-    s.src = ANTOM_POPUP_SDK
-    s.async = true
-    s.setAttribute('data-antom-popup', '1')
-    s.onload = () => resolve()
-    s.onerror = () => resolve()
-    document.body.appendChild(s)
-  })
+  try { await ensureScript() } catch { return null }
   return window.AMSCashierPayment || null
 }
 

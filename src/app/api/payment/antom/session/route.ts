@@ -62,18 +62,8 @@ export async function POST(request: Request) {
     const meta: Record<string, unknown> = { is3DSAuthentication: true }
     if (body.save_card !== false && user) meta.tokenizeMode = 'ASKFORCONSENT'
     paymentMethod.paymentMethodMetaData = meta
-  } else if (method === 'APPLEPAY') {
-    // Apple Pay（嵌入式 Payment Element）：applePayConfiguration 置於 paymentMethodMetaData 內，
-    // 且【必須】帶 requiredShippingContactFields / requiredBillingContactFields / buttonsBundled
-    //（依 Antom 官方 Payment Element 範例；先前缺這些 contact fields 導致 SDK 初始化卡死）。
-    paymentMethod.paymentMethodMetaData = {
-      applePayConfiguration: {
-        requiredShippingContactFields: ['postalAddress'],
-        requiredBillingContactFields: ['postalAddress'],
-        buttonsBundled: true,   // 完全照 Antom 官方 Apple Pay 範例（Boolean true）
-      },
-    }
   }
+  // Apple Pay 不在此設 paymentMethod：官方要求以 availablePaymentMethod 指定，applePayConfiguration 建議留空（見下）。
 
   // 渲染模式（前端可選，供展示三種模式）：
   //   element = 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，前端 mountComponent，原生按鈕 inline）
@@ -84,11 +74,14 @@ export async function POST(request: Request) {
     element: 'ELEMENT_PAYMENT', popup: undefined, hosted: 'CHECKOUT_PAYMENT',
   }
   const productScene = sceneByMode[renderMode] ?? 'ELEMENT_PAYMENT'
-  // 彈窗(drop-in)需「可用付款方式列表」availablePaymentMethod；送單一 paymentMethod 會讓 SDK 對 undefined
-  // 做 .find() → Failed to create iframe。故 popup 用 availablePaymentMethod，element/hosted 用 paymentMethod。
+  // 方式欄位：
+  //  - Apple Pay → 官方要求用 availablePaymentMethod.paymentMethodTypeList=[APPLEPAY]，applePayConfiguration 建議留空。
+  //  - 彈窗(drop-in) → 亦用 availablePaymentMethod（送單一 paymentMethod 會讓 SDK .find on undefined → Failed to create iframe）。
+  //  - 卡片/街口(嵌入/托管) → paymentMethod（帶 3DS/tokenize metadata）。
+  const isApplePay = method === 'APPLEPAY'
   const pmMeta = paymentMethod.paymentMethodMetaData as Record<string, unknown> | undefined
-  const methodField: Record<string, unknown> = renderMode === 'popup'
-    ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: method }], ...(pmMeta ? { paymentMethodMetaData: pmMeta } : {}) } }
+  const methodField: Record<string, unknown> = (isApplePay || renderMode === 'popup')
+    ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: method }], ...(!isApplePay && pmMeta ? { paymentMethodMetaData: pmMeta } : {}) } }
     : { paymentMethod }
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
