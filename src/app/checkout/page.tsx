@@ -185,8 +185,10 @@ function CheckoutContent() {
       // 載入逾時偵測：8 秒內未完成
       setTimeout(() => { if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成），請截圖此畫面回報。') }, 8000)
       // mount：type=payment、singleOption=skip（單一方式跳過列表直接進付款流程）
+      // singleOption:'list' → 顯示付款方式（SDK 渲染 Apple Pay 按鈕，由使用者手勢觸發）；
+      // 'skip' 會在載入當下強行進付款流程，Apple Pay 因非手勢而空白 + appHeartBeatTimeout。
       await element.mount(
-        { type: 'payment', appearance: { theme: 'default' }, notRedirectAfterComplete: false, merchantAppointParam: { singleOption: 'skip' } },
+        { type: 'payment', appearance: { theme: 'default' }, notRedirectAfterComplete: false, merchantAppointParam: { singleOption: 'list' } },
         '#antom-container',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ).then((r: any) => {
