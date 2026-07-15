@@ -151,20 +151,15 @@ function CheckoutContent() {
       } else {
         // 嵌入式（官方 Payment Element 流程）：createComponent 取得元件 → element.mount() 嵌入 →
         // 自訂按鈕點擊後呼叫 element.submitPayment()。Apple Pay 不需採集要素，一樣用自訂按鈕 → submitPayment()。
-        const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }
+        // SDK 1.47.0：卡片/Apple Pay 用 createComponent 取得元件（mountComponent 是 PayPal 專用）。
+        // 元件 → element.mount({selector}) 嵌入 → element.submitPayment() 送出。
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let element: any = c
-        if (typeof c.mountComponent === 'function') {
-          const r = await c.mountComponent(mountOpts, '#antom-container')
-          if (r) element = r
-        } else if (typeof c.createComponent === 'function') {
-          const comp = await c.createComponent(mountOpts)
-          if (comp?.mount) await comp.mount('#antom-container')
-          if (comp) element = comp
-        } else {
-          throw new Error('SDK 無 mountComponent/createComponent 方法')
+        const element: any = await c.createComponent({ sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } })
+        if (element?.mount) {
+          try { await element.mount({ selector: '#antom-container' }) }
+          catch { await element.mount('#antom-container') }
         }
-        antomInstanceRef.current = (typeof element?.submitPayment === 'function') ? element : c
+        antomInstanceRef.current = element
         // 已綁定卡片自動送出；其餘（新卡/街口/Apple Pay）顯示自訂送出鍵 → submitPayment()
         if (antomCardId) void handleAntomSubmit()
         else setAntomShowSubmit(true)
