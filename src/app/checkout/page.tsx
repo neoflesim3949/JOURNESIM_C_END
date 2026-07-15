@@ -124,8 +124,8 @@ function CheckoutContent() {
         const cap = (tag: string) => (...args: unknown[]) => {
           try {
             const msg = args.map((a) => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
-            if (/merchant|validat|apple|createcomponent|submitpayment|error|fail|cancel|unsupported|session|plugin/i.test(msg)) {
-              setAntomEvents((prev) => [...prev, `${tag}｜${msg.slice(0, 180)}`].slice(-24))
+            if (/merchant|validat|apple|createcomponent|submitpayment|error|fail|cancel|unsupported|session|plugin|network|capabilit|countr|currenc|dismiss|abort/i.test(msg)) {
+              setAntomEvents((prev) => [...prev, `${tag}｜${msg.slice(0, 320)}`].slice(-24))
             }
           } catch { /* ignore */ }
         }
