@@ -62,14 +62,13 @@ export async function POST(request: Request) {
     const meta: Record<string, unknown> = { is3DSAuthentication: true }
     if (body.save_card !== false && user) meta.tokenizeMode = 'ASKFORCONSENT'
     paymentMethod.paymentMethodMetaData = meta
-  } else if (method === 'APPLEPAY') {
-    // Apple Pay：applePayConfiguration 需為 paymentMethod【頂層】欄位（與 paymentMethodType 平級，Antom 確認）
-    // buttonsBundled 讓 Payment Element 自動渲染 Apple Pay 原生按鈕
-    paymentMethod.applePayConfiguration = { buttonsBundled: 'true' }
   }
 
-  // 【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent
-  // 內嵌本站 div、不跳轉。需商戶開通「Web 嵌入式白名單」權限（未開通時 Apple Pay 會卡 SDK_START_OF_LOADING）。
+  // 【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent 內嵌、不跳轉。
+  // Apple Pay 於 Payment Element 場景【必須】用 availablePaymentMethod.paymentMethodTypeList 指定（非 paymentMethod），
+  // applePayConfiguration 置於 availablePaymentMethod.paymentMethodMetaData 且官方建議置空/預設（Antom 官方文檔截圖）。
+  // 先前誤送 paymentMethod.paymentMethodType=APPLEPAY + 頂層 applePayConfiguration → SDK 卡 SDK_START_OF_LOADING。
+  const isApplePay = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
     productScene: 'ELEMENT_PAYMENT',
@@ -81,7 +80,9 @@ export async function POST(request: Request) {
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
     paymentAmount: { currency: payCurrency, value },
-    paymentMethod,
+    ...(isApplePay
+      ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: 'APPLEPAY' }] } }
+      : { paymentMethod }),
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }
