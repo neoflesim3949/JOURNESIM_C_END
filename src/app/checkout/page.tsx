@@ -43,7 +43,6 @@ function CheckoutContent() {
   const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
   const [antomMsg, setAntomMsg] = useState('')                // SDK 事件/錯誤（畫面顯示，方便手機診斷）
   const [antomEvents, setAntomEvents] = useState<string[]>([]) // SDK 事件序列（診斷用）
-  const [antomRenderMode, setAntomRenderMode] = useState<'element' | 'popup' | 'hosted'>('element') // 渲染模式（展示用）
   const [antomShowSubmit, setAntomShowSubmit] = useState(false) // 卡片/街口自建送出鍵（Apple Pay 用原生按鈕）
   const [antomSubmitting, setAntomSubmitting] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,9 +51,6 @@ function CheckoutContent() {
 
   useEffect(() => {
     setIsInLineApp(/Line/i.test(navigator.userAgent))
-    // 還原上次選的收銀台模式（切換模式時會重載頁面以乾淨載入單一支 SDK）
-    const savedMode = sessionStorage.getItem('antomRenderMode')
-    if (savedMode === 'element' || savedMode === 'popup' || savedMode === 'hosted') setAntomRenderMode(savedMode)
     if (totalPrice > 0) trackBeginCheckout(totalPrice)
     fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => {
       if (d?.provider === 'antom') setProvider('antom')
@@ -97,7 +93,7 @@ function CheckoutContent() {
         body: JSON.stringify({
           order_number: orderNumber,
           payment_method: antomCardId ? 'CARD' : antomMethod,
-          render_mode: antomRenderMode,
+          render_mode: 'element',
           ...(antomCardId ? { card_id: antomCardId } : {}),
         }),
       }).then((r) => r.json()).catch(() => null)
@@ -198,9 +194,15 @@ function CheckoutContent() {
       }).catch((e: any) => { setAntomEvents((prev) => [...prev, `mount catch:${e?.code || e?.message || e}`].slice(-24)); setAntomMsg(`載入失敗：${e?.message || e}`) })
       elementDone = true
       setAntomMsg('')
-      // 已綁定卡片自動送出；其餘（新卡/街口/Apple Pay）顯示自訂送出鍵 → submitPayment()
-      if (antomCardId) void handleAntomSubmit()
-      else setAntomShowSubmit(true)
+      // 一鍵直達：已綁定卡片 / Apple Pay 於 mount 完成後自動 submitPayment（點「前往付款」即觸發 Wallet，不再多一步）。
+      // 若因瀏覽器手勢限制被擋，handleAntomSubmit 會顯示錯誤並保留自訂送出鍵作為備援。
+      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
+      if (antomCardId || isApplePay) {
+        setAntomShowSubmit(true)   // 先備好備援按鈕（自動觸發失敗時使用者仍可手動點）
+        void handleAntomSubmit()
+      } else {
+        setAntomShowSubmit(true)   // 新卡/街口：填表後按自訂送出鍵
+      }
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
@@ -509,32 +511,7 @@ function CheckoutContent() {
                   </div>
                 </div>
               )}
-              {/* 渲染模式選擇器（展示用：嵌入式 / 彈窗 / 托管）*/}
-              {!antomMounted && (
-                <div className="mb-3 space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground">收銀台模式（展示用）</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {([
-                      { id: 'element', label: '嵌入式' },
-                      { id: 'hosted', label: '托管跳轉' },
-                    ] as const).map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => {
-                          // 已載過 SDK 才切換 → 重載頁面乾淨載入（避免 v2/marmot 兩支 SDK 污染 window）
-                          sessionStorage.setItem('antomRenderMode', m.id)
-                          if (antomMounted) window.location.reload()
-                          else setAntomRenderMode(m.id)
-                        }}
-                        className={`px-2 py-2 text-xs rounded-lg border transition-colors ${antomRenderMode === m.id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* 固定嵌入式（AMSElement）；托管/彈窗模式已驗證完畢不再展示 */}
               {!antomMounted && (
                 <button
                   onClick={handleAntom}
