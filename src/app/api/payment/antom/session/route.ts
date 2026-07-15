@@ -75,13 +75,12 @@ export async function POST(request: Request) {
     }
   }
 
-  // 卡片/街口 → 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，前端 mountComponent + submitPayment）。
-  // Apple Pay → 完全照 Antom 官方 Apple Pay 範例：【不帶 productScene】+ paymentMethod.paymentMethodType=APPLEPAY
-  //   + applePayConfiguration(buttonsBundled:true) + paymentFactor.isAuthorization；前端走 createComponent。
-  const isApplePay = method === 'APPLEPAY'
+  // 三種方式統一【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent
+  // 內嵌 #antom-container。Apple Pay 靠 applePayConfiguration.buttonsBundled 渲染【原生黑色 Apple Pay 按鈕】；
+  // 卡片/街口自建按鈕呼叫 submitPayment()。
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    ...(isApplePay ? {} : { productScene: 'ELEMENT_PAYMENT' }),
+    productScene: 'ELEMENT_PAYMENT',
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
