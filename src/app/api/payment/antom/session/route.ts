@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     },
     paymentAmount: { currency: payCurrency, value },
     ...(isApplePay
-      ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: 'APPLEPAY' }] } }
+      ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: 'APPLEPAY' }], expressCheckout: true } }
       : { paymentMethod }),
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
