@@ -169,13 +169,28 @@ function CheckoutContent() {
         }
       }
       let elementDone = false
+      // 修正 Apple Pay 顯示名稱：sessionData 第 4 段為客戶端 metadata（base64 JSON、未簽章），
+      // Antom 伺服器將 merchantName 寫死 "Merchant"（API 之 order.merchant 參數不生效）。
+      // SDK 以此值作 Apple Pay 表 total.label 與 merchant 驗證 displayName → 於傳入 SDK 前改寫為 FLESIM.COM。
+      let sessionData = s.paymentSessionData as string
+      try {
+        const parts = sessionData.split('&&')
+        if (parts.length >= 4 && parts[3]) {
+          const decoded = atob(parts[3])
+          if (decoded.includes('"merchantName":"Merchant"')) {
+            parts[3] = btoa(decoded.replace('"merchantName":"Merchant"', '"merchantName":"FLESIM.COM"'))
+            sessionData = parts.join('&&')
+            setAntomEvents((prev) => [...prev, 'REWRITE｜merchantName Merchant→FLESIM.COM'].slice(-24))
+          }
+        }
+      } catch { /* 改寫失敗則用原始 sessionData */ }
       // 官方 Payment Element 正解：new AMSElement({environment,locale,sessionData}) → element.mount({type:'payment',…}, selector)
-      //   → 自訂按鈕點擊呼叫 element.submitPayment()。sessionData 在建構子傳（勿改動 paymentSessionData）。
+      //   → 自訂按鈕點擊呼叫 element.submitPayment()。
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const element: any = new SDK({
         environment: s.environment === 'prod' ? 'prod' : 'sandbox',
         locale: 'zh_TW',
-        sessionData: s.paymentSessionData,
+        sessionData,
       })
       antomInstanceRef.current = element
       // 載入逾時偵測：8 秒內未完成
@@ -194,15 +209,11 @@ function CheckoutContent() {
       }).catch((e: any) => { setAntomEvents((prev) => [...prev, `mount catch:${e?.code || e?.message || e}`].slice(-24)); setAntomMsg(`載入失敗：${e?.message || e}`) })
       elementDone = true
       setAntomMsg('')
-      // 一鍵直達：已綁定卡片 / Apple Pay 於 mount 完成後自動 submitPayment（點「前往付款」即觸發 Wallet，不再多一步）。
-      // 若因瀏覽器手勢限制被擋，handleAntomSubmit 會顯示錯誤並保留自訂送出鍵作為備援。
-      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
-      if (antomCardId || isApplePay) {
-        setAntomShowSubmit(true)   // 先備好備援按鈕（自動觸發失敗時使用者仍可手動點）
-        void handleAntomSubmit()
-      } else {
-        setAntomShowSubmit(true)   // 新卡/街口：填表後按自訂送出鍵
-      }
+      // Apple Pay 不可於 mount 後自動 submitPayment：Safari 要求 Wallet 由「新鮮的使用者手勢」觸發，
+      // 點「前往付款」的手勢經建單+mount(約4s async)已過期 → 自動觸發被擋 + appHeartBeatTimeout（實測）。
+      // → Apple Pay/新卡/街口一律顯示自訂送出鍵，由使用者點擊（手勢）觸發；僅已綁定卡片(無 Wallet)自動送出。
+      if (antomCardId) void handleAntomSubmit()
+      setAntomShowSubmit(true)
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
