@@ -75,13 +75,11 @@ export async function POST(request: Request) {
     }
   }
 
-  // 卡片/街口 → 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent。
-  // Apple Pay → 【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent，
-  //   paymentMethod.paymentMethodType=APPLEPAY + 上述 applePayConfiguration（依官方 Payment Element 範例）。
-  const useElement = method === 'APPLEPAY'
+  // 三種方式統一【小彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent
+  // 開 on-site overlay，不整頁覆蓋、不跳轉託管。Apple Pay 仍帶 paymentMethodType=APPLEPAY + applePayConfiguration
+  //（含 contact fields，依官方範例）；待 Antom「支付证书」配置完成後即可於彈窗喚起。
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    ...(useElement ? { productScene: 'ELEMENT_PAYMENT' } : {}),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,

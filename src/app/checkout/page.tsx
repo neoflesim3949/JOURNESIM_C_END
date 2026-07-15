@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomElement, loadAntomPopup } from '@/lib/antom-sdk'
+import { loadAntomPopup } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -112,9 +112,8 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      // 卡片/街口 → 彈窗 AMSCashierPayment.createComponent；Apple Pay → 嵌入式 Payment Element AMSPaymentElement.mountComponent
-      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
-      const SDK = isApplePay ? await loadAntomElement() : await loadAntomPopup()
+      // 三種方式統一【小彈窗】：AMSCashierPayment.createComponent 開 on-site overlay（不整頁覆蓋/不跳轉）
+      const SDK = await loadAntomPopup()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
@@ -149,13 +148,8 @@ function CheckoutContent() {
       }, 8000)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      if (isApplePay) {
-        // Apple Pay 嵌入式：mountComponent 掛到 #antom-container，buttonsBundled 自動渲染 Apple Pay 原生按鈕
-        await c.mountComponent({ sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }, '#antom-container')
-      } else {
-        // 卡片/街口彈窗：createComponent 開 overlay（含卡號表單與送出鍵），付款完成 SDK 自動導回 paymentRedirectUrl
-        await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
-      }
+      // 小彈窗：createComponent 開 overlay（含卡號表單/Apple Pay 按鈕與送出鍵），付款完成 SDK 自動導回 paymentRedirectUrl
+      await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
       // 就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
       setAntomMsg('')
