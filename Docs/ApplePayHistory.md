@@ -106,6 +106,52 @@ Apple Pay：availablePaymentMethod.paymentMethodTypeList = [{ paymentMethodType:
 
 ---
 
+## 六之一、彈窗模式最終結果（2026-07-15）
+
+改用彈窗 `AMSCashierPayment.createComponent`（`CASHIER_PAYMENT`，不設 productScene）後：
+
+- ✅ **彈窗成功開啟**（createComponent 有效，不再有 iframe / Load resource timeout）。
+- ❌ **Apple Pay** 進入付款處理即報 `SDK_PAYMENT_ERROR`，Antom 彈窗顯示 *"Looks like there is an issue! Please return to checkout page and place the order again."*，加 `availablePaymentMethod.expressCheckout:true` 亦無效。
+- 卡片 / 街口在同一 session/SDK 正常。
+
+**跨模式一致結論**：Apple Pay 在**嵌入式（卡死）／彈窗（SDK_PAYMENT_ERROR）**皆於「商戶驗證 / 付款處理」階段失敗，而卡片全程正常 → 問題不在前端渲染或 payload，指向 **Antom 側未完成 www.flesim.com 的 Apple Pay 商戶/網域註冊綁定**（我方僅上傳 domain association 檔，Antom 端尚需於後台註冊）。
+
+**現行處置**：卡片 / 街口以彈窗上線可用；Apple Pay 暫緩（或自後台 `antom_enabled_methods` 移除 APPLEPAY），待 Antom 修復後端註冊。
+
+---
+
+## 六之二、給 Antom 的工單（可直接複製）
+
+```
+【商戶】Flesim.com HK Limited｜正式環境｜網域 www.flesim.com
+【問題】Web Cashier Payment：信用卡正常，惟 Apple Pay 於所有集成模式皆失敗。
+
+【已確認正常】
+- createPaymentSession 皆回 result S / SUCCESS（範例 paymentRequestId：FL260715NM8NDX）。
+- 同一整合下，信用卡（paymentMethod=CARD）可正常渲染與付款。
+
+【Apple Pay 失敗現象（依模式）】
+1) 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，AMSPaymentElement.mountComponent）：
+   前端事件停在 SDK_START_OF_LOADING，永不進展、無 onError。
+2) 嵌入式（marmot 1.19.0 AMSCashierPayment.mountComponent）：
+   onError SDK_INTERNAL_ERROR(Failed to create iframe) → SDK_CREATECOMPONENT_ERROR(Load resource timeout)。
+3) 彈窗（CASHIER_PAYMENT 不設 productScene，AMSCashierPayment.createComponent）：
+   彈窗可開，Apple Pay 進付款處理即 SDK_PAYMENT_ERROR，頁面顯示
+   「Looks like there is an issue, please place the order again」。加 expressCheckout:true 無效。
+
+【我方已備妥的前置】
+- .well-known/apple-developer-merchantid-domain-association（www.flesim.com 回 200 text/plain 不轉址）。
+- settlementStrategy.settlementCurrency=USD、env.terminalType=WEB、env.clientIp（真實公網 IP）。
+- Apple Pay 以 availablePaymentMethod.paymentMethodTypeList=[{paymentMethodType:APPLEPAY}] 指定（經官方 Java SDK model 驗證結構正確）。
+- 「Web 嵌入式白名單」已請貴方開通。裝置為 Safari + Apple Wallet 已加卡（ApplePaySession 自檢通過）。
+
+【請協助確認】
+貴方後台是否已完成 www.flesim.com 的 Apple Pay 商戶/網域註冊綁定？
+Apple Pay 於各模式皆在「商戶驗證/付款處理」階段失敗、信用卡全程正常，研判為後端 Apple Pay 設定未完成。
+```
+
+---
+
 ## 七、關鍵教訓
 
 1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` 成功只代表 session 建立，Apple Pay 出不出來是**前端 SDK 階段**，兩者需分開診斷。
