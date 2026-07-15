@@ -75,12 +75,18 @@ export async function POST(request: Request) {
     }
   }
 
-  // 三種方式統一【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent
-  // 內嵌 #antom-container。Apple Pay 靠 applePayConfiguration.buttonsBundled 渲染【原生黑色 Apple Pay 按鈕】；
-  // 卡片/街口自建按鈕呼叫 submitPayment()。
+  // 渲染模式（前端可選，供展示三種模式）：
+  //   element = 嵌入式 Payment Element（productScene=ELEMENT_PAYMENT，前端 mountComponent，原生按鈕 inline）
+  //   popup   = 彈窗（不設 productScene，前端 createComponent，開 overlay）
+  //   hosted  = 全托管（productScene=CHECKOUT_PAYMENT，回 normalUrl 整頁跳轉）
+  const renderMode = String(body.render_mode || 'element').toLowerCase()
+  const sceneByMode: Record<string, string | undefined> = {
+    element: 'ELEMENT_PAYMENT', popup: undefined, hosted: 'CHECKOUT_PAYMENT',
+  }
+  const productScene = sceneByMode[renderMode] ?? 'ELEMENT_PAYMENT'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    productScene: 'ELEMENT_PAYMENT',
+    ...(productScene ? { productScene } : {}),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -108,7 +114,12 @@ export async function POST(request: Request) {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
     const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
-    // 卡片/街口彈窗 createComponent、Apple Pay 嵌入式 mountComponent：皆回 paymentSessionData 供前端 SDK
+    // 托管模式：回 normalUrl → 前端整頁跳轉
+    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
+    if (renderMode === 'hosted' && normalUrl) {
+      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
+    }
+    // element/popup：回 paymentSessionData 供前端 SDK（mountComponent / createComponent）
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
