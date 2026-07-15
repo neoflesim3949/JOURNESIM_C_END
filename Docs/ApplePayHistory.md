@@ -188,6 +188,23 @@ Antom Dashboard → Apple Pay → 分頁狀態：
 
 ---
 
+## 六之五、嵌入式 + submitPayment 最終狀態（2026-07-15）
+
+依 Antom 真人客服指示（「嵌入式不需支付憑證，前端須自建按鈕呼叫 `submitPayment()`」）完成整合：
+- 後端 `productScene=ELEMENT_PAYMENT`；前端 `AMSPaymentElement.mountComponent` 內嵌 `#antom-container`。
+- 卡片/街口：自建送出鍵 → `inst.submitPayment().then({status,error,userCanceled3D})`，依官方處理回傳。
+- Apple Pay：`applePayConfiguration.buttonsBundled` 原生按鈕。
+
+**實測結果**：
+- ✅ **卡片 / 街口：完全正常**（內嵌表單 + 送出鍵 + 3DS，可完成付款）。
+- ❌ **Apple Pay：仍停在 `SDK_START_OF_LOADING`**（無 `SDK_END_OF_LOADING`、無 `onError`、按鈕未渲染）。
+
+**決定性結論**：`submitPayment()` 是「送出階段」，而 Apple Pay 卡在更前面的「載入階段」，按鈕從未渲染 → 根本到不了 submitPayment。**同一 session/SDK/mountComponent，卡片可載入、唯 Apple Pay 載入卡死** → 確認為 Antom 端 Apple Pay「商戶/憑證驗證」（官方文檔：憑證用於「發起 payment session 前」驗證）未就緒，非前端整合問題。客服「不需憑證」之說與證據不符。
+
+**現行處置**：卡片/街口以嵌入式上線可用；Apple Pay 待 Antom 端修復（優先確認「支付证书」——目前停在「下載 CSR」未完成）。上線前建議自後台 `antom_enabled_methods` 移除 APPLEPAY，避免顧客撞 loading。
+
+---
+
 ## 七、關鍵教訓
 
 1. **後端請求成功 ≠ 前端能渲染**：`createPaymentSession` 成功只代表 session 建立，Apple Pay 出不出來是**前端 SDK 階段**，兩者需分開診斷。

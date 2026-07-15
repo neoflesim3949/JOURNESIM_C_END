@@ -70,7 +70,9 @@ export async function POST(request: Request) {
       applePayConfiguration: {
         requiredShippingContactFields: ['email', 'name', 'phone', 'postalAddress'],
         requiredBillingContactFields: ['name', 'postalAddress'],
-        buttonsBundled: 'true',
+        // Boolean（非字串）；false = Apple Pay 按鈕獨立置頂。本 session 僅 Apple Pay 一種方式，
+        // 設 true（與其他方式捆綁）會讓 SDK 湊不出方法列表 → 疑為 SDK_START_OF_LOADING 卡死主因。
+        buttonsBundled: false,
       },
     }
   }
