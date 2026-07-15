@@ -64,12 +64,14 @@ export async function POST(request: Request) {
     paymentMethod.paymentMethodMetaData = meta
   }
 
-  // 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent 開 overlay，
-  // 完整 UI、自帶送出鍵、官方範例做法。用 createComponent（非 mountComponent，後者內嵌 iframe 會 Load resource timeout）。
-  // Apple Pay 用 availablePaymentMethod.paymentMethodTypeList 指定（非 paymentMethod）。
-  const isApplePay = method === 'APPLEPAY'
+  // 還原 f762005 之可用組合：
+  //  - 卡片/街口 → 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent 開 overlay。
+  //  - Apple Pay → 【全托管收銀台】(productScene=CHECKOUT_PAYMENT)：回 normalUrl 整頁跳轉託管頁（彈窗 Apple Pay
+  //    會 SDK_PAYMENT_ERROR，托管為實測可用之模式）。三種方式皆用 paymentMethod（Apple Pay=paymentMethodType APPLEPAY）。
+  const useHosted = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
+    ...(useHosted ? { productScene: 'CHECKOUT_PAYMENT' } : {}),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -78,9 +80,7 @@ export async function POST(request: Request) {
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
     paymentAmount: { currency: payCurrency, value },
-    ...(isApplePay
-      ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: 'APPLEPAY' }], expressCheckout: true } }
-      : { paymentMethod }),
+    paymentMethod,
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }
@@ -98,7 +98,12 @@ export async function POST(request: Request) {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
     const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
-    // 彈窗（含 Apple Pay）：回 paymentSessionData 供 SDK createComponent
+    // Apple Pay 全托管：回 normalUrl → 前端整頁跳轉託管頁
+    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
+    if (useHosted && normalUrl) {
+      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
+    }
+    // 卡片/街口彈窗：回 paymentSessionData 供 SDK createComponent
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
