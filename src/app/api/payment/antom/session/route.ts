@@ -70,10 +70,13 @@ export async function POST(request: Request) {
   //   popup   = 彈窗（不設 productScene，前端 createComponent，開 overlay）
   //   hosted  = 全托管（productScene=CHECKOUT_PAYMENT，回 normalUrl 整頁跳轉）
   const renderMode = String(body.render_mode || 'element').toLowerCase()
+  // 註：productScene=ELEMENT_PAYMENT 會令 sessionData 之 paymentMethodCategoryType=ALL，
+  // 而 SDK createComponent 的 CARD_APPLE_PAY plugin 僅支援 category=CARD（單一方式）。
+  // 故嵌入式(element)【不帶 productScene】→ 單一 paymentMethod → category=CARD → plugin 才認得。
   const sceneByMode: Record<string, string | undefined> = {
-    element: 'ELEMENT_PAYMENT', popup: undefined, hosted: 'CHECKOUT_PAYMENT',
+    element: undefined, popup: undefined, hosted: 'CHECKOUT_PAYMENT',
   }
-  const productScene = sceneByMode[renderMode] ?? 'ELEMENT_PAYMENT'
+  const productScene = sceneByMode[renderMode]
   // 方式欄位：
   //  - 嵌入/托管（含 Apple Pay）→ 單一 paymentMethod。Apple Pay 用 paymentMethodType=APPLEPAY，
   //    使 sessionData 的 paymentMethodCategoryType=CARD（SDK createComponent 之 CARD_APPLE_PAY plugin 才支援）；
