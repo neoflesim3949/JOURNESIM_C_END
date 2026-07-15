@@ -155,7 +155,6 @@ function CheckoutContent() {
           return origSend.call(this, nextBody as XMLHttpRequestBodyInit)
         }
       }
-      let elementDone = false
       // 修正 Apple Pay 顯示名稱：sessionData 第 4 段為客戶端 metadata（base64 JSON、未簽章），
       // Antom 伺服器將 merchantName 寫死 "Merchant"（API 之 order.merchant 參數不生效）。
       // SDK 以此值作 Apple Pay 表 total.label 與 merchant 驗證 displayName → 於傳入 SDK 前改寫為 FLESIM.COM。
@@ -180,22 +179,24 @@ function CheckoutContent() {
         sessionData,
       })
       antomInstanceRef.current = element
-      // 載入逾時偵測：8 秒內未完成
-      setTimeout(() => { if (!elementDone) setAntomMsg('元件載入逾時（8s 未完成），請截圖此畫面回報。') }, 8000)
+      // 註：不設載入逾時警告——閘道查詢偏慢(3~5s)+SDK 心跳重試會令 mount promise 晚 resolve,
+      // 但畫面早已渲染完成;真正的載入錯誤由 mount() 的 then/catch 回報。
       // mount：type=payment、singleOption=skip（單一方式跳過列表直接進付款流程）
       // singleOption:'list' → 顯示付款方式（SDK 渲染 Apple Pay 按鈕，由使用者手勢觸發）；
       // 'skip' 會在載入當下強行進付款流程，Apple Pay 因非手勢而空白 + appHeartBeatTimeout。
-      await element.mount(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const mountResult: any = await element.mount(
         { type: 'payment', appearance: { theme: 'default' }, notRedirectAfterComplete: false, merchantAppointParam: { singleOption: 'list' } },
         '#antom-container',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ).then((r: any) => {
-        const err = r?.error
-        if (err?.code) { setAntomEvents((prev) => [...prev, `mount error:${err.code}`].slice(-24)); setAntomMsg(`載入失敗：${err.message || err.code}`) }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      }).catch((e: any) => { setAntomEvents((prev) => [...prev, `mount catch:${e?.code || e?.message || e}`].slice(-24)); setAntomMsg(`載入失敗：${e?.message || e}`) })
-      elementDone = true
-      setAntomMsg('')
+      ).catch((e: any) => ({ error: e }))
+      const mountErr = mountResult?.error
+      if (mountErr && (mountErr.code || mountErr.message)) {
+        setAntomEvents((prev) => [...prev, `mount error:${mountErr.code || mountErr.message}`].slice(-24))
+        setAntomMsg(`載入失敗：${mountErr.message || mountErr.code}`)
+      } else {
+        setAntomMsg('')
+      }
       // 不自動 submitPayment：Safari 要求 Wallet 由「新鮮的使用者手勢」觸發（實測 async 後觸發會被擋）。
       // 顧客於元件內選好方式（含已綁卡）後，點「確認付款」（手勢）→ submitPayment()。
       setAntomShowSubmit(true)
