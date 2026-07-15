@@ -59,16 +59,13 @@ export async function POST(request: Request) {
     paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
   }
 
-  // 混合模式：
-  //  - 卡片/街口 → 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 createComponent 完整 UI、
-  //    自帶送出鍵、無需嵌入式白名單，保留原生體驗。
-  //  - Apple Pay → 【全托管收銀台】(productScene=CHECKOUT_PAYMENT)：回 normalUrl 整頁跳轉 Antom 託管頁，
-  //    這是本商戶唯一能穩定喚起 Apple Pay 的模式（嵌入式白名單未開通）。
-  //    註：Antom 客服口中的「HOSTED_CKP」對應 API 合法值為 CHECKOUT_PAYMENT。
-  const useHosted = method === 'APPLEPAY'
+  // 全部走【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 createComponent 完整 UI、
+  // 自帶送出鍵、無需嵌入式白名單、不跳轉，保留原生體驗。
+  //  - Apple Pay 為錢包/極速支付：不送 paymentMethod.paymentMethodType（Antom 確認 APPLEPAY 不可直接帶），
+  //    改以 availablePaymentMethod 指定 + expressCheckout:true，由收銀台自動渲染 Apple Pay 極速按鈕。
+  const isApplePay = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    ...(useHosted ? { productScene: 'CHECKOUT_PAYMENT' } : {}),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -77,7 +74,9 @@ export async function POST(request: Request) {
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
     paymentAmount: { currency: payCurrency, value },
-    paymentMethod,
+    ...(isApplePay
+      ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: 'APPLEPAY', paymentMethodOrder: 1 }], expressCheckout: true } }
+      : { paymentMethod }),
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }
@@ -100,12 +99,7 @@ export async function POST(request: Request) {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
     const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
-    // 全托管（Apple Pay）：回 normalUrl → 前端整頁跳轉託管頁
-    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
-    if (useHosted && normalUrl) {
-      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
-    }
-    // 彈窗（卡片/街口）：回 paymentSessionData 供 SDK createComponent
+    // 彈窗（含 Apple Pay 極速支付）：回 paymentSessionData 供 SDK createComponent
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
