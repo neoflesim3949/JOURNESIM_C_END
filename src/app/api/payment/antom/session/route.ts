@@ -30,7 +30,8 @@ export async function POST(request: Request) {
   // 付款方式：後台預設或前端指定（CARD / JKOPAY / ALIPAY_HK…）
   const method = String(body.payment_method || cfg.defaultMethod || 'CARD').toUpperCase()
   // 部分方式只收特定幣別（AlipayHK 僅 HKD）；其餘用後台交易幣別（預設 TWD，卡片與街口皆可）
-  const METHOD_CURRENCY: Record<string, string> = { ALIPAY_HK: 'HKD' }
+  // Apple Pay 試用 USD（與結算幣別一致；TWD 疑導致 Apple Pay 表驗證後被關）
+  const METHOD_CURRENCY: Record<string, string> = { ALIPAY_HK: 'HKD', APPLEPAY: 'USD' }
   const payCurrency = (METHOD_CURRENCY[method] || cfg.paymentCurrency).toUpperCase()
 
   // 訂單以 TWD 計價；若交易幣別非 TWD，用匯率換算（exchange_rates: 每 1 TWD 兌多少外幣）
@@ -62,6 +63,15 @@ export async function POST(request: Request) {
     const meta: Record<string, unknown> = { is3DSAuthentication: true }
     if (body.save_card !== false && user) meta.tokenizeMode = 'ASKFORCONSENT'
     paymentMethod.paymentMethodMetaData = meta
+  } else if (method === 'APPLEPAY') {
+    // 照官方 Payment Element Apple Pay 範例補齊 applePayConfiguration（先前缺，表驗證後被關疑與此有關）
+    paymentMethod.paymentMethodMetaData = {
+      applePayConfiguration: {
+        requiredShippingContactFields: ['email', 'name', 'phone', 'postalAddress'],
+        requiredBillingContactFields: ['name', 'postalAddress'],
+        buttonsBundled: 'true',
+      },
+    }
   }
   // Apple Pay 不在此設 paymentMethod：官方要求以 availablePaymentMethod 指定，applePayConfiguration 建議留空（見下）。
 
@@ -94,6 +104,13 @@ export async function POST(request: Request) {
       referenceOrderId: order.order_number,
       orderDescription: `FLESIM 訂單 ${order.order_number}`,
       orderAmount: { currency: payCurrency, value },
+      // 照官方範例補 goods 明細（Apple Pay 表建立 line items 需要）
+      goods: [{
+        referenceGoodsId: order.order_number,
+        goodsName: `FLESIM 訂單 ${order.order_number}`,
+        goodsQuantity: '1',
+        goodsUnitAmount: { currency: payCurrency, value },
+      }],
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
     paymentAmount: { currency: payCurrency, value },
@@ -106,11 +123,12 @@ export async function POST(request: Request) {
   if (cfg.currency) payload.settlementStrategy = { settlementCurrency: cfg.currency.toUpperCase() }
   // 網頁整合須指定終端類型；Apple Pay 另需 clientIp（真實公網 IP），缺失會靜默失敗（Antom 確認）
   const clientIp = getClientIp(request)
-  payload.env = { terminalType: 'WEB', ...(clientIp ? { clientIp } : {}) }
+  // 照官方範例補 deviceLanguage/deviceId
+  payload.env = { terminalType: 'WEB', deviceLanguage: 'zh_TW', deviceId: '', ...(clientIp ? { clientIp } : {}) }
   // isAuthorization 為卡片/Apple Pay 授權專用；APM（Alipay 等）不帶。
   // 註：3DS 由 paymentMethodMetaData.is3DSAuthentication 控制（見上），不在 paymentFactor。
   if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
-  else if (method === 'APPLEPAY') payload.paymentFactor = { isAuthorization: true }  // 照官方範例，僅 isAuthorization
+  else if (method === 'APPLEPAY') payload.paymentFactor = { isAuthorization: true, captureMode: 'AUTOMATIC' }  // 照官方範例補 captureMode
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
