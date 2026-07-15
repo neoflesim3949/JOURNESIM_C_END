@@ -29,9 +29,8 @@ export async function POST(request: Request) {
 
   // 付款方式：後台預設或前端指定（CARD / JKOPAY / ALIPAY_HK…）
   const method = String(body.payment_method || cfg.defaultMethod || 'CARD').toUpperCase()
-  // 部分方式只收特定幣別（AlipayHK 僅 HKD）；其餘用後台交易幣別（預設 TWD，卡片與街口皆可）
-  // Apple Pay 試用 USD（與結算幣別一致；TWD 疑導致 Apple Pay 表驗證後被關）
-  const METHOD_CURRENCY: Record<string, string> = { ALIPAY_HK: 'HKD', APPLEPAY: 'USD' }
+  // 部分方式只收特定幣別（AlipayHK 僅 HKD）；其餘用後台交易幣別（預設 TWD，卡片/街口/Apple Pay 皆可）
+  const METHOD_CURRENCY: Record<string, string> = { ALIPAY_HK: 'HKD' }
   const payCurrency = (METHOD_CURRENCY[method] || cfg.paymentCurrency).toUpperCase()
 
   // 訂單以 TWD 計價；若交易幣別非 TWD，用匯率換算（exchange_rates: 每 1 TWD 兌多少外幣）
