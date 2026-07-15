@@ -1,13 +1,13 @@
 'use client'
 
-import { Suspense, useState, useEffect } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, CheckCircle, Wifi, CreditCard, Gift } from 'lucide-react'
 import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomPopup } from '@/lib/antom-sdk'
+import { loadAntomElement } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -43,6 +43,10 @@ function CheckoutContent() {
   const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
   const [antomMsg, setAntomMsg] = useState('')                // SDK 事件/錯誤（畫面顯示，方便手機診斷）
   const [antomEvents, setAntomEvents] = useState<string[]>([]) // SDK 事件序列（診斷用）
+  const [antomShowSubmit, setAntomShowSubmit] = useState(false) // 卡片/街口自建送出鍵（Apple Pay 用原生按鈕）
+  const [antomSubmitting, setAntomSubmitting] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const antomInstanceRef = useRef<any>(null)                    // 已掛載的 Payment Element 實例（呼叫 submitPayment）
   const hasSim = simItems.length > 0
 
   useEffect(() => {
@@ -112,11 +116,13 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      // 三種方式統一【小彈窗】：AMSCashierPayment.createComponent 開 on-site overlay（不整頁覆蓋/不跳轉）
-      const SDK = await loadAntomPopup()
+      // 嵌入式 Payment Element：AMSPaymentElement.mountComponent 內嵌 #antom-container（小視窗）
+      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
+      const SDK = await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
+      setAntomShowSubmit(false)
       setAntomEvents([])
       // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
       let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
@@ -148,16 +154,56 @@ function CheckoutContent() {
       }, 8000)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      // 小彈窗：createComponent 開 overlay（含卡號表單/Apple Pay 按鈕與送出鍵），付款完成 SDK 自動導回 paymentRedirectUrl
-      await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
+      // 嵌入式：mountComponent 掛到 #antom-container。Apple Pay 用 buttonsBundled 原生按鈕（不加送出鍵）；
+      // 卡片/街口 showSubmitButton:false → 由自建送出鍵呼叫 submitPayment()（Antom 官方 Payment Element 做法）
+      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: false } }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let inst: any = c
+      if (typeof c.mountComponent === 'function') {
+        const r = await c.mountComponent(mountOpts, '#antom-container')
+        if (r) inst = r
+      } else if (typeof c.createComponent === 'function') {
+        const comp = await c.createComponent(mountOpts)
+        if (comp?.mount) await comp.mount('#antom-container')
+        if (comp) inst = comp
+      } else {
+        throw new Error('SDK 無 mountComponent/createComponent 方法')
+      }
+      antomInstanceRef.current = inst
       // 就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
       setAntomMsg('')
+      if (!isApplePay) setAntomShowSubmit(true)   // 卡片/街口顯示自建送出鍵
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
       alert('付款初始化失敗：' + (e instanceof Error ? e.message : String(e))); setLoading(false)
     }
+  }
+
+  // 卡片/街口 送出付款：呼叫 Payment Element 的 submitPayment() 並依 Antom 官方回傳處理
+  async function handleAntomSubmit() {
+    const inst = antomInstanceRef.current
+    if (!inst || typeof inst.submitPayment !== 'function') { setAntomMsg('付款元件尚未就緒，請稍候再試'); return }
+    setAntomSubmitting(true); setAntomMsg('')
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { status, userCanceled3D, error } = (await inst.submitPayment()) as any
+      const toResult = () => { window.location.href = `/payment/result?provider=antom&order_number=${encodeURIComponent(orderNumber)}` }
+      if (error) {
+        const code = error?.code || ''
+        if (userCanceled3D || status === 'PROCESSING') { toResult(); return }  // 結果未定 → 到結果頁輪詢
+        if (code === 'FORM_INVALID') { setAntomMsg(''); return }                // 表單錯誤 SDK 已提示
+        setAntomMsg(`付款未完成：${error?.message || code}`)
+        return
+      }
+      if (status === 'SUCCESS' || status === 'PROCESSING') { toResult(); return }
+      if (status === 'CANCELLED') { setAntomMsg('已取消付款'); return }
+      toResult()
+    } catch (e) {
+      console.error('[antom] submit error', e)
+      setAntomMsg('送出付款失敗：' + (e instanceof Error ? e.message : String(e)))
+    } finally { setAntomSubmitting(false) }
   }
 
   useEffect(() => {
@@ -441,8 +487,18 @@ function CheckoutContent() {
                   {loading ? '處理中…' : antomCardId ? `使用此卡付款 ${formatPrice(totalPrice)}` : `前往付款 ${formatPrice(totalPrice)}`}
                 </button>
               )}
-              {/* Antom 收銀台掛載容器（彈窗模式由 SDK 開 overlay，此容器保留備用）*/}
+              {/* 嵌入式 Payment Element 掛載容器 */}
               <div id="antom-container" className="mt-3" />
+              {/* 卡片/街口自建送出鍵 → submitPayment()（Apple Pay 用 buttonsBundled 原生按鈕，不顯示此鍵）*/}
+              {antomShowSubmit && (
+                <button
+                  onClick={handleAntomSubmit}
+                  disabled={antomSubmitting}
+                  className="w-full mt-3 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
+                >
+                  {antomSubmitting ? '付款送出中…' : `確認付款 ${formatPrice(totalPrice)}`}
+                </button>
+              )}
               {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
               {antomEvents.length > 0 && <p className="mt-2 text-[11px] text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 break-words font-mono">SDK: {antomEvents.join(' → ')}</p>}
               {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">{antomCardId ? '將帶出綁定卡片於收銀台完成付款' : '將以 Antom 收銀台完成付款'}</p>}
