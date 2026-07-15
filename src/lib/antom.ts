@@ -203,6 +203,8 @@ export async function antomRequest(path: string, payload: Record<string, unknown
         'Signature': `algorithm=RSA256,keyVersion=1,signature=${signature}`,
       },
       body,
+      // Antom 建議 ≥10s（閘道往返本身數秒，太短會過早中斷觸發重試更慢）；設 20s 上限避免閘道卡死吊住函式
+      signal: AbortSignal.timeout(20000),
     })
     const text = await res.text()
     let data: Record<string, unknown>

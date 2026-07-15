@@ -499,9 +499,17 @@ function CheckoutContent() {
               {/* Payment Element 直接嵌入第一層：付款方式列表由 SDK 渲染（卡片/Apple Pay/街口 + 已綁卡） */}
               <p className="text-sm font-medium mb-1">付款方式</p>
               {!antomMounted && (
-                <p className="text-xs text-muted-foreground py-4 text-center border border-dashed border-gray-200 rounded-lg">
-                  載入付款方式…
-                </p>
+                <div className="border border-dashed border-gray-200 rounded-lg p-4 space-y-3" aria-label="載入付款方式中">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="inline-block w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    正在載入付款方式…
+                  </div>
+                  <div className="space-y-2 animate-pulse">
+                    <div className="h-10 bg-gray-100 rounded-lg" />
+                    <div className="h-10 bg-gray-100 rounded-lg" />
+                    <div className="h-10 bg-gray-100 rounded-lg" />
+                  </div>
+                </div>
               )}
               {/* 嵌入式 Payment Element 掛載容器 */}
               <div id="antom-container" className="mt-1" />
