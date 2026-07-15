@@ -64,14 +64,15 @@ export async function POST(request: Request) {
     paymentMethod.paymentMethodMetaData = meta
   }
 
-  // 【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent 內嵌、不跳轉。
-  // Apple Pay 於 Payment Element 場景【必須】用 availablePaymentMethod.paymentMethodTypeList 指定（非 paymentMethod），
-  // applePayConfiguration 置於 availablePaymentMethod.paymentMethodMetaData 且官方建議置空/預設（Antom 官方文檔截圖）。
-  // 先前誤送 paymentMethod.paymentMethodType=APPLEPAY + 頂層 applePayConfiguration → SDK 卡 SDK_START_OF_LOADING。
+  // 穩定組合（多輪實測後收斂）：
+  //  - 卡片/街口 → 【嵌入式 ELEMENT_PAYMENT】(v2 AMSPaymentElement.mountComponent 可正常渲染)。
+  //  - Apple Pay → 【全托管 CHECKOUT_PAYMENT】回 normalUrl 整頁跳轉（本專案唯一實測可喚起 Apple Pay 的模式；
+  //    嵌入式前端渲染兩支 SDK 皆失敗：v2 卡 SDK_START_OF_LOADING、marmot 報 Failed to create iframe / Load resource timeout）。
+  //    Apple Pay 用 availablePaymentMethod.paymentMethodTypeList 指定（非 paymentMethod）。
   const isApplePay = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    productScene: 'ELEMENT_PAYMENT',
+    productScene: isApplePay ? 'CHECKOUT_PAYMENT' : 'ELEMENT_PAYMENT',
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -100,7 +101,12 @@ export async function POST(request: Request) {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
     const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
-    // 彈窗（含 Apple Pay 極速支付）：回 paymentSessionData 供 SDK createComponent
+    // Apple Pay 全托管：回 normalUrl → 前端整頁跳轉託管頁
+    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
+    if (isApplePay && normalUrl) {
+      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
+    }
+    // 卡片/街口嵌入式：回 paymentSessionData 供 SDK mountComponent
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({

@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomPopup } from '@/lib/antom-sdk'
+import { loadAntomElement } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -116,9 +116,9 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      // 嵌入式：改用官方【嵌入式 Web 文檔】的 AMSCashierPayment.mountComponent（marmot-cloud 1.19.0），
-      // 非 v2 AMSPaymentElement——後者卡片可渲染但 Apple Pay 卡 SDK_START_OF_LOADING。內嵌本站 div、不跳轉。
-      const SDK = await loadAntomPopup()
+      // 卡片/街口嵌入式：v2 AMSPaymentElement.mountComponent（實測可正常渲染卡片）。
+      // Apple Pay 不走到這（後端回 redirect_url，上方已整頁跳轉托管頁）。
+      const SDK = await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
