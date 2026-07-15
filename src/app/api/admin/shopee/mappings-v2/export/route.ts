@@ -14,10 +14,12 @@ export async function POST(request: Request) {
   const productIds: string[] | null = Array.isArray(reqBody.product_ids) && reqBody.product_ids.length ? reqBody.product_ids : null
   const supabase = createAdminClient()
 
-  // 最新批次（原始 Excel 結構）
-  const { data: batch } = await supabase.from('shopee_import_batches')
-    .select('raw_aoa, col_index, note_row, header_row, sheet_name, file_name')
-    .eq('account_id', accountId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+  // 取全部批次（新→舊）。以最新批次為欄位/表頭範本；資料列跨批次合併（見下），
+  // 避免最新批次僅含部分商品（如只有義大利）時，其他商品被濾掉導致匯出空。
+  const { data: batches } = await supabase.from('shopee_import_batches')
+    .select('raw_aoa, col_index, note_row, header_row, sheet_name, file_name, created_at')
+    .eq('account_id', accountId).order('created_at', { ascending: false })
+  const batch = batches?.[0]
   if (!batch) return NextResponse.json({ error: '此帳號尚無匯入批次，請先匯入蝦皮 Excel' }, { status: 400 })
 
   const ci = batch.col_index as Record<string, number>
@@ -46,6 +48,8 @@ export async function POST(request: Request) {
   const keepVar = productIds
     ? new Set(options.filter(o => productIds.includes(String(o.shopee_product_id))).map(o => String(o.shopee_variation_id)))
     : null
+  // 目前商品庫仍存在的選項ID（跨批次合併時，排除舊批次已移除/下架的殘留列）
+  const validVid = new Set(options.map(o => String(o.shopee_variation_id)))
 
   // 套餐選項貨號 → 套餐售價（售價以套餐為準）
   const pkgPriceByCode = new Map((await buildOptionIndex(supabase)).map(it => [it.code, it.sell_price]))
@@ -89,18 +93,36 @@ export async function POST(request: Request) {
   const dayNum = (s: string): number => { const m = String(s).match(/(\d+)/); return m ? Number(m[1]) : 9999 }
 
   // 就地覆蓋價格/貨號/庫存欄（其餘 cell 一律不動），收集後依序排序
-  const src = (batch.raw_aoa as unknown[][]).map(r => Array.isArray(r) ? [...r] : r)
   const dataStart = (typeof batch.note_row === 'number' ? batch.note_row : (batch.header_row ?? 0)) + 1
-  const head = src.slice(0, dataStart)
+  const head = (batch.raw_aoa as unknown[][]).slice(0, dataStart).map(r => Array.isArray(r) ? [...r] : r)
+  // 跨批次合併資料列：新批次優先、依「商品選項ID」去重。僅併入欄位結構與範本一致的批次
+  //（同為蝦皮 mass_update 匯出），避免欄位錯位。→ 任何批次匯入過的商品都能匯出。
+  const touchedCols = ['價格', '商品選項ID', '主商品貨號', '商品選項貨號', '庫存', '商品規格名稱']
+  const sameLayout = (bci: Record<string, number> | null | undefined) =>
+    !!bci && touchedCols.every(k => ci[k] === bci[k])
+  const seenVid = new Set<string>()
+  const src: unknown[][] = []
+  for (const b of batches || []) {
+    if (!sameLayout(b.col_index as Record<string, number>)) continue
+    const bStart = (typeof b.note_row === 'number' ? b.note_row : (b.header_row ?? 0)) + 1
+    const braw = b.raw_aoa as unknown[][]
+    for (let i = bStart; i < braw.length; i++) {
+      const row = braw[i]
+      if (!Array.isArray(row)) continue
+      const vid = row[varCol] === undefined || row[varCol] === null ? '' : String(row[varCol]).trim()
+      if (!vid || seenVid.has(vid)) continue
+      seenVid.add(vid)
+      src.push([...row])
+    }
+  }
   const entries: { row: unknown[]; pIdx: number; dRank: number; dNum: number }[] = []
   const productOrder = new Map<string, number>(); let pCounter = 0
   const dataFirstSeen = new Map<string, Map<string, number>>() // 沒有拖曳排序時的數據量首見順序
   let changed = 0
-  for (let i = dataStart; i < src.length; i++) {
-    const row = src[i] as unknown[]
-    if (!Array.isArray(row)) continue // 排序模式下略過非資料列
+  for (const row of src) {
     const vid = row[varCol] === undefined || row[varCol] === null ? '' : String(row[varCol]).trim()
     if (!vid) continue
+    if (!validVid.has(vid)) continue          // 只輸出目前商品庫仍存在的選項
     if (keepVar && !keepVar.has(vid)) continue
     const p = priceByVar.get(vid); if (p != null) { row[priceCol] = p; changed++ }
     if (mainSkuCol !== undefined) { const ms = mainSkuByVar.get(vid); if (ms) row[mainSkuCol] = ms }
