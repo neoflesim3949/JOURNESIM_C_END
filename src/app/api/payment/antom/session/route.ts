@@ -75,13 +75,13 @@ export async function POST(request: Request) {
   }
   const productScene = sceneByMode[renderMode] ?? 'ELEMENT_PAYMENT'
   // 方式欄位：
-  //  - Apple Pay → 官方要求用 availablePaymentMethod.paymentMethodTypeList=[APPLEPAY]，applePayConfiguration 建議留空。
-  //  - 彈窗(drop-in) → 亦用 availablePaymentMethod（送單一 paymentMethod 會讓 SDK .find on undefined → Failed to create iframe）。
-  //  - 卡片/街口(嵌入/托管) → paymentMethod（帶 3DS/tokenize metadata）。
-  const isApplePay = method === 'APPLEPAY'
+  //  - 嵌入/托管（含 Apple Pay）→ 單一 paymentMethod。Apple Pay 用 paymentMethodType=APPLEPAY，
+  //    使 sessionData 的 paymentMethodCategoryType=CARD（SDK createComponent 之 CARD_APPLE_PAY plugin 才支援）；
+  //    若送 availablePaymentMethod 會變 category=ALL → SDK 回 "unsupported payment method"。
+  //  - 彈窗(drop-in) → availablePaymentMethod（送單一 paymentMethod 會 .find on undefined → Failed to create iframe）。
   const pmMeta = paymentMethod.paymentMethodMetaData as Record<string, unknown> | undefined
-  const methodField: Record<string, unknown> = (isApplePay || renderMode === 'popup')
-    ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: method }], ...(!isApplePay && pmMeta ? { paymentMethodMetaData: pmMeta } : {}) } }
+  const methodField: Record<string, unknown> = renderMode === 'popup'
+    ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: method }], ...(pmMeta ? { paymentMethodMetaData: pmMeta } : {}) } }
     : { paymentMethod }
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
