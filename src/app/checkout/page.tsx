@@ -52,6 +52,9 @@ function CheckoutContent() {
 
   useEffect(() => {
     setIsInLineApp(/Line/i.test(navigator.userAgent))
+    // 還原上次選的收銀台模式（切換模式時會重載頁面以乾淨載入單一支 SDK）
+    const savedMode = sessionStorage.getItem('antomRenderMode')
+    if (savedMode === 'element' || savedMode === 'popup' || savedMode === 'hosted') setAntomRenderMode(savedMode)
     if (totalPrice > 0) trackBeginCheckout(totalPrice)
     fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => {
       if (d?.provider === 'antom') setProvider('antom')
@@ -163,7 +166,13 @@ function CheckoutContent() {
           throw new Error('SDK 無 mountComponent/createComponent 方法')
         }
         antomInstanceRef.current = inst
-        if (!isApplePay) setAntomShowSubmit(true)   // 卡片/街口顯示自建送出鍵；Apple Pay 用原生按鈕
+        // mount 成功後：無需填表的情境（Apple Pay / 已綁定卡片）自動執行 submitPayment；
+        // 新卡/街口仍顯示自建送出鍵（避免對空表單直接送出 → FORM_INVALID）
+        if (isApplePay || antomCardId) {
+          void handleAntomSubmit()
+        } else {
+          setAntomShowSubmit(true)
+        }
       }
       // 就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
@@ -485,7 +494,12 @@ function CheckoutContent() {
                       <button
                         key={m.id}
                         type="button"
-                        onClick={() => setAntomRenderMode(m.id)}
+                        onClick={() => {
+                          // 已載過 SDK 才切換 → 重載頁面乾淨載入（避免 v2/marmot 兩支 SDK 污染 window）
+                          sessionStorage.setItem('antomRenderMode', m.id)
+                          if (antomMounted) window.location.reload()
+                          else setAntomRenderMode(m.id)
+                        }}
                         className={`px-2 py-2 text-xs rounded-lg border transition-colors ${antomRenderMode === m.id ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
                       >
                         {m.label}

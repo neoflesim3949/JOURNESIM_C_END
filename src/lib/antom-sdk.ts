@@ -44,10 +44,27 @@ export async function loadAntomElement(): Promise<Window['AMSPaymentElement'] | 
   return window.AMSPaymentElement || window.AMSCashierPayment || null
 }
 
-// 彈窗模式（createComponent）：改用同一支穩定的 v2 SDK 的 AMSCashierPayment
-//（marmot-cloud 1.19.0 在部分環境會 Failed to create iframe / Load resource timeout，且與 v2 併載會衝突）
+// 彈窗模式（createComponent）：用官方彈窗 SDK marmot-cloud 1.19.0（v2 的 AMSCashierPayment.createComponent
+// 非官方彈窗，會 Failed to create iframe）。獨立 <script>，與 v2 分開，避免污染 window。
+const ANTOM_POPUP_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.19.0/dist/umd/ams-checkout.min.js'
 export async function loadAntomPopup(): Promise<Window['AMSCashierPayment'] | null> {
-  try { await ensureScript() } catch { return null }
+  if (typeof window === 'undefined') return null
+  await new Promise<void>((resolve) => {
+    const existing = document.querySelector('script[data-antom-popup]')
+    if (existing) {
+      if (window.AMSCashierPayment) return resolve()
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', () => resolve())
+      return
+    }
+    const s = document.createElement('script')
+    s.src = ANTOM_POPUP_SDK
+    s.async = true
+    s.setAttribute('data-antom-popup', '1')
+    s.onload = () => resolve()
+    s.onerror = () => resolve()
+    document.body.appendChild(s)
+  })
   return window.AMSCashierPayment || null
 }
 
