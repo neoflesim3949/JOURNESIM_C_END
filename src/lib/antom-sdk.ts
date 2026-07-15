@@ -1,7 +1,7 @@
 // Antom Web SDK（ams-checkout）loader
-// 官方要求 SDK 版本 ≥ 1.46.0，否則 Apple Pay 外掛未註冊（plugin unregistered / Failed to create iframe）。
-// 1.47.0 為最新版，已確認含 ELEMENT_PAYMENT + APPLEPAY 外掛；新版統一用 AMSCashierPayment 類別。
-const ANTOM_SDK = 'https://sdk.marmot-cloud.com/package/ams-checkout/1.47.0/dist/umd/ams-checkout.min.js'
+// 改用 v2（js.antom.com/v2，v2.0.20+）：含 plugin_CARD_APPLE_PAY_createComponent + AMSCashierPayment。
+// 測試 v2 是否對 Apple Pay merchant validation 之 domain 處理與 v1 不同。
+const ANTOM_SDK = 'https://js.antom.com/v2/ams-checkout.js'
 
 declare global {
   interface Window {
