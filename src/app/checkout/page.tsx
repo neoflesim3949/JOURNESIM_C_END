@@ -7,7 +7,7 @@ import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomPopup } from '@/lib/antom-sdk'
+import { loadAntomElement } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -111,9 +111,9 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      // 全部走【彈窗模式】（marmot-cloud 1.19.0 AMSCashierPayment.createComponent，官方範例做法）
-      // 完整 UI、自帶送出鍵；Apple Pay 自動渲染；無需嵌入式白名單
-      const SDK = await loadAntomPopup()
+      // 嵌入式 Payment Element（v2 AMSPaymentElement.mountComponent，內嵌本站 div、不跳轉）
+      // 需商戶開通「Web 嵌入式白名單」；卡片/街口用 showSubmitButton 自帶送出鍵，Apple Pay 用原生按鈕
+      const SDK = await loadAntomElement()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
@@ -145,8 +145,19 @@ function CheckoutContent() {
       }, 8000)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      // 彈窗模式（官方範例）：createComponent 喚起完整付款彈窗（含送出鍵/Apple Pay），完成後導回 paymentRedirectUrl
-      await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
+      // 嵌入式：mountComponent 掛到 #antom-container；付款完成 SDK 自動導回 paymentRedirectUrl
+      // Apple Pay 原生按鈕即付款鍵（不加送出鍵）；卡片/街口 showSubmitButton 自帶送出鍵
+      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
+      const selector = '#antom-container'
+      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: !isApplePay } }
+      if (typeof c.mountComponent === 'function') {
+        await c.mountComponent(mountOpts, selector)
+      } else if (typeof c.createComponent === 'function') {
+        const comp = await c.createComponent(mountOpts)
+        if (comp?.mount) await comp.mount(selector)
+      } else {
+        throw new Error('SDK 無 mountComponent/createComponent 方法')
+      }
       // 掛載完成即視為就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
       setAntomMsg('')

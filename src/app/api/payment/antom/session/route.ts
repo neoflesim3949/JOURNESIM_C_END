@@ -57,15 +57,17 @@ export async function POST(request: Request) {
   } else if (method === 'CARD' && body.save_card !== false && user) {
     // 付款即綁卡（tokenizeMode）：收銀台顯示 Antom 原生「儲存卡片」勾選；付款後 webhook 存卡
     paymentMethod.paymentMethodMetaData = { tokenizeMode: 'ASKFORCONSENT' }
+  } else if (method === 'APPLEPAY') {
+    // Apple Pay：applePayConfiguration 需為 paymentMethod【頂層】欄位（與 paymentMethodType 平級，Antom 確認）
+    // buttonsBundled 讓 Payment Element 自動渲染 Apple Pay 原生按鈕
+    paymentMethod.applePayConfiguration = { buttonsBundled: 'true' }
   }
 
-  // 全部走【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 createComponent 完整 UI、
-  // 自帶送出鍵、無需嵌入式白名單、不跳轉，保留原生體驗。
-  //  - Apple Pay 為錢包/極速支付：不送 paymentMethod.paymentMethodType（Antom 確認 APPLEPAY 不可直接帶），
-  //    改以 availablePaymentMethod 指定 + expressCheckout:true，由收銀台自動渲染 Apple Pay 極速按鈕。
-  const isApplePay = method === 'APPLEPAY'
+  // 【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent
+  // 內嵌本站 div、不跳轉。需商戶開通「Web 嵌入式白名單」權限（未開通時 Apple Pay 會卡 SDK_START_OF_LOADING）。
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
+    productScene: 'ELEMENT_PAYMENT',
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -74,9 +76,7 @@ export async function POST(request: Request) {
       buyer: { referenceBuyerId: String(order.email || order.order_number) },
     },
     paymentAmount: { currency: payCurrency, value },
-    ...(isApplePay
-      ? { availablePaymentMethod: { paymentMethodTypeList: [{ paymentMethodType: 'APPLEPAY', paymentMethodOrder: 1 }], expressCheckout: true } }
-      : { paymentMethod }),
+    paymentMethod,
     paymentRedirectUrl: `${origin}/payment/result?provider=antom&order_number=${encodeURIComponent(order.order_number)}`,
     paymentNotifyUrl: `${origin}/api/webhooks/antom`,
   }
