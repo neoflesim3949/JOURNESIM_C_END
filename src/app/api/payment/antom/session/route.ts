@@ -123,8 +123,10 @@ export async function POST(request: Request) {
   if (cfg.currency) payload.settlementStrategy = { settlementCurrency: cfg.currency.toUpperCase() }
   // 網頁整合須指定終端類型；Apple Pay 另需 clientIp（真實公網 IP），缺失會靜默失敗（Antom 確認）
   const clientIp = getClientIp(request)
-  // 照官方範例補 deviceLanguage/deviceId
-  payload.env = { terminalType: 'WEB', deviceLanguage: 'zh_TW', deviceId: '', ...(clientIp ? { clientIp } : {}) }
+  // 照官方範例補 deviceLanguage/deviceId；Apple Pay 試 terminalType=WAP + osType=IOS（手機端，測是否走不同流程/網域）
+  payload.env = method === 'APPLEPAY'
+    ? { terminalType: 'WAP', osType: 'IOS', deviceLanguage: 'zh_TW', deviceId: '', ...(clientIp ? { clientIp } : {}) }
+    : { terminalType: 'WEB', deviceLanguage: 'zh_TW', deviceId: '', ...(clientIp ? { clientIp } : {}) }
   // isAuthorization 為卡片/Apple Pay 授權專用；APM（Alipay 等）不帶。
   // 註：3DS 由 paymentMethodMetaData.is3DSAuthentication 控制（見上），不在 paymentFactor。
   if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
