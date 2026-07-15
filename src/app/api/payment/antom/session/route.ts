@@ -95,7 +95,7 @@ export async function POST(request: Request) {
           paymentMethodTypeList: methodList.map((m) => ({ paymentMethodType: m })),
           ...(hasMeta ? { paymentMethodMetaData: pmMeta } : {}),
         },
-        ...(savedTokens.length ? { savedPaymentMethods: savedTokens.map((t) => ({ paymentMethodId: t })) } : {}),
+        ...(savedTokens.length ? { savedPaymentMethods: savedTokens.map((t) => ({ paymentMethodType: 'CARD', paymentMethodId: t })) } : {}),
       }
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
