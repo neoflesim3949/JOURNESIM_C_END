@@ -48,6 +48,8 @@ function CheckoutContent() {
   useEffect(() => {
     setIsInLineApp(/Line/i.test(navigator.userAgent))
     if (totalPrice > 0) trackBeginCheckout(totalPrice)
+    // 效能：進頁即預載 Antom SDK 腳本（1.5MB），與建單/建 session 平行進行
+    void loadAntomElement()
     fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => {
       if (d?.provider === 'antom') setProvider('antom')
     }).catch(() => {}).finally(() => setProviderReady(true))
@@ -221,6 +223,8 @@ function CheckoutContent() {
     const emailKey = isEmailValid(email) ? email : ''
     const sig = [emailKey, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
     if (sig === antomPrepSigRef.current) return
+    // 效能：首次載入立即執行；之後的變更才 debounce（等輸入告一段落）
+    const isFirst = antomPrepSigRef.current === ''
     const t = setTimeout(() => {
       antomPrepSigRef.current = sig
       // 重建：先銷毀舊元件（金額/Email 變更 → 舊 session 作廢）
@@ -228,7 +232,7 @@ function CheckoutContent() {
       antomInstanceRef.current = null
       setAntomShowSubmit(false)
       void handleAntom()
-    }, 900)   // debounce：等使用者輸入告一段落
+    }, isFirst ? 0 : 900)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, providerReady, orderComplete, email, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress, items.length, hasSim])

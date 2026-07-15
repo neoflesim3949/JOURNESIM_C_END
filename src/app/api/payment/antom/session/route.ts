@@ -20,19 +20,26 @@ export async function POST(request: Request) {
   if (!orderNumber) return NextResponse.json({ error: '缺少訂單編號' }, { status: 400 })
 
   const supabase = createAdminClient()
-  const { data: order } = await supabase.from('orders')
-    .select('id, order_number, total_amount, email').eq('order_number', orderNumber).single()
-  if (!order) return NextResponse.json({ error: '訂單不存在' }, { status: 404 })
-
-  const cfg = await getAntomConfig()
   const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin
+  const method = String(body.payment_method || 'ALL').toUpperCase()
+
+  // 效能：獨立查詢並行化（訂單/設定/啟用方式/登入會員），省去串行往返
+  const [orderRes, cfg, enabledRes, userRes] = await Promise.all([
+    supabase.from('orders').select('id, order_number, total_amount, email').eq('order_number', orderNumber).single(),
+    getAntomConfig(),
+    method === 'ALL'
+      ? supabase.from('system_settings').select('value').eq('key', 'antom_enabled_methods').maybeSingle()
+      : Promise.resolve({ data: null }),
+    createClient().then((c) => c.auth.getUser()),
+  ])
+  const order = orderRes.data
+  if (!order) return NextResponse.json({ error: '訂單不存在' }, { status: 404 })
+  const user = userRes.data.user
 
   // 付款方式：'ALL' = 由 Payment Element 渲染全部啟用方式（結帳頁第一層嵌入）；或指定單一方式
-  const method = String(body.payment_method || 'ALL').toUpperCase()
   let methodList: string[]
   if (method === 'ALL') {
-    const { data: st } = await supabase.from('system_settings').select('value').eq('key', 'antom_enabled_methods').maybeSingle()
-    methodList = String(st?.value || 'CARD,JKOPAY').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean)
+    methodList = String(enabledRes.data?.value || 'CARD,JKOPAY').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean)
       .filter((m) => m !== 'ALIPAY_HK')   // AlipayHK 僅收 HKD，與 TWD 列表混用會衝突，列表模式排除
     if (methodList.length === 0) methodList = ['CARD']
   } else {
@@ -51,9 +58,6 @@ export async function POST(request: Request) {
   }
   const value = toAntomAmountValue(payAmount, payCurrency)
 
-  // 登入會員（供已綁卡付款 / 付款即綁卡判斷）
-  const serverSupabase = await createClient()
-  const { data: { user } } = await serverSupabase.auth.getUser()
   const cardId = String(body.card_id || '').trim()
 
   // 官方 Payment Element：所有方式以 availablePaymentMethod.paymentMethodTypeList 指定，
