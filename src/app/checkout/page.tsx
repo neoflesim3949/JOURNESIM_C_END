@@ -75,13 +75,20 @@ function CheckoutContent() {
 
   // Antom：建單(pending) → createPaymentSession(ALL) → Payment Element 直接嵌入結帳頁第一層
   // 由 SDK 渲染付款方式列表（卡片/Apple Pay/街口 + 已綁卡），顧客選好按「確認付款」→ submitPayment()
+  // 世代防護：初次載入(掛載需 3~5s)期間若因 Email/金額變更觸發重建，兩次 prepare 會互相打架
+  //（實測 mount PARAM_INVALID + submit ERR_DATA_STRUCT_UNRECOGNIZED）→ 每次 prepare 領編號，
+  // 任一 await 後發現被更新的 prepare 取代即退出，確保只有最新一次操作元件。
+  const antomGenRef = useRef(0)
   async function handleAntom() {
     if (items.length === 0) return
     if (hasSim && (!shippingName || !shippingPhone || !shippingAddress)) return
+    const gen = ++antomGenRef.current
+    const stale = () => gen !== antomGenRef.current
     setLoading(true)
     try {
       let orderNumber: string
-      try { orderNumber = await createAntomOrder() } catch (err) { setAntomMsg(err instanceof Error ? err.message : '下單失敗'); setLoading(false); return }
+      try { orderNumber = await createAntomOrder() } catch (err) { if (!stale()) { setAntomMsg(err instanceof Error ? err.message : '下單失敗'); setLoading(false) } return }
+      if (stale()) return
       setOrderNumber(orderNumber)
 
       const s = await fetch('/api/payment/antom/session', {
@@ -92,11 +99,13 @@ function CheckoutContent() {
           render_mode: 'element',
         }),
       }).then((r) => r.json()).catch(() => null)
+      if (stale()) return
       if (s?.redirect_url) { window.location.href = s.redirect_url; return }
       if (!s?.paymentSessionData) { setAntomMsg(s?.error || 'Antom 建立收銀台失敗（請確認後台憑證/設定）'); setLoading(false); return }
 
       // 官方 Payment Element：AMSElement
       const SDK = await loadAntomElement()
+      if (stale()) return
       if (!SDK) { setAntomMsg('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
@@ -195,6 +204,8 @@ function CheckoutContent() {
         '#antom-container',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ).catch((e: any) => ({ error: e }))
+      // 世代防護：掛載期間已被更新的 prepare 取代 → 銷毀本次元件並退出（避免兩個 iframe 打架）
+      if (stale()) { try { element.destroy?.() } catch { /* ignore */ } return }
       const mountErr = mountResult?.error
       if (mountErr && (mountErr.code || mountErr.message)) {
         setAntomEvents((prev) => [...prev, `mount error:${mountErr.code || mountErr.message}`].slice(-24))
