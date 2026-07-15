@@ -1,13 +1,13 @@
 'use client'
 
-import { Suspense, useState, useEffect, useRef } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, CheckCircle, Wifi, CreditCard, Gift } from 'lucide-react'
 import { TapPayForm } from '@/components/checkout/tappay-form'
 import { formatPrice } from '@/lib/utils'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
-import { loadAntomElement } from '@/lib/antom-sdk'
+import { loadAntomPopup } from '@/lib/antom-sdk'
 
 export default function CheckoutPage() {
   return (
@@ -43,10 +43,6 @@ function CheckoutContent() {
   const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
   const [antomMsg, setAntomMsg] = useState('')                // SDK 事件/錯誤（畫面顯示，方便手機診斷）
   const [antomEvents, setAntomEvents] = useState<string[]>([]) // SDK 事件序列（診斷用）
-  const [antomShowSubmit, setAntomShowSubmit] = useState(false) // 嵌入式卡片/街口需自建送出鍵
-  const [antomSubmitting, setAntomSubmitting] = useState(false)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const antomInstanceRef = useRef<any>(null)                  // 已掛載的 Payment Element 實例（供送出鍵呼叫 submitPayment）
   const hasSim = simItems.length > 0
 
   useEffect(() => {
@@ -116,13 +112,11 @@ function CheckoutContent() {
         } catch { /* 忽略 */ }
       }
 
-      // 卡片/街口嵌入式：v2 AMSPaymentElement.mountComponent（實測可正常渲染卡片）。
-      // Apple Pay 不走到這（後端回 redirect_url，上方已整頁跳轉托管頁）。
-      const SDK = await loadAntomElement()
+      // 全部走【彈窗模式】：AMSCashierPayment.createComponent 開 overlay，完整 UI、自帶送出鍵（官方範例做法）。
+      const SDK = await loadAntomPopup()
       if (!SDK) { alert('無法載入 Antom 收銀台，請稍後再試'); setLoading(false); return }
 
       setAntomMounted(true)
-      setAntomShowSubmit(false)
       setAntomEvents([])
       // 將 SDK 事件/錯誤顯示在畫面（手機測無 console，便於截圖診斷）
       let elementDone = false   // 收到 loading 完成/付款事件即視為已就緒
@@ -154,52 +148,15 @@ function CheckoutContent() {
       }, 8000)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const c = cashier as any
-      // 嵌入式：mountComponent 掛到 #antom-container；付款完成 SDK 自動導回 paymentRedirectUrl
-      // Apple Pay 原生按鈕即付款鍵（不加送出鍵）；卡片/街口 showSubmitButton 自帶送出鍵
-      const isApplePay = !antomCardId && antomMethod === 'APPLEPAY'
-      const selector = '#antom-container'
-      const mountOpts = { sessionData: s.paymentSessionData, appearance: { showSubmitButton: !isApplePay } }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let inst: any = c
-      if (typeof c.mountComponent === 'function') {
-        await c.mountComponent(mountOpts, selector)
-      } else if (typeof c.createComponent === 'function') {
-        const comp = await c.createComponent(mountOpts)
-        if (comp?.mount) await comp.mount(selector)
-        if (comp) inst = comp
-      } else {
-        throw new Error('SDK 無 mountComponent/createComponent 方法')
-      }
-      // 掛載完成即視為就緒 → 關閉逾時誤報並清空載入訊息
+      // 彈窗模式：createComponent 開 overlay（含卡號表單/Apple Pay 按鈕與送出鍵），付款完成 SDK 自動導回 paymentRedirectUrl
+      await c.createComponent({ sessionData: s.paymentSessionData, notRedirectAfterComplete: false })
+      // 就緒 → 關閉逾時誤報並清空載入訊息
       elementDone = true
       setAntomMsg('')
-      // Payment Element 內嵌不自帶送出鍵 → 卡片/街口顯示自建送出鍵（呼叫 submitPayment）；Apple Pay 用原生按鈕
-      antomInstanceRef.current = inst
-      if (!isApplePay) setAntomShowSubmit(true)
       setLoading(false)
     } catch (e) {
       console.error('[antom] mount error', e)
       alert('付款初始化失敗：' + (e instanceof Error ? e.message : String(e))); setLoading(false)
-    }
-  }
-
-  // 嵌入式 Payment Element 送出付款：呼叫元件實例的 submitPayment（Antom 內嵌不自帶送出鍵）
-  async function handleAntomSubmit() {
-    const inst = antomInstanceRef.current
-    if (!inst) { setAntomMsg('付款元件尚未就緒，請稍候再試'); return }
-    setAntomSubmitting(true)
-    setAntomMsg('')
-    try {
-      if (typeof inst.submitPayment === 'function') await inst.submitPayment()
-      else if (typeof inst.submit === 'function') await inst.submit()
-      else if (typeof inst.confirmPayment === 'function') await inst.confirmPayment()
-      else throw new Error('元件無 submitPayment 方法')
-      // 付款結果由 onEventCallback（SDK_PAYMENT_*）處理；SDK 亦會自動導回 paymentRedirectUrl
-    } catch (e) {
-      console.error('[antom] submit error', e)
-      setAntomMsg('送出付款失敗：' + (e instanceof Error ? e.message : String(e)))
-    } finally {
-      setAntomSubmitting(false)
     }
   }
 
@@ -484,19 +441,9 @@ function CheckoutContent() {
                   {loading ? '處理中…' : antomCardId ? `使用此卡付款 ${formatPrice(totalPrice)}` : `前往付款 ${formatPrice(totalPrice)}`}
                 </button>
               )}
-              {/* Antom 收銀台掛載容器 */}
+              {/* Antom 收銀台掛載容器（彈窗模式由 SDK 開 overlay，此容器保留備用）*/}
               <div id="antom-container" className="mt-3" />
-              {/* 嵌入式 Payment Element 不自帶送出鍵 → 卡片/街口自建送出鍵（Apple Pay 用原生按鈕，不顯示此鍵）*/}
-              {antomShowSubmit && (
-                <button
-                  onClick={handleAntomSubmit}
-                  disabled={antomSubmitting}
-                  className="w-full mt-3 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
-                >
-                  {antomSubmitting ? '付款送出中…' : `確認付款 ${formatPrice(totalPrice)}`}
-                </button>
-              )}
-              {antomMsg && <p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
+              {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
               {antomEvents.length > 0 && <p className="mt-2 text-[11px] text-center text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 break-words font-mono">SDK: {antomEvents.join(' → ')}</p>}
               {!antomMounted && <p className="mt-2 text-xs text-muted-foreground text-center">{antomCardId ? '將帶出綁定卡片於收銀台完成付款' : '將以 Antom 收銀台完成付款'}</p>}
             </div>

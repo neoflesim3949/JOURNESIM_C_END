@@ -64,15 +64,12 @@ export async function POST(request: Request) {
     paymentMethod.paymentMethodMetaData = meta
   }
 
-  // 穩定組合（多輪實測後收斂）：
-  //  - 卡片/街口 → 【嵌入式 ELEMENT_PAYMENT】(v2 AMSPaymentElement.mountComponent 可正常渲染)。
-  //  - Apple Pay → 【全托管 CHECKOUT_PAYMENT】回 normalUrl 整頁跳轉（本專案唯一實測可喚起 Apple Pay 的模式；
-  //    嵌入式前端渲染兩支 SDK 皆失敗：v2 卡 SDK_START_OF_LOADING、marmot 報 Failed to create iframe / Load resource timeout）。
-  //    Apple Pay 用 availablePaymentMethod.paymentMethodTypeList 指定（非 paymentMethod）。
+  // 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent 開 overlay，
+  // 完整 UI、自帶送出鍵、官方範例做法。用 createComponent（非 mountComponent，後者內嵌 iframe 會 Load resource timeout）。
+  // Apple Pay 用 availablePaymentMethod.paymentMethodTypeList 指定（非 paymentMethod）。
   const isApplePay = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    productScene: isApplePay ? 'CHECKOUT_PAYMENT' : 'ELEMENT_PAYMENT',
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -101,12 +98,7 @@ export async function POST(request: Request) {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
     const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
-    // Apple Pay 全托管：回 normalUrl → 前端整頁跳轉託管頁
-    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
-    if (isApplePay && normalUrl) {
-      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
-    }
-    // 卡片/街口嵌入式：回 paymentSessionData 供 SDK mountComponent
+    // 彈窗（含 Apple Pay）：回 paymentSessionData 供 SDK createComponent
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
