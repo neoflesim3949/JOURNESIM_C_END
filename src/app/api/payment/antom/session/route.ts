@@ -62,16 +62,26 @@ export async function POST(request: Request) {
     const meta: Record<string, unknown> = { is3DSAuthentication: true }
     if (body.save_card !== false && user) meta.tokenizeMode = 'ASKFORCONSENT'
     paymentMethod.paymentMethodMetaData = meta
+  } else if (method === 'APPLEPAY') {
+    // Apple Pay（嵌入式 Payment Element）：applePayConfiguration 置於 paymentMethodMetaData 內，
+    // 且【必須】帶 requiredShippingContactFields / requiredBillingContactFields / buttonsBundled
+    //（依 Antom 官方 Payment Element 範例；先前缺這些 contact fields 導致 SDK 初始化卡死）。
+    paymentMethod.paymentMethodMetaData = {
+      applePayConfiguration: {
+        requiredShippingContactFields: ['email', 'name', 'phone', 'postalAddress'],
+        requiredBillingContactFields: ['name', 'postalAddress'],
+        buttonsBundled: 'true',
+      },
+    }
   }
 
-  // 還原 f762005 之可用組合：
-  //  - 卡片/街口 → 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent 開 overlay。
-  //  - Apple Pay → 【全托管收銀台】(productScene=CHECKOUT_PAYMENT)：回 normalUrl 整頁跳轉託管頁（彈窗 Apple Pay
-  //    會 SDK_PAYMENT_ERROR，托管為實測可用之模式）。三種方式皆用 paymentMethod（Apple Pay=paymentMethodType APPLEPAY）。
-  const useHosted = method === 'APPLEPAY'
+  // 卡片/街口 → 【彈窗模式】(CASHIER_PAYMENT，不設 productScene)：前端 AMSCashierPayment.createComponent。
+  // Apple Pay → 【嵌入式 Payment Element】(productScene=ELEMENT_PAYMENT)：前端 AMSPaymentElement.mountComponent，
+  //   paymentMethod.paymentMethodType=APPLEPAY + 上述 applePayConfiguration（依官方 Payment Element 範例）。
+  const useElement = method === 'APPLEPAY'
   const payload: Record<string, unknown> = {
     productCode: 'CASHIER_PAYMENT',
-    ...(useHosted ? { productScene: 'CHECKOUT_PAYMENT' } : {}),
+    ...(useElement ? { productScene: 'ELEMENT_PAYMENT' } : {}),
     paymentRequestId: order.order_number,
     order: {
       referenceOrderId: order.order_number,
@@ -90,20 +100,16 @@ export async function POST(request: Request) {
   // 網頁整合須指定終端類型；Apple Pay 另需 clientIp（真實公網 IP），缺失會靜默失敗（Antom 確認）
   const clientIp = getClientIp(request)
   payload.env = { terminalType: 'WEB', ...(clientIp ? { clientIp } : {}) }
-  // isAuthorization 為卡片授權專用；APM（Alipay 等）不帶。
+  // isAuthorization 為卡片/Apple Pay 授權專用；APM（Alipay 等）不帶。
   // 註：3DS 由 paymentMethodMetaData.is3DSAuthentication 控制（見上），不在 paymentFactor。
   if (method === 'CARD') payload.paymentFactor = { isAuthorization: true }
+  else if (method === 'APPLEPAY') payload.paymentFactor = { isAuthorization: true, captureMode: 'AUTOMATIC' }
 
   try {
     const res = await antomRequest('/ams/api/v1/payments/createPaymentSession', payload)
     const result = (res.data.result || {}) as Record<string, string>
     const environment = cfg.env === 'production' ? 'prod' : 'sandbox'
-    // Apple Pay 全托管：回 normalUrl → 前端整頁跳轉託管頁
-    const normalUrl = (res.data.normalUrl || res.data.redirectUrl) as string | undefined
-    if (useHosted && normalUrl) {
-      return NextResponse.json({ ok: true, redirect_url: normalUrl, environment })
-    }
-    // 卡片/街口彈窗：回 paymentSessionData 供 SDK createComponent
+    // 卡片/街口彈窗 createComponent、Apple Pay 嵌入式 mountComponent：皆回 paymentSessionData 供前端 SDK
     const paymentSessionData = res.data.paymentSessionData as string
     if (paymentSessionData) {
       return NextResponse.json({
