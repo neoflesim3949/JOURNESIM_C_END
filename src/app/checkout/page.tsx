@@ -38,7 +38,6 @@ function CheckoutContent() {
   const [antomMounted, setAntomMounted] = useState(false)
   const [providerReady, setProviderReady] = useState(false)   // 金流供應商 config 是否載入
   const [antomMsg, setAntomMsg] = useState('')                // SDK 事件/錯誤（畫面顯示，方便手機診斷）
-  const [antomEvents, setAntomEvents] = useState<string[]>([]) // SDK 事件序列（診斷用）
   const [antomShowSubmit, setAntomShowSubmit] = useState(false) // 卡片/街口自建送出鍵（Apple Pay 用原生按鈕）
   const [antomSubmitting, setAntomSubmitting] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,8 +49,15 @@ function CheckoutContent() {
     if (totalPrice > 0) trackBeginCheckout(totalPrice)
     // 效能：進頁即預載 Antom SDK 腳本（1.5MB），與建單/建 session 平行進行
     void loadAntomElement()
+    // 效能：provider 快取——回訪免等 config API（~300ms）即開始載入付款元件；仍以 API 回應為準校正
+    try {
+      const cached = localStorage.getItem('payProvider')
+      if (cached === 'antom' || cached === 'tappay') { setProvider(cached); setProviderReady(true) }
+    } catch { /* ignore */ }
     fetch('/api/shop/tappay-config').then((r) => r.json()).then((d) => {
-      if (d?.provider === 'antom') setProvider('antom')
+      const p = d?.provider === 'antom' ? 'antom' as const : 'tappay' as const
+      setProvider(p)
+      try { localStorage.setItem('payProvider', p) } catch { /* ignore */ }
     }).catch(() => {}).finally(() => setProviderReady(true))
   }, [])
 
@@ -110,65 +116,8 @@ function CheckoutContent() {
 
       setAntomMounted(true)
       setAntomShowSubmit(false)
-      setAntomEvents([])
-      // Safari 手機看不到 console → 攔截 SDK 內部 console.log/error 顯示到畫面（診斷 Apple Pay merchant validation）
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any
-      if (!w.__antomLogPatched) {
-        w.__antomLogPatched = true
-        const o = { log: console.log.bind(console), error: console.error.bind(console), warn: console.warn.bind(console) }
-        const cap = (tag: string) => (...args: unknown[]) => {
-          try {
-            const msg = args.map((a) => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')
-            if (/merchant|validat|apple|createcomponent|submitpayment|error|fail|cancel|unsupported|session|plugin|network|capabilit|countr|currenc|dismiss|abort/i.test(msg)) {
-              // merchant session 那行放長，以便看 domainName / initiativeContext（診斷網域不符）
-              const len = /merchantsessionobjectstring|domainname|initiativecontext|validatemerchant/i.test(msg) ? 900 : 320
-              setAntomEvents((prev) => [...prev, `${tag}｜${msg.slice(0, len)}`].slice(-24))
-            }
-          } catch { /* ignore */ }
-        }
-        console.log = (...a: unknown[]) => { cap('log')(...a); o.log(...a) }
-        console.error = (...a: unknown[]) => { cap('ERR')(...a); o.error(...a) }
-        console.warn = (...a: unknown[]) => { cap('warn')(...a); o.warn(...a) }
-
-        // 攔截 fetch / XHR：把 SDK 打去 alipay/antom 的 merchant validation 請求 body 顯示到畫面
-        // 並嘗試把 body 內的 checkout.antom.com → www.flesim.com（若 Antom 依 body 網域簽發，即可修正）
-        const isApayHost = (u: string) => /alipay\.com|antom/i.test(u) && /merchant|apay|apple|payment_session|validate|risk_client|open/i.test(u)
-        const rewriteBody = (b: string) => {
-          if (typeof b !== 'string' || b.indexOf('checkout.antom.com') === -1) return b
-          const nb = b.split('checkout.antom.com').join('www.flesim.com')
-          setAntomEvents((prev) => [...prev, `REWRITE｜checkout.antom.com→www.flesim.com`].slice(-24))
-          return nb
-        }
-        const origFetch = window.fetch.bind(window)
-        window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-          let nextInit = init
-          try {
-            const url = typeof input === 'string' ? input : (input as Request)?.url || String(input)
-            const body = init?.body
-            if (isApayHost(url) && typeof body === 'string') {
-              setAntomEvents((prev) => [...prev, `FETCH｜${url.slice(0, 60)}｜${body.slice(0, 400)}`].slice(-24))
-              nextInit = { ...(init as RequestInit), body: rewriteBody(body) }
-            }
-          } catch { /* ignore */ }
-          return origFetch(input, nextInit)
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const XHR = XMLHttpRequest.prototype as any
-        const origOpen = XHR.open, origSend = XHR.send
-        XHR.open = function (m: string, u: string, ...rest: unknown[]) { this.__antomUrl = u; return origOpen.call(this, m, u, ...rest) }
-        XHR.send = function (body?: unknown) {
-          let nextBody = body
-          try {
-            const u = this.__antomUrl || ''
-            if (isApayHost(u) && typeof body === 'string') {
-              setAntomEvents((prev) => [...prev, `XHR｜${String(u).slice(0, 60)}｜${(body as string).slice(0, 400)}`].slice(-24))
-              nextBody = rewriteBody(body as string)
-            }
-          } catch { /* ignore */ }
-          return origSend.call(this, nextBody as XMLHttpRequestBodyInit)
-        }
-      }
+      // 註：除錯期的 console/fetch/XHR 攔截與畫面 log 面板已移除——SDK init 期間每條 log 觸發
+      // 整頁重渲染，實測拖慢載入；正式環境僅保留使用者需要的錯誤訊息（antomMsg）。
       // 修正 Apple Pay 顯示名稱：sessionData 第 4 段為客戶端 metadata（base64 JSON、未簽章），
       // Antom 伺服器將 merchantName 寫死 "Merchant"（API 之 order.merchant 參數不生效）。
       // SDK 以此值作 Apple Pay 表 total.label 與 merchant 驗證 displayName → 於傳入 SDK 前改寫為 FLESIM.COM。
@@ -180,7 +129,6 @@ function CheckoutContent() {
           if (decoded.includes('"merchantName":"Merchant"')) {
             parts[3] = btoa(decoded.replace('"merchantName":"Merchant"', '"merchantName":"FLESIM.COM"'))
             sessionData = parts.join('&&')
-            setAntomEvents((prev) => [...prev, 'REWRITE｜merchantName Merchant→FLESIM.COM'].slice(-24))
           }
         }
       } catch { /* 改寫失敗則用原始 sessionData */ }
@@ -208,7 +156,6 @@ function CheckoutContent() {
       if (stale()) { try { element.destroy?.() } catch { /* ignore */ } return }
       const mountErr = mountResult?.error
       if (mountErr && (mountErr.code || mountErr.message)) {
-        setAntomEvents((prev) => [...prev, `mount error:${mountErr.code || mountErr.message}`].slice(-24))
         setAntomMsg(`載入失敗：${mountErr.message || mountErr.code}`)
       } else {
         setAntomMsg('')
@@ -285,7 +232,6 @@ function CheckoutContent() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { status, userCanceled3D, session, error } = (await inst.submitPayment()) as any
-      setAntomEvents((prev) => [...prev, `submit｜status=${status}${error ? ' err=' + (error.code || '') : ''}`].slice(-24))
       const toResult = () => { window.location.href = `/payment/result?provider=antom&order_number=${encodeURIComponent(orderNumber)}` }
       if (error) {
         const code = error?.code || ''
@@ -564,11 +510,6 @@ function CheckoutContent() {
                 </button>
               )}
               {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
-              {antomEvents.length > 0 && (
-                <div className="mt-2 text-[10px] text-left text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono space-y-0.5 max-h-72 overflow-auto">
-                  {antomEvents.map((e, i) => <div key={i} className="break-all leading-tight">{e}</div>)}
-                </div>
-              )}
             </div>
           ) : (
             <TapPayForm
