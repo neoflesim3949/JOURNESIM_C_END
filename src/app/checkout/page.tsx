@@ -223,22 +223,21 @@ function CheckoutContent() {
     }
   }
 
-  // 結帳頁第一層自動嵌入：進頁即建單+掛載 Payment Element（email 未填先用訪客佔位）；
-  // Email/金額/點數/收件資料變更時自動銷毀重建（簽章比對）。未填 Email 前「確認付款」不可按。
+  // 結帳頁第一層自動嵌入：進頁即建單+掛載 Payment Element（email 未填先用訪客佔位）。
+  // 效能：Email 變更「不重建」元件（金額未變無需新 session），改以 update-email 就地更新訂單；
+  // 僅金額/點數/收件資料變更時銷毀重建（簽章比對）。未填 Email 前「確認付款」不可按。
   const antomPrepSigRef = useRef('')
   useEffect(() => {
     if (provider !== 'antom' || !providerReady || orderComplete) return
     const shipOk = !hasSim || (!!shippingName && !!shippingPhone && !!shippingAddress)
     if (!shipOk || items.length === 0 || totalPrice <= 0) return
-    // email 未有效前一律視為訪客佔位（避免每敲一字重建一次）
-    const emailKey = isEmailValid(email) ? email : ''
-    const sig = [emailKey, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
+    const sig = [totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
     if (sig === antomPrepSigRef.current) return
     // 效能：首次載入立即執行；之後的變更才 debounce（等輸入告一段落）
     const isFirst = antomPrepSigRef.current === ''
     const t = setTimeout(() => {
       antomPrepSigRef.current = sig
-      // 重建：先銷毀舊元件（金額/Email 變更 → 舊 session 作廢）
+      // 重建：先銷毀舊元件（金額變更 → 舊 session 作廢）
       try { antomInstanceRef.current?.destroy?.() } catch { /* ignore */ }
       antomInstanceRef.current = null
       setAntomShowSubmit(false)
@@ -246,15 +245,40 @@ function CheckoutContent() {
     }, isFirst ? 0 : 900)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, providerReady, orderComplete, email, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress, items.length, hasSim])
+  }, [provider, providerReady, orderComplete, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress, items.length, hasSim])
+
+  // Email 就地同步：填妥有效 email 後（0.6s debounce）更新至現有 pending 訂單，元件不重載
+  const emailSyncedRef = useRef(false)
+  useEffect(() => {
+    emailSyncedRef.current = false
+    if (provider !== 'antom' || !orderNumber || !isEmailValid(email)) return
+    const t = setTimeout(() => {
+      fetch('/api/checkout/update-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_number: orderNumber, email }),
+      }).then((r) => { if (r.ok) emailSyncedRef.current = true }).catch(() => {})
+    }, 600)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, orderNumber, email])
 
   // 送出付款：呼叫 Payment Element 的 submitPayment() 並依 Antom 官方回傳處理
   async function handleAntomSubmit() {
     // 防呆：未填有效 Email 不給付款（訂單/eSIM 以 Email 交付）
     if (!isEmailValid(email)) { setAntomMsg('請先填寫有效的 Email（訂單與 eSIM 將寄送至此信箱）'); return }
-    // 防呆：Email 剛填好、元件仍在以正確 Email 重建中 → 請稍候
-    const curSig = [email, totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
+    // 防呆：金額/點數/收件變更、元件重建中 → 請稍候
+    const curSig = [totalPrice, pointsToRedeem, shippingName, shippingPhone, shippingAddress].join('|')
     if (curSig !== antomPrepSigRef.current) { setAntomMsg('資料更新中，請稍候一下再按「確認付款」'); return }
+    // 防呆：email 尚未同步到訂單（0.6s debounce 中）→ 立即補送並請再按一次
+    // 註：不能在 submitPayment 前 await（會失去使用者手勢，Apple Pay 表將被 Safari 擋下）
+    if (!emailSyncedRef.current && orderNumber) {
+      fetch('/api/checkout/update-email', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_number: orderNumber, email }),
+      }).then((r) => { if (r.ok) emailSyncedRef.current = true }).catch(() => {})
+      setAntomMsg('資料同步中，請再按一次「確認付款」')
+      return
+    }
     const inst = antomInstanceRef.current
     if (!inst || typeof inst.submitPayment !== 'function') { setAntomMsg('付款元件尚未就緒，請稍候再試'); return }
     setAntomSubmitting(true); setAntomMsg('')
@@ -376,6 +400,11 @@ function CheckoutContent() {
 
   return (
     <div className="max-w-lg mx-auto px-4 py-8">
+      {/* 效能：預熱 Antom 相關網域連線（DNS+TCP+TLS 約省 0.3~0.4s；React 19 自動提升至 head）*/}
+      <link rel="preconnect" href="https://js.antom.com" />
+      <link rel="preconnect" href="https://open-sea-global.alipay.com" />
+      <link rel="preconnect" href="https://checkout.antom.com" />
+      <link rel="preconnect" href="https://applepay.cdn-apple.com" />
       <Link href="/cart" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
         <ArrowLeft className="w-4 h-4" /> 返回購物車
       </Link>
