@@ -1106,10 +1106,14 @@ function CardUsageModal({ modal, onClose }: { modal: { itemId: string; loading: 
     setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: true } }))
     try {
       const params = new URLSearchParams({ iccid })
-      // 從截止日往前推 30 天（含當天 → 共 30 天區間）
+      // 查詢終點取「截止日、今天」較早者往前推 30 天（含當天 → 共 30 天區間）：
+      // 已到期的卡查效期最後 30 天；長效期未到期的卡查近 30 天（截止日在未來，流量不可能發生在未來）
       if (expirationDate) {
         const endStr = expirationDate.slice(0, 10) // "2026-05-23 00:00:00" → "2026-05-23"
-        const end = new Date(endStr + 'T00:00:00Z')
+        const expiry = new Date(endStr + 'T00:00:00Z')
+        const now = new Date()
+        const today = new Date(now.toISOString().slice(0, 10) + 'T00:00:00Z')
+        const end = expiry.getTime() < today.getTime() ? expiry : today
         const begin = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000)
         const fmt = (d: Date) => d.toISOString().slice(0, 10)
         params.set('end_date', fmt(end))
