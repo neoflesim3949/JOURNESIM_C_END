@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { RefreshCw, ChevronDown, ChevronRight, PlayCircle } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronRight, PlayCircle, ClipboardPaste } from 'lucide-react'
 import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 
 interface BcLog {
@@ -41,6 +41,9 @@ export default function BcLogsPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
   const [distinctTypes, setDistinctTypes] = useState<string[]>([])
   const [bodyCache, setBodyCache] = useState<Map<string, { request_body: unknown; response_body: unknown }>>(new Map())
+  const [showManual, setShowManual] = useState(false)
+  const [manualText, setManualText] = useState('')
+  const [manualBusy, setManualBusy] = useState(false)
   const setUrl = useUrlStateBatch()
 
   async function load() {
@@ -74,6 +77,30 @@ export default function BcLogsPage() {
     }
   }
 
+  // 手動貼入 callback 內容 → 交由正式 webhook 邏輯解析執行（callback 已指向其他系統時的補跑入口）
+  async function submitManual() {
+    const text = manualText.trim()
+    if (!text) { alert('請先貼上 callback JSON 內容'); return }
+    setManualBusy(true)
+    try {
+      const res = await fetch('/api/admin/bc-logs/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload: text }),
+      })
+      const d = await res.json()
+      if (!res.ok) { alert(d.error || `解析失敗：${JSON.stringify(d.result || d)}`); return }
+      alert(`解析完成\n類型：${d.tradeType}\n回應：${d.result?.tradeCode || ''} ${d.result?.tradeMsg || ''}`)
+      setShowManual(false)
+      setManualText('')
+      load()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    } finally {
+      setManualBusy(false)
+    }
+  }
+
   async function replayLog(logId: string) {
     if (!confirm('重新解析這筆 webhook？將依目前邏輯更新相關資料。')) return
     const res = await fetch(`/api/admin/bc-logs/${logId}/replay`, { method: 'POST' })
@@ -93,10 +120,43 @@ export default function BcLogsPage() {
           <h1 className="text-2xl font-bold">BC API Log</h1>
           <p className="mt-1 text-sm text-gray-500">共 {total} 筆記錄</p>
         </div>
-        <button onClick={load} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
-          <RefreshCw className="w-4 h-4" /> 重新整理
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowManual(true)} className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
+            <ClipboardPaste className="w-4 h-4" /> 手動解析 Callback
+          </button>
+          <button onClick={load} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">
+            <RefreshCw className="w-4 h-4" /> 重新整理
+          </button>
+        </div>
       </div>
+
+      {showManual && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !manualBusy && setShowManual(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold">手動解析 Callback</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              貼上 BC 回呼的完整 JSON（含 tradeType / tradeData），系統會以正式 webhook 邏輯解析執行並寫入 log。
+              適用於 callback 已指向其他系統、需要在此補跑通知的情況。
+            </p>
+            <textarea
+              value={manualText}
+              onChange={e => setManualText(e.target.value)}
+              rows={12}
+              spellCheck={false}
+              placeholder={'{\n  "tradeType": "N009",\n  "tradeData": { "orderId": "...", "channelOrderId": "...", "subOrderList": [ ... ] },\n  "tradeTime": "2026-07-19 12:00:00"\n}'}
+              className="mt-3 w-full border border-gray-300 rounded-lg p-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button onClick={() => setShowManual(false)} disabled={manualBusy}
+                className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">取消</button>
+              <button onClick={submitManual} disabled={manualBusy}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                <PlayCircle className="w-4 h-4" /> {manualBusy ? '解析中…' : '解析執行'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 flex gap-2 items-center flex-wrap">
         {(() => {
