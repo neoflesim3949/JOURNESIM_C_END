@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Loader2, Calendar } from 'lucide-react'
+import { Search, Loader2, Calendar, Printer } from 'lucide-react'
 
 interface PlanSub {
   skuName?: string
@@ -52,6 +52,12 @@ export default function CardsLookupPage() {
   const [rangeTo, setRangeTo] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set()) // key = `${iccid}|${channelSubOrderId}`
   const [batchWorking, setBatchWorking] = useState(false)
+  // 標籤列印（30mm × 15mm，與蝦皮商品標籤同一套 canvas → jsPDF 每張一頁作法）
+  const [showExpiryLabel, setShowExpiryLabel] = useState(false)
+  const [expiryLabelDate, setExpiryLabelDate] = useState('')
+  const [expiryLabelCount, setExpiryLabelCount] = useState(30)
+  const [showBlankLabel, setShowBlankLabel] = useState(false)
+  const [blankRangeText, setBlankRangeText] = useState('')
 
   async function handleLookup() {
     const iccids = [...new Set(text.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean))]
@@ -160,6 +166,99 @@ export default function CardsLookupPage() {
     } finally { setWorking(null) }
   }
 
+  // 產 30mm × 15mm 標籤 PDF（每張一頁，canvas 繪字避免印表機字型/切割位移）
+  // 每行字級自動放大到左右滿版；各行總高超出標籤時再整體等比縮回
+  async function printLabelsPdf(labels: { text: string; bold?: boolean }[][]) {
+    const W_MM = 30, H_MM = 15
+    const PX_PER_MM = 24
+    const FONT = '"Microsoft JhengHei","PingFang TC","Noto Sans TC",sans-serif'
+    const cw = W_MM * PX_PER_MM, ch = H_MM * PX_PER_MM
+    const padX = 1 * PX_PER_MM, padY = 0.8 * PX_PER_MM
+    const maxW = cw - padX * 2
+    const LINE_GAP = 1.12
+    const drawCard = (lines: { text: string; bold?: boolean }[]) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = cw; canvas.height = ch
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch)
+      ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      // 以 100px 量寬 → 等比放大到滿版（文字寬與字級成正比）
+      const sizes = lines.map(l => {
+        ctx.font = `${l.bold ? 'bold ' : ''}100px ${FONT}`
+        const w = ctx.measureText(l.text).width || 1
+        return 100 * maxW / w
+      })
+      const totalH = sizes.reduce((a, b) => a + b * LINE_GAP, 0)
+      const k = totalH > ch - padY * 2 ? (ch - padY * 2) / totalH : 1
+      let y = (ch - totalH * k) / 2
+      lines.forEach((l, i) => {
+        const fpx = sizes[i] * k
+        ctx.font = `${l.bold ? 'bold ' : ''}${fpx}px ${FONT}`
+        ctx.fillText(l.text, cw / 2, y + (fpx * LINE_GAP) / 2)
+        y += fpx * LINE_GAP
+      })
+      return canvas.toDataURL('image/png')
+    }
+
+    const win = window.open('', '_blank')
+    if (win) win.document.body.innerHTML = '<p id="msg" style="font-family:sans-serif;padding:16px">PDF 產生中…</p>'
+    const setMsg = (t: string) => { try { const m = win?.document.getElementById('msg'); if (m) m.textContent = t } catch {} }
+    try {
+      const { jsPDF } = await import('jspdf')
+      const doc = new jsPDF({ unit: 'mm', format: [W_MM, H_MM], orientation: 'landscape' })
+      for (let i = 0; i < labels.length; i++) {
+        setMsg(`PDF 產生中… ${i + 1}/${labels.length}`)
+        if (i > 0) doc.addPage([W_MM, H_MM], 'landscape')
+        doc.addImage(drawCard(labels[i]), 'PNG', 0, 0, W_MM, H_MM)
+      }
+      const blobUrl = doc.output('bloburl') as unknown as string
+      if (win) win.location.href = blobUrl
+      else window.open(blobUrl, '_blank')
+    } catch (e) {
+      const msg = 'PDF 產生失敗：' + (e instanceof Error ? e.message : String(e))
+      setMsg(msg)
+      alert(msg)
+    }
+  }
+
+  // 效期標籤：有效日期 / yyyy/mm/dd，重複 N 份
+  function printExpiryLabels() {
+    if (!expiryLabelDate) { alert('請選擇日期'); return }
+    const count = Math.floor(expiryLabelCount)
+    if (!count || count < 1 || count > 1000) { alert('份數請填 1 ~ 1000'); return }
+    const dateText = expiryLabelDate.replace(/-/g, '/')
+    void printLabelsPdf(Array.from({ length: count }, () => [
+      { text: '有效日期', bold: true },
+      { text: dateText },
+    ]))
+    setShowExpiryLabel(false)
+  }
+
+  // 空白卡標籤：輸入號段（如 22108295501-22108295550），每 10 個一組出「號段起迄／起號／迄號」三行
+  function printBlankLabels() {
+    const m = blankRangeText.trim().match(/^(\d+)\s*[-~～]\s*(\d+)$/)
+    if (!m) { alert('號段格式錯誤，範例：22108295501-22108295550'); return }
+    const [, sStr, eStr] = m
+    const start = BigInt(sStr), end = BigInt(eStr)
+    if (end < start) { alert('迄號不可小於起號'); return }
+    const total = end - start + BigInt(1)
+    if (total > BigInt(10000)) { alert('號段超過 10000 張，請分批列印'); return }
+    const pad = sStr.length
+    const fmt = (n: bigint) => n.toString().padStart(pad, '0')
+    const labels: { text: string; bold?: boolean }[][] = []
+    for (let a = start; a <= end; a += BigInt(10)) {
+      const b = a + BigInt(9) <= end ? a + BigInt(9) : end
+      labels.push([
+        { text: '號段起迄', bold: true },
+        { text: fmt(a) },
+        { text: fmt(b) },
+      ])
+    }
+    if (!confirm(`共 ${total} 張卡，將列印 ${labels.length} 張標籤（每 10 個一組），確定？`)) return
+    void printLabelsPdf(labels)
+    setShowBlankLabel(false)
+  }
+
   async function loadExpiring(scope: 'tomorrow' | 'month' | 'range' = 'tomorrow') {
     let url = '/api/admin/cards/expiring-tomorrow'
     if (scope === 'month') url = '/api/admin/cards/expiring-month'
@@ -202,6 +301,14 @@ export default function CardsLookupPage() {
           <p className="mt-1 text-sm text-gray-500">貼入多筆 ICCID（每行一個或以逗號 / 空白分隔），一次查 F010 卡狀態 + F012 套餐使用，可直接申請 F017 售後</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          <button onClick={() => setShowExpiryLabel(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+            <Printer className="w-4 h-4" /> 列印效期標籤
+          </button>
+          <button onClick={() => setShowBlankLabel(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+            <Printer className="w-4 h-4" /> 列印空白卡標籤
+          </button>
           <button onClick={() => loadExpiring('tomorrow')}
             className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
             <Calendar className="w-4 h-4" /> 查詢到期卡片
@@ -221,6 +328,86 @@ export default function CardsLookupPage() {
           </div>
         </div>
       </div>
+
+      {showExpiryLabel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowExpiryLabel(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold">列印效期標籤</h2>
+            <p className="mt-1 text-xs text-gray-500">30mm × 15mm，兩行滿版：「有效日期」＋日期</p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">有效日期</label>
+                <input type="date" value={expiryLabelDate} onChange={e => setExpiryLabelDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">份數</label>
+                <input type="number" min={1} max={1000} value={expiryLabelCount}
+                  onChange={e => setExpiryLabelCount(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+              {/* 預覽：textLength 模擬列印的「字級放大到左右滿版」 */}
+              <svg viewBox="0 0 300 150" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'block', background: '#fff', border: '1px solid #d1d5db', borderRadius: 4 }}>
+                <text x="150" y="52" textAnchor="middle" fontWeight="bold" fontSize="62" textLength="284" lengthAdjust="spacingAndGlyphs">有效日期</text>
+                <text x="150" y="122" textAnchor="middle" fontSize="52" textLength="284" lengthAdjust="spacingAndGlyphs">{(expiryLabelDate || 'yyyy-mm-dd').replace(/-/g, '/')}</text>
+              </svg>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowExpiryLabel(false)}
+                className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
+              <button onClick={printExpiryLabels}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+                <Printer className="w-4 h-4" /> 產生 PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBlankLabel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowBlankLabel(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold">列印空白卡標籤</h2>
+            <p className="mt-1 text-xs text-gray-500">輸入號段，每 10 個號自動切一組，每組一張三行標籤：「號段起迄」＋起號＋迄號（30mm × 15mm）</p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">號段（起號-迄號）</label>
+                <input type="text" value={blankRangeText} onChange={e => setBlankRangeText(e.target.value)}
+                  placeholder="22108295501-22108295550" spellCheck={false}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" />
+              </div>
+              {(() => {
+                const m = blankRangeText.trim().match(/^(\d+)\s*[-~～]\s*(\d+)$/)
+                const s = m ? m[1] : '22108295501'
+                let e = '22108295510'
+                if (m) {
+                  try {
+                    const start = BigInt(m[1]); const end = BigInt(m[2])
+                    const first = start + BigInt(9) <= end ? start + BigInt(9) : end
+                    e = first.toString().padStart(m[1].length, '0')
+                  } catch { e = m[2] }
+                }
+                // 預覽：textLength 模擬列印的「字級放大到左右滿版」（第一張）
+                return (
+                  <svg viewBox="0 0 300 150" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'block', background: '#fff', border: '1px solid #d1d5db', borderRadius: 4 }}>
+                    <text x="150" y="40" textAnchor="middle" fontWeight="bold" fontSize="46" textLength="284" lengthAdjust="spacingAndGlyphs">號段起迄</text>
+                    <text x="150" y="90" textAnchor="middle" fontSize="40" textLength="284" lengthAdjust="spacingAndGlyphs">{s}</text>
+                    <text x="150" y="136" textAnchor="middle" fontSize="40" textLength="284" lengthAdjust="spacingAndGlyphs">{e}</text>
+                  </svg>
+                )
+              })()}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowBlankLabel(false)}
+                className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
+              <button onClick={printBlankLabels}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+                <Printer className="w-4 h-4" /> 產生 PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
         <textarea value={text} onChange={e => setText(e.target.value)}
