@@ -16,7 +16,8 @@ async function batchUpsert(supabase: any, records: Record<string, unknown>[]) {
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE)
     const { error } = await supabase.from('bc_products').upsert(batch, { onConflict: 'sku_id' })
-    if (error) throw error
+    // PostgrestError 是純物件，直接 throw 會在外層被 String() 成 [object Object]，包成 Error 保留訊息
+    if (error) throw new Error(`bc_products upsert 失敗（第 ${i / BATCH_SIZE + 1} 批）：${error.message || JSON.stringify(error)}`)
     synced += batch.length
   }
   return synced
@@ -38,22 +39,25 @@ export async function POST(request: Request) {
       const priceMap = new Map<string, BCProductPrice['price']>()
       for (const arr of allPricesArrays) for (const p of arr) priceMap.set(p.skuId, p.price)
 
-      // 既有 sku_id（避免插入只有價格、缺商品主檔的稀疏列）
-      const existing = new Set<string>()
+      // 既有 sku_id → name（避免插入只有價格、缺商品主檔的稀疏列；
+      // name 必須帶上：upsert 的 INSERT 檢查 NOT NULL 在 ON CONFLICT 之前，缺 name 會 23502）
+      const existing = new Map<string, string>()
       for (let from = 0; ; from += 1000) {
-        const { data } = await supabase.from('bc_products').select('sku_id').range(from, from + 999)
+        const { data } = await supabase.from('bc_products').select('sku_id, name').range(from, from + 999)
         if (!data || data.length === 0) break
-        for (const r of data) existing.add(r.sku_id)
+        for (const r of data) existing.set(r.sku_id, r.name)
         if (data.length < 1000) break
       }
 
       const now = new Date().toISOString()
       const records: Record<string, unknown>[] = []
       for (const [skuId, skuPrices] of priceMap) {
-        if (!existing.has(skuId)) continue
+        const name = existing.get(skuId)
+        if (name === undefined) continue
         const costPrice = Array.isArray(skuPrices) ? skuPrices.find((t) => t.copies === '1')?.settlementPrice || null : null
         records.push({
           sku_id: skuId,
+          name,
           prices: Array.isArray(skuPrices) && skuPrices.length > 0 ? skuPrices : null,
           cost_price: costPrice ? Number(costPrice) : null,
           updated_at: now,
@@ -212,7 +216,11 @@ export async function POST(request: Request) {
     })
   } catch (err) {
     console.error('Product sync failed:', err)
-    let msg = err instanceof Error ? err.message : String(err)
+    // 非 Error 的物件（如 PostgrestError）取 message 或 JSON 化，避免顯示 [object Object]
+    let msg = err instanceof Error ? err.message
+      : (err && typeof err === 'object')
+        ? ((err as { message?: string }).message || JSON.stringify(err))
+        : String(err)
     // 如果錯誤內容包含 HTML（例如 Cloudflare 502 error page），萃取狀態資訊
     if (msg.includes('<!DOCTYPE') || msg.includes('<html')) {
       const codeMatch = msg.match(/Error code (\d+)/i) || msg.match(/\b(502|503|504|500)\b/)

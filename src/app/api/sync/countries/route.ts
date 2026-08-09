@@ -29,14 +29,18 @@ export async function POST() {
         .from('bc_countries')
         .upsert(batch, { onConflict: 'mcc' })
 
-      if (error) throw error
+      // PostgrestError 是純物件，包成 Error 保留訊息（避免外層顯示 [object Object]）
+      if (error) throw new Error(`bc_countries upsert 失敗：${error.message || JSON.stringify(error)}`)
       synced += batch.length
     }
 
     return NextResponse.json({ synced })
   } catch (err) {
     console.error('Country sync failed:', err)
-    let msg = err instanceof Error ? err.message : String(err)
+    let msg = err instanceof Error ? err.message
+      : (err && typeof err === 'object')
+        ? ((err as { message?: string }).message || JSON.stringify(err))
+        : String(err)
     if (msg.includes('<!DOCTYPE') || msg.includes('<html')) {
       const codeMatch = msg.match(/Error code (\d+)/i) || msg.match(/\b(502|503|504|500)\b/)
       msg = codeMatch ? `上游服務暫時無回應（${codeMatch[1]}），請稍後再試` : '上游服務暫時無回應，請稍後再試'

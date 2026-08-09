@@ -58,6 +58,9 @@ export default function CardsLookupPage() {
   const [expiryLabelCount, setExpiryLabelCount] = useState(30)
   const [showBlankLabel, setShowBlankLabel] = useState(false)
   const [blankRangeText, setBlankRangeText] = useState('')
+  const [showApnLabel, setShowApnLabel] = useState(false)
+  const [apnLabelText, setApnLabelText] = useState('')
+  const [apnLabelCount, setApnLabelCount] = useState(30)
 
   async function handleLookup() {
     const iccids = [...new Set(text.split(/[\n,;\s]+/).map(s => s.trim()).filter(Boolean))]
@@ -259,6 +262,19 @@ export default function CardsLookupPage() {
     setShowBlankLabel(false)
   }
 
+  // APN 標籤：APN / 內容，重複 N 份
+  function printApnLabels() {
+    const apn = apnLabelText.trim()
+    if (!apn) { alert('請輸入 APN'); return }
+    const count = Math.floor(apnLabelCount)
+    if (!count || count < 1 || count > 1000) { alert('份數請填 1 ~ 1000'); return }
+    void printLabelsPdf(Array.from({ length: count }, () => [
+      { text: 'APN', bold: true },
+      { text: apn },
+    ]))
+    setShowApnLabel(false)
+  }
+
   async function loadExpiring(scope: 'tomorrow' | 'month' | 'range' = 'tomorrow') {
     let url = '/api/admin/cards/expiring-tomorrow'
     if (scope === 'month') url = '/api/admin/cards/expiring-month'
@@ -308,6 +324,10 @@ export default function CardsLookupPage() {
           <button onClick={() => setShowBlankLabel(true)}
             className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
             <Printer className="w-4 h-4" /> 列印空白卡標籤
+          </button>
+          <button onClick={() => setShowApnLabel(true)}
+            className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+            <Printer className="w-4 h-4" /> 列印 APN 標籤
           </button>
           <button onClick={() => loadExpiring('tomorrow')}
             className="flex items-center gap-2 px-3 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700">
@@ -401,6 +421,42 @@ export default function CardsLookupPage() {
               <button onClick={() => setShowBlankLabel(false)}
                 className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
               <button onClick={printBlankLabels}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+                <Printer className="w-4 h-4" /> 產生 PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApnLabel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowApnLabel(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold">列印 APN 標籤</h2>
+            <p className="mt-1 text-xs text-gray-500">30mm × 15mm，兩行滿版：「APN」＋設定值</p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">APN</label>
+                <input type="text" value={apnLabelText} onChange={e => setApnLabelText(e.target.value)}
+                  placeholder="three.mobile.com.hk" spellCheck={false}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">份數</label>
+                <input type="number" min={1} max={1000} value={apnLabelCount}
+                  onChange={e => setApnLabelCount(Number(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+              </div>
+              {/* 預覽：textLength 模擬列印的「字級放大到左右滿版」 */}
+              <svg viewBox="0 0 300 150" style={{ width: '30mm', height: '15mm', margin: '0 auto', display: 'block', background: '#fff', border: '1px solid #d1d5db', borderRadius: 4 }}>
+                <text x="150" y="58" textAnchor="middle" fontWeight="bold" fontSize="64" textLength="284" lengthAdjust="spacingAndGlyphs">APN</text>
+                <text x="150" y="120" textAnchor="middle" fontSize="34" textLength="284" lengthAdjust="spacingAndGlyphs">{apnLabelText.trim() || 'three.mobile.com.hk'}</text>
+              </svg>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowApnLabel(false)}
+                className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
+              <button onClick={printApnLabels}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
                 <Printer className="w-4 h-4" /> 產生 PDF
               </button>

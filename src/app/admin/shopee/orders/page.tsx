@@ -271,6 +271,12 @@ export default function ShopeeOrdersPage() {
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    // 防呆：訂單報表檔名必為 Order 開頭（蝦皮匯出格式），避免誤選金流或其他檔案
+    if (!/^order/i.test(file.name)) {
+      alert(`檔名須以 Order 開頭（目前：${file.name}）\n請確認選擇的是蝦皮「訂單」報表`)
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
     setImporting(true); setImportResult(null)
     try {
       const rows = await parseExcel(file)
@@ -291,6 +297,12 @@ export default function ShopeeOrdersPage() {
   async function handleSettlementImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    // 防呆：金流報表檔名必為 Income 開頭（蝦皮匯出格式），避免誤選訂單或其他檔案
+    if (!/^income/i.test(file.name)) {
+      alert(`檔名須以 Income 開頭（目前：${file.name}）\n請確認選擇的是蝦皮「金流／撥款」報表`)
+      if (settlementFileRef.current) settlementFileRef.current.value = ''
+      return
+    }
     setImportingSettlement(true); setImportResult(null)
     try {
       const rows = await parseExcel(file)
