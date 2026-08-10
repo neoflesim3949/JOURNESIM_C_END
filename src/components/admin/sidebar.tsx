@@ -67,6 +67,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: '/admin/shopee/dashboard', label: '蝦皮儀表板' },
       { href: '/admin/shopee/orders', label: '蝦皮訂單' },
+      { href: '/admin/shopee/aftersales', label: '蝦皮售後' },
       { href: '/admin/shopee/mappings-v2', label: '商品對應 V2' },
       { href: '/admin/shopee/coverage', label: '跨帳號對應主檔' },
       { href: '/admin/shopee/accounts', label: '帳號管理' },

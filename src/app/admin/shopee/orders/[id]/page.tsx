@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Save, Printer, Send, X, Undo2, Split, Plus, Trash2, Download, Activity } from 'lucide-react'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
+import { hydratePrintSettings } from '@/lib/print-settings'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
 function generateCode128SVG(text: string, height = 30, barWidth = 1.5): string {
@@ -141,6 +142,28 @@ export default function ShopeeOrderDetailPage() {
   const [receiptBuyer, setReceiptBuyer] = useState('')
   const [receiptTaxId, setReceiptTaxId] = useState('')
   const [receiptAddress, setReceiptAddress] = useState('')
+  // 頁面層「卡與套餐使用（F012）」：整單所有 ICCID 的套餐使用＋批量售後
+  const [pageUsage, setPageUsage] = useState<PlanUsageResult[] | null>(null)
+  const [pageUsageLoading, setPageUsageLoading] = useState(false)
+  async function loadPageUsage() {
+    const targets = items.filter(i => Array.isArray(i.iccid) && (i.iccid as string[]).length > 0)
+    if (targets.length === 0) { alert('此訂單沒有已回填 ICCID 的品項'); return }
+    setPageUsageLoading(true)
+    try {
+      const results = await Promise.all(targets.map(async it => {
+        try {
+          const d = await fetch(`/api/admin/shopee/orders/${id}/items/${it.id}/card-usage`).then(r => r.json())
+          return (d.planUsage || []) as PlanUsageResult[]
+        } catch { return [] as PlanUsageResult[] }
+      }))
+      // 合併各品項結果，依 ICCID 去重
+      const seen = new Set<string>()
+      const merged: PlanUsageResult[] = []
+      for (const arr of results) for (const p of arr) { if (seen.has(p.iccid)) continue; seen.add(p.iccid); merged.push(p) }
+      setPageUsage(merged)
+    } finally { setPageUsageLoading(false) }
+  }
+
   // 售後紀錄（F017 呼叫紀錄，依渠道單號比對）
   interface AfterSaleRecord { id: string; created_at: string; channel_order_id: string; channel_sub_order_id: string | null; reason: string; iccids: string[]; card_count: number; after_sale_id: string | null; refund_cny: number | null; refund_twd: number | null; ok: boolean; error: string | null }
   const [aftersales, setAftersales] = useState<AfterSaleRecord[]>([])
@@ -186,7 +209,12 @@ export default function ShopeeOrderDetailPage() {
       setAftersales(d.records || [])
     } catch { /* 表未建或查詢失敗時不擋頁面 */ }
   }
-  useEffect(() => { load() }, [id])
+  useEffect(() => {
+    // 先把列印設定（寄件人/印章/標籤）從 DB 灌回 localStorage，寄件單/收據元件才拿得到（跨裝置）
+    void hydratePrintSettings()
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
 
   // 更新訂單層級欄位（為手動訂單提供直接編輯）
   async function saveOrderField(field: string, value: string | number | null) {
@@ -928,6 +956,24 @@ export default function ShopeeOrderDetailPage() {
         </div>
       </div>
 
+      {/* 卡與套餐使用（F012）— 頁面層整單查詢＋批量售後 */}
+      <div className="mt-6 bg-white border border-gray-200 rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">卡與套餐使用（F012）</h2>
+          <button onClick={loadPageUsage} disabled={pageUsageLoading}
+            className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700 disabled:opacity-60">
+            {pageUsageLoading ? '查詢中…' : pageUsage ? '重新查詢' : '查詢使用狀況'}
+          </button>
+        </div>
+        {pageUsage ? (
+          <div className="mt-3">
+            <F012UsageBlock planUsage={pageUsage} onAfterSaleDone={() => { loadAftersales(); void loadPageUsage() }} />
+          </div>
+        ) : !pageUsageLoading && (
+          <p className="mt-3 text-xs text-gray-400">點「查詢使用狀況」查整單所有 ICCID 的套餐使用（每張打一次 F012），可勾選未使用套餐批量售後</p>
+        )}
+      </div>
+
       {/* 售後訂單（F017 成功後生成，bc_aftersales） */}
       {aftersales.length > 0 && (
         <div className="mt-6 bg-white border border-gray-200 rounded-xl p-5">
@@ -1122,31 +1168,40 @@ export default function ShopeeOrderDetailPage() {
 interface DailyTrafficItem { usedDate: string; type: string; usedAmount: string; country: string; countryRegionCode: string }
 interface DailyTrafficResult { loading: boolean; items?: DailyTrafficItem[]; error?: string; beginDate?: string; endDate?: string }
 
-function CardUsageModal({ modal, onClose, onAfterSaleDone }: { modal: { itemId: string; loading: boolean; data: CardUsageResp | null; error: string | null }; onClose: () => void; onAfterSaleDone?: () => void }) {
-  const PLAN_STATUS_LABEL: Record<string, string> = {
-    '0': '未使用', '1': '使用中', '2': '已用完', '3': '已過期', '4': '已退訂',
-  }
-  const CARD_STATUS_LABEL: Record<string, string> = {
-    '0': '載體有效', '1': '載體無效', '2': '已停用',
-  }
+const PLAN_STATUS_LABEL: Record<string, string> = {
+  '0': '未使用', '1': '使用中', '2': '已用完', '3': '已過期', '4': '已退訂',
+}
 
-  const [trafficByIccid, setTrafficByIccid] = useState<Record<string, DailyTrafficResult>>({})
+// BC 流量單位為 KB（F023 usedAmount、F046 totalTraffic/remainingTraffic 皆為 KB）
+function fmtTraffic(s?: string | null) {
+  if (s == null || s === '') return '—'
+  const kb = Number(s)
+  if (isNaN(kb)) return s
+  if (kb < 0) return '不限'
+  if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(2) + ' GB'
+  if (kb >= 1024) return (kb / 1024).toFixed(2) + ' MB'
+  return Math.round(kb) + ' KB'
+}
 
+// F012 套餐使用表（含「未使用」勾選＋批量售後）— 使用狀況彈窗與訂單頁共用
+function F012UsageBlock({ planUsage, onAfterSaleDone }: { planUsage: PlanUsageResult[]; onAfterSaleDone?: () => void }) {
   // 批量售後（只針對「未使用」planStatus=0 的套餐）
   // eligible = 未使用且有渠道單號可退；key = `${iccid}|${channelSubOrderId}`
-  type AfterSaleItem = { key: string; iccid: string; channelSubOrderId?: string; channelOrderId?: string; orderId?: string }
+  type AfterSaleItem = { key: string; iccid: string; skuName?: string; channelSubOrderId?: string; channelOrderId?: string; orderId?: string }
   const [selectedAS, setSelectedAS] = useState<Set<string>>(new Set())
   const [asWorking, setAsWorking] = useState(false)
+  const [asConfirmOpen, setAsConfirmOpen] = useState(false)
+  const [asReason, setAsReason] = useState<'20' | '29'>('20')
   const eligibleAS: AfterSaleItem[] = (() => {
     const out: AfterSaleItem[] = []
-    for (const p of modal.data?.planUsage || []) {
+    for (const p of planUsage) {
       if (!p.ok) continue
       for (const o of p.data || []) {
         for (const s of o.subOrderList || []) {
           if ((s.planStatus || '') !== '0') continue   // 只售後未使用
           const derivable = !!s.channelSubOrderId && /[SE]\d+$/.test(s.channelSubOrderId)
           if (!o.channelOrderId && !derivable) continue // 無渠道單號無法 F017
-          out.push({ key: `${p.iccid}|${s.channelSubOrderId || ''}`, iccid: p.iccid, channelSubOrderId: s.channelSubOrderId, channelOrderId: o.channelOrderId, orderId: o.orderId })
+          out.push({ key: `${p.iccid}|${s.channelSubOrderId || ''}`, iccid: p.iccid, skuName: s.skuName, channelSubOrderId: s.channelSubOrderId, channelOrderId: o.channelOrderId, orderId: o.orderId })
         }
       }
     }
@@ -1156,21 +1211,24 @@ function CardUsageModal({ modal, onClose, onAfterSaleDone }: { modal: { itemId: 
   useEffect(() => {
     setSelectedAS(new Set(eligibleAS.map(e => e.key)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modal.data])
+  }, [planUsage])
 
-  async function batchAfterSale() {
+  // 開啟售後明細確認彈窗
+  function batchAfterSale() {
     const picked = eligibleAS.filter(e => selectedAS.has(e.key))
     if (picked.length === 0) { alert('沒有勾選任何未使用套餐'); return }
-    const reason = prompt(`對 ${picked.length} 張未使用卡批次申請售後\n請輸入原因代碼：\n20 = 無理由退訂\n29 = eSIM 未下載退訂`)
-    if (reason === null) return
-    if (!reason.trim()) { alert('請填寫原因代碼'); return }
-    if (!confirm(`確定對 ${picked.length} 張未使用卡申請售後退訂？同 channelOrderId 會合併成同一張售後單。`)) return
+    setAsConfirmOpen(true)
+  }
+
+  async function submitAfterSale() {
+    const picked = eligibleAS.filter(e => selectedAS.has(e.key))
+    if (picked.length === 0) { setAsConfirmOpen(false); return }
     setAsWorking(true)
     try {
       const res = await fetch('/api/admin/cards-lookup/aftersale-batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          reason: reason.trim(),
+          reason: asReason,
           source: 'order_detail',
           items: picked.map(p => ({ iccid: p.iccid, channelSubOrderId: p.channelSubOrderId, channelOrderId: p.channelOrderId, orderId: p.orderId })),
         }),
@@ -1184,9 +1242,179 @@ function CardUsageModal({ modal, onClose, onAfterSaleDone }: { modal: { itemId: 
       ).join('\n')
       alert(`批次售後完成\n成功 ${ok} 組 / 失敗 ${fail} 組\n\n${detail}`)
       setSelectedAS(new Set())
+      setAsConfirmOpen(false)
       onAfterSaleDone?.()
     } finally { setAsWorking(false) }
   }
+
+
+  const pickedAS = eligibleAS.filter(e => selectedAS.has(e.key))
+
+  return (
+    <div>
+      {/* 售後明細確認彈窗 */}
+      {asConfirmOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => !asWorking && setAsConfirmOpen(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-gray-200">
+              <h3 className="font-semibold">批量售後確認</h3>
+              <p className="mt-0.5 text-xs text-gray-500">共 {pickedAS.length} 張未使用卡；同渠道單號會合併成同一張售後單，由 BC 自動拆</p>
+            </div>
+            <div className="flex-1 overflow-auto px-5 py-3">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-2 py-1.5 text-left border-b">ICCID</th>
+                    <th className="px-2 py-1.5 text-left border-b">渠道子單</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pickedAS.map(p => (
+                    <tr key={p.key} className="border-b">
+                      <td className="px-2 py-1.5 font-mono">{p.iccid}</td>
+                      <td className="px-2 py-1.5 font-mono text-gray-500">{p.channelSubOrderId || p.channelOrderId || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="mt-4">
+                <p className="text-xs font-medium text-gray-500 mb-2">售後原因</p>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="radio" name="as-reason" checked={asReason === '20'} onChange={() => setAsReason('20')} />
+                    20 無理由退訂
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="radio" name="as-reason" checked={asReason === '29'} onChange={() => setAsReason('29')} />
+                    29 eSIM 未下載退訂
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setAsConfirmOpen(false)} disabled={asWorking}
+                className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">取消</button>
+              <button onClick={submitAfterSale} disabled={asWorking}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-60">
+                {asWorking ? '送出中…' : `確認售後（${pickedAS.length} 張）`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-xs font-semibold text-gray-500">F012 套餐使用</h4>
+        {eligibleAS.length > 0 && (
+          <button onClick={batchAfterSale} disabled={asWorking || selectedAS.size === 0}
+            className="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50">
+            {asWorking ? '送出中…' : `批量售後未使用 (${selectedAS.size})`}
+          </button>
+        )}
+      </div>
+      <table className="w-full text-xs border border-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-2 py-1.5 text-left border-b">
+              {eligibleAS.length > 0 && (
+                <input type="checkbox"
+                  checked={eligibleAS.length > 0 && eligibleAS.every(e => selectedAS.has(e.key))}
+                  onChange={() => {
+                    const all = eligibleAS.every(e => selectedAS.has(e.key))
+                    setSelectedAS(all ? new Set() : new Set(eligibleAS.map(e => e.key)))
+                  }} />
+              )}
+            </th>
+            <th className="px-2 py-1.5 text-left border-b">套餐名稱</th>
+            <th className="px-2 py-1.5 text-left border-b">ICCID</th>
+            <th className="px-2 py-1.5 text-left border-b">APN</th>
+            <th className="px-2 py-1.5 text-left border-b">狀態</th>
+            <th className="px-2 py-1.5 text-left border-b">激活時間</th>
+            <th className="px-2 py-1.5 text-left border-b">結束時間</th>
+            <th className="px-2 py-1.5 text-left border-b">剩餘天數</th>
+            <th className="px-2 py-1.5 text-left border-b">總流量</th>
+            <th className="px-2 py-1.5 text-left border-b">剩餘流量</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(() => {
+            const rows: { iccid: string; sub?: PlanUsageSub; error?: string }[] = []
+            for (const p of planUsage) {
+              if (!p.ok) {
+                rows.push({ iccid: p.iccid, error: p.error })
+                continue
+              }
+              const subs = (p.data || []).flatMap(o => o.subOrderList || [])
+              if (subs.length === 0) {
+                rows.push({ iccid: p.iccid })
+              } else {
+                for (const s of subs) rows.push({ iccid: p.iccid, sub: s })
+              }
+            }
+            if (rows.length === 0) {
+              return <tr><td colSpan={10} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
+            }
+            const fmtApn = (cs?: PlanUsageCountry[]) => {
+              if (!cs || cs.length === 0) return '—'
+              return cs.map(c => {
+                const apn = c.apn || '—'
+                const op = c.operator ? ` (${c.operator})` : ''
+                return `${apn}${op}`
+              }).join(', ')
+            }
+            return rows.map((r, j) => {
+              if (r.error) return (
+                <tr key={j} className="border-b">
+                  <td className="px-2 py-1.5"></td>
+                  <td className="px-2 py-1.5 text-red-600" colSpan={1}>—</td>
+                  <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                  <td className="px-2 py-1.5 text-red-600" colSpan={7}>{r.error}</td>
+                </tr>
+              )
+              const s = r.sub
+              if (!s) return (
+                <tr key={j} className="border-b">
+                  <td className="px-2 py-1.5"></td>
+                  <td className="px-2 py-1.5 text-gray-400">無套餐</td>
+                  <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                  <td className="px-2 py-1.5 text-gray-400" colSpan={7}>—</td>
+                </tr>
+              )
+              const asKey = `${r.iccid}|${s.channelSubOrderId || ''}`
+              const asEligible = eligibleAS.some(e => e.key === asKey)
+              return (
+                <tr key={j} className={`border-b ${asEligible && selectedAS.has(asKey) ? 'bg-red-50/40' : ''}`}>
+                  <td className="px-2 py-1.5">
+                    {asEligible && (
+                      <input type="checkbox" checked={selectedAS.has(asKey)}
+                        onChange={() => setSelectedAS(prev => { const n = new Set(prev); n.has(asKey) ? n.delete(asKey) : n.add(asKey); return n })} />
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
+                  <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
+                  <td className="px-2 py-1.5 font-mono text-xs" title={(s.country || []).map(c => `${c.name || c.mcc || ''}: ${c.apn || '—'}${c.operator ? ' / ' + c.operator : ''}${c.apnUsername ? ' / user=' + c.apnUsername : ''}${c.apnPassword ? ' / pwd=' + c.apnPassword : ''}`).join('\n') || ''}>{fmtApn(s.country)}</td>
+                  <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
+                  <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
+                  <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
+                  <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
+                  <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
+                  <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
+                </tr>
+              )
+            })
+          })()}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CardUsageModal({ modal, onClose, onAfterSaleDone }: { modal: { itemId: string; loading: boolean; data: CardUsageResp | null; error: string | null }; onClose: () => void; onAfterSaleDone?: () => void }) {
+  const CARD_STATUS_LABEL: Record<string, string> = {
+    '0': '載體有效', '1': '載體無效', '2': '已停用',
+  }
+
+  const [trafficByIccid, setTrafficByIccid] = useState<Record<string, DailyTrafficResult>>({})
 
   async function loadDailyTraffic(iccid: string, expirationDate?: string) {
     setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: true } }))
@@ -1215,17 +1443,6 @@ function CardUsageModal({ modal, onClose, onAfterSaleDone }: { modal: { itemId: 
     } catch (err) {
       setTrafficByIccid(prev => ({ ...prev, [iccid]: { loading: false, error: err instanceof Error ? err.message : String(err) } }))
     }
-  }
-
-  // BC 流量單位為 KB（F023 usedAmount、F046 totalTraffic/remainingTraffic 皆為 KB）
-  function fmtTraffic(s?: string | null) {
-    if (s == null || s === '') return '—'
-    const kb = Number(s)
-    if (isNaN(kb)) return s
-    if (kb < 0) return '不限'
-    if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(2) + ' GB'
-    if (kb >= 1024) return (kb / 1024).toFixed(2) + ' MB'
-    return Math.round(kb) + ' KB'
   }
 
   return (
@@ -1315,110 +1532,7 @@ function CardUsageModal({ modal, onClose, onAfterSaleDone }: { modal: { itemId: 
                 </table>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-xs font-semibold text-gray-500">F012 套餐使用</h4>
-                  {eligibleAS.length > 0 && (
-                    <button onClick={batchAfterSale} disabled={asWorking || selectedAS.size === 0}
-                      className="px-3 py-1.5 bg-red-600 text-white text-xs rounded hover:bg-red-700 disabled:opacity-50">
-                      {asWorking ? '送出中…' : `批量售後未使用 (${selectedAS.size})`}
-                    </button>
-                  )}
-                </div>
-                <table className="w-full text-xs border border-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-2 py-1.5 text-left border-b">
-                        {eligibleAS.length > 0 && (
-                          <input type="checkbox"
-                            checked={eligibleAS.length > 0 && eligibleAS.every(e => selectedAS.has(e.key))}
-                            onChange={() => {
-                              const all = eligibleAS.every(e => selectedAS.has(e.key))
-                              setSelectedAS(all ? new Set() : new Set(eligibleAS.map(e => e.key)))
-                            }} />
-                        )}
-                      </th>
-                      <th className="px-2 py-1.5 text-left border-b">套餐名稱</th>
-                      <th className="px-2 py-1.5 text-left border-b">ICCID</th>
-                      <th className="px-2 py-1.5 text-left border-b">APN</th>
-                      <th className="px-2 py-1.5 text-left border-b">狀態</th>
-                      <th className="px-2 py-1.5 text-left border-b">激活時間</th>
-                      <th className="px-2 py-1.5 text-left border-b">結束時間</th>
-                      <th className="px-2 py-1.5 text-left border-b">剩餘天數</th>
-                      <th className="px-2 py-1.5 text-left border-b">總流量</th>
-                      <th className="px-2 py-1.5 text-left border-b">剩餘流量</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const rows: { iccid: string; sub?: PlanUsageSub; error?: string }[] = []
-                      for (const p of modal.data.planUsage) {
-                        if (!p.ok) {
-                          rows.push({ iccid: p.iccid, error: p.error })
-                          continue
-                        }
-                        const subs = (p.data || []).flatMap(o => o.subOrderList || [])
-                        if (subs.length === 0) {
-                          rows.push({ iccid: p.iccid })
-                        } else {
-                          for (const s of subs) rows.push({ iccid: p.iccid, sub: s })
-                        }
-                      }
-                      if (rows.length === 0) {
-                        return <tr><td colSpan={10} className="px-2 py-2 text-gray-400 text-center">無套餐記錄</td></tr>
-                      }
-                      const fmtApn = (cs?: PlanUsageCountry[]) => {
-                        if (!cs || cs.length === 0) return '—'
-                        return cs.map(c => {
-                          const apn = c.apn || '—'
-                          const op = c.operator ? ` (${c.operator})` : ''
-                          return `${apn}${op}`
-                        }).join(', ')
-                      }
-                      return rows.map((r, j) => {
-                        if (r.error) return (
-                          <tr key={j} className="border-b">
-                            <td className="px-2 py-1.5"></td>
-                            <td className="px-2 py-1.5 text-red-600" colSpan={1}>—</td>
-                            <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
-                            <td className="px-2 py-1.5 text-red-600" colSpan={7}>{r.error}</td>
-                          </tr>
-                        )
-                        const s = r.sub
-                        if (!s) return (
-                          <tr key={j} className="border-b">
-                            <td className="px-2 py-1.5"></td>
-                            <td className="px-2 py-1.5 text-gray-400">無套餐</td>
-                            <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
-                            <td className="px-2 py-1.5 text-gray-400" colSpan={7}>—</td>
-                          </tr>
-                        )
-                        const asKey = `${r.iccid}|${s.channelSubOrderId || ''}`
-                        const asEligible = eligibleAS.some(e => e.key === asKey)
-                        return (
-                          <tr key={j} className={`border-b ${asEligible && selectedAS.has(asKey) ? 'bg-red-50/40' : ''}`}>
-                            <td className="px-2 py-1.5">
-                              {asEligible && (
-                                <input type="checkbox" checked={selectedAS.has(asKey)}
-                                  onChange={() => setSelectedAS(prev => { const n = new Set(prev); n.has(asKey) ? n.delete(asKey) : n.add(asKey); return n })} />
-                              )}
-                            </td>
-                            <td className="px-2 py-1.5">{s.skuName || '—'}{s.copies ? ` ×${s.copies}` : ''}</td>
-                            <td className="px-2 py-1.5 font-mono">{r.iccid}</td>
-                            <td className="px-2 py-1.5 font-mono text-xs" title={(s.country || []).map(c => `${c.name || c.mcc || ''}: ${c.apn || '—'}${c.operator ? ' / ' + c.operator : ''}${c.apnUsername ? ' / user=' + c.apnUsername : ''}${c.apnPassword ? ' / pwd=' + c.apnPassword : ''}`).join('\n') || ''}>{fmtApn(s.country)}</td>
-                            <td className="px-2 py-1.5">{PLAN_STATUS_LABEL[s.planStatus || ''] || s.planStatus || '—'}</td>
-                            <td className="px-2 py-1.5">{s.planStartTime || '—'}</td>
-                            <td className="px-2 py-1.5">{s.planEndTime || '—'}</td>
-                            <td className="px-2 py-1.5">{s.remainingDays != null ? `${s.remainingDays}/${s.totalDays || '—'}` : '—'}</td>
-                            <td className="px-2 py-1.5">{fmtTraffic(s.totalTraffic)}</td>
-                            <td className="px-2 py-1.5">{fmtTraffic(s.remainingTraffic)}</td>
-                          </tr>
-                        )
-                      })
-                    })()}
-                  </tbody>
-                </table>
-              </div>
+              <F012UsageBlock planUsage={modal.data.planUsage} onAfterSaleDone={onAfterSaleDone} />
             </>
           )}
         </div>

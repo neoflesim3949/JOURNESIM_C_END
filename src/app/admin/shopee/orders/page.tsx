@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3, Plus, Send } from 'lucide-react'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
+import { hydratePrintSettings, savePrintSettings } from '@/lib/print-settings'
 import * as XLSX from 'xlsx'
 
 // ── Code 128B 一維條碼 SVG 生成 ──────────────────────────
@@ -163,32 +164,34 @@ export default function ShopeeOrdersPage() {
   const [batchEditLoading, setBatchEditLoading] = useState(false)
   const [batchSubmitting, setBatchSubmitting] = useState(false)
 
-  // 從 localStorage 載入設定 + 載入帳號
+  // 載入設定（DB 為準 → 灌回 localStorage 快取）+ 載入帳號
   useEffect(() => {
-    const saved = localStorage.getItem('shopee_label_settings')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        // 舊資料沒有 orientation → 補預設 landscape
-        if (!parsed.orientation) parsed.orientation = 'landscape'
-        setLabelSettings(parsed)
-      } catch {}
-    }
-    const savedExpiry = localStorage.getItem('shopee_expiry_date')
-    if (savedExpiry) setExpiryDate(savedExpiry)
-    const savedSender = localStorage.getItem('shopee_sender_info')
-    if (savedSender) { try { setSenderInfo(prev => ({ ...prev, ...JSON.parse(savedSender) })) } catch {} }
+    void hydratePrintSettings().then(() => {
+      const saved = localStorage.getItem('shopee_label_settings')
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          // 舊資料沒有 orientation → 補預設 landscape
+          if (!parsed.orientation) parsed.orientation = 'landscape'
+          setLabelSettings(parsed)
+        } catch {}
+      }
+      const savedExpiry = localStorage.getItem('shopee_expiry_date')
+      if (savedExpiry) setExpiryDate(savedExpiry)
+      const savedSender = localStorage.getItem('shopee_sender_info')
+      if (savedSender) { try { setSenderInfo(prev => ({ ...prev, ...JSON.parse(savedSender) })) } catch {} }
+    })
     fetch('/api/admin/shopee/accounts').then(r => r.json()).then(d => setAccounts(d || []))
   }, [])
 
   function saveExpiryDate(date: string) {
     setExpiryDate(date)
-    localStorage.setItem('shopee_expiry_date', date)
+    savePrintSettings({ shopee_expiry_date: date })
   }
 
   function saveLabelSettings(s: { line1: number; line2: number; line3: number; orientation: 'landscape' | 'portrait' }) {
     setLabelSettings(s)
-    localStorage.setItem('shopee_label_settings', JSON.stringify(s))
+    savePrintSettings({ shopee_label_settings: JSON.stringify(s) })
     setShowLabelSettings(false)
   }
 
@@ -889,7 +892,7 @@ export default function ShopeeOrdersPage() {
                 {typeof window !== 'undefined' && localStorage.getItem('receipt_stamp_url') ? (
                   <div className="flex items-center gap-3">
                     <img src={localStorage.getItem('receipt_stamp_url')!} alt="印章" style={{ maxHeight: '60px' }} />
-                    <button onClick={() => { localStorage.removeItem('receipt_stamp_url'); setShowLabelSettings(false); setTimeout(() => setShowLabelSettings(true), 0) }}
+                    <button onClick={() => { savePrintSettings({ receipt_stamp_url: '' }); setShowLabelSettings(false); setTimeout(() => setShowLabelSettings(true), 0) }}
                       className="text-xs text-red-500 hover:underline">移除</button>
                   </div>
                 ) : (
@@ -904,7 +907,7 @@ export default function ShopeeOrdersPage() {
                       const res = await fetch('/api/admin/media', { method: 'POST', body: form })
                       if (res.ok) {
                         const { url } = await res.json()
-                        localStorage.setItem('receipt_stamp_url', url)
+                        savePrintSettings({ receipt_stamp_url: url })
                         setShowLabelSettings(false); setTimeout(() => setShowLabelSettings(true), 0)
                       }
                     }} />
@@ -946,7 +949,7 @@ export default function ShopeeOrdersPage() {
               <div style={{ fontSize: `${labelSettings.line3}px`, lineHeight: 1.2 }}>使用期限：2026/04/06</div>
             </div>
             <div className="mt-4 flex gap-2">
-              <button onClick={() => { localStorage.setItem('shopee_sender_info', JSON.stringify(senderInfo)); saveLabelSettings(labelSettings) }} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
+              <button onClick={() => { savePrintSettings({ shopee_sender_info: JSON.stringify(senderInfo) }); saveLabelSettings(labelSettings) }} className="flex-1 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">儲存</button>
               <button onClick={() => setShowLabelSettings(false)} className="px-4 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">取消</button>
             </div>
           </div>

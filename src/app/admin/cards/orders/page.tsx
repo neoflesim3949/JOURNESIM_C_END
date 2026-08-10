@@ -100,6 +100,13 @@ export default function CardOrdersPage() {
       const items: SkuInfo[] = d.items || []
       setCardOpts(items)
       if (items[0]) setPickSku(items[0].sku_id)
+      // 只有一個商品 → 直接帶入明細（省一次點擊）
+      if (items.length === 1) {
+        const only = items[0]
+        setLines(prev => prev.length === 0
+          ? [{ sku: only, copies: only.prices?.[0]?.copies || '1', number: '1' }]
+          : prev)
+      }
     })
     loadHistory()
   }, [])

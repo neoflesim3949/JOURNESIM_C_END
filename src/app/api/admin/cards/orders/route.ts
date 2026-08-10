@@ -40,13 +40,15 @@ export async function GET(request: Request) {
   if (action === 'cards') {
     // 實體卡商品：卡類型（單次/多次/硬卡/卡+套餐組合），上架中
     const CARD_TYPES = ['210', '211', '212', '311', '3101', '3102', '3103', '3104']
+    // 排除未採購品項：海外12月单次卡-红（只買白卡）
+    const EXCLUDED_SKUS = ['1739178481903804']
     const supabase = createAdminClient()
     const { data } = await supabase.from('bc_products')
       .select('sku_id, name, type, days, prices, cost_price')
       .in('type', CARD_TYPES)
       .or('is_active.is.null,is_active.eq.true')
       .order('name')
-    return NextResponse.json({ items: data || [] })
+    return NextResponse.json({ items: (data || []).filter(p => !EXCLUDED_SKUS.includes(p.sku_id)) })
   }
 
   if (action === 'skus') {
