@@ -155,6 +155,13 @@ export async function createEsimOrder(data: BCCreateEsimOrderInput) {
 }
 
 // =====================================================
+// F005 — 獲取物流公司資訊
+// =====================================================
+export async function getLogisticsCompanies() {
+  return callBC<{ code: string; name: string }[]>('F005', {})
+}
+
+// =====================================================
 // F006 — 創建卡訂單（郵寄/自提）
 // =====================================================
 export async function createSimOrder(data: BCCreateSimOrderInput) {
@@ -383,6 +390,8 @@ export interface BCCreateSimOrderInput {
   express?: object
   selfPickup?: object
   totalAmount?: string
+  comment?: string
+  estimatedUseTime?: string
   subOrderList: {
     channelSubOrderId: string
     deviceSkuId: string

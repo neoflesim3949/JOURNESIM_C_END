@@ -41,7 +41,13 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/orders/after-sales', label: '售後列表' },
     ],
   },
-  { href: '/admin/cards', label: '卡片管理', icon: CreditCard },
+  {
+    href: '/admin/cards', label: '卡片管理', icon: CreditCard,
+    children: [
+      { href: '/admin/cards', label: '卡片管理' },
+      { href: '/admin/cards/orders', label: '卡片訂單' },
+    ],
+  },
   { 
     href: '/admin/members', label: '會員管理', icon: Users,
     children: [
@@ -169,7 +175,10 @@ function NavEntry({ item, pathname }: { item: NavItem; pathname: string }) {
         {open && (
           <div className="mt-1 ml-8 space-y-1">
             {item.children!.map((child) => {
-              const childActive = pathname.startsWith(child.href)
+              // 同組下級取「最長匹配」高亮，避免 /admin/cards 與 /admin/cards/orders 同時亮
+              const best = item.children!.filter((c) => pathname.startsWith(c.href))
+                .sort((a, b) => b.href.length - a.href.length)[0]
+              const childActive = best?.href === child.href
               return (
                 <Link
                   key={child.href}
