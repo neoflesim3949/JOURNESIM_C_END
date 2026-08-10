@@ -85,8 +85,8 @@ export async function GET(request: Request) {
   const search = searchParams.get('search') || ''
   const kind = searchParams.get('kind') || '' // ''=全部 / sim / esim
 
-  // 至少要有一個篩選條件
-  if (!countries && !selectedDays && !capacity && !speed && !operators && !search) {
+  // 至少要有一個篩選條件（kind 也算：實體卡多無國家資料，允許只用類型列全部）
+  if (!countries && !selectedDays && !capacity && !speed && !operators && !search && !kind) {
     return NextResponse.json([])
   }
 

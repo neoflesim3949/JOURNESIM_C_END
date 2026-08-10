@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2, Loader2, Send, ChevronDown, ChevronRight, Wand2 } from 'lucide-react'
-import { BcMatchModal } from '@/components/admin/bc-match-modal'
 import { getProductTypeLabel } from '@/lib/bc-enums'
 
 interface PriceTier { copies: string; settlementPrice: string }
@@ -40,9 +39,10 @@ function parseAddress(raw: string): { name: string; phone: string; province: str
 }
 
 export default function CardOrdersPage() {
+  const [tab, setTab] = useState<'create' | 'history'>('create')
   const [lines, setLines] = useState<OrderLine[]>([])
-  const [showPicker, setShowPicker] = useState(false)
-  const [addingSkus, setAddingSkus] = useState(false)
+  const [cardOpts, setCardOpts] = useState<SkuInfo[]>([])   // 卡類商品清單（實體卡就這幾顆）
+  const [pickSku, setPickSku] = useState('')
   // 地址識別
   const [rawAddress, setRawAddress] = useState('')
   // 收貨人 / 收貨地址 / 配送（F006 express）
@@ -64,12 +64,43 @@ export default function CardOrdersPage() {
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
-  // F005 物流公司（一次載入）
+  // 收貨資訊記憶（存資料庫 system_settings，全後台共用）：進頁帶入、修改後防抖自動存
+  const shipLoadedRef = useRef(false)
+  useEffect(() => {
+    fetch('/api/admin/cards/orders?action=shipinfo').then(r => r.json()).then(d => {
+      const saved = d.info || {}
+      if (saved.userName) setUserName(saved.userName)
+      if (saved.userPhone) setUserPhone(saved.userPhone)
+      if (saved.province) setProvince(saved.province)
+      if (saved.city) setCity(saved.city)
+      if (saved.district) setDistrict(saved.district)
+      if (saved.address) setAddress(saved.address)
+      if (saved.logistics) setLogistics(saved.logistics)
+      if (saved.expressFee) setExpressFee(saved.expressFee)
+    }).finally(() => { shipLoadedRef.current = true })
+  }, [])
+  useEffect(() => {
+    if (!shipLoadedRef.current) return   // 載入回填階段不觸發儲存
+    const t = setTimeout(() => {
+      void fetch('/api/admin/cards/orders', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ info: { userName, userPhone, province, city, district, address, logistics, expressFee } }),
+      })
+    }, 600)
+    return () => clearTimeout(t)
+  }, [userName, userPhone, province, city, district, address, logistics, expressFee])
+
+  // F005 物流公司 + 卡類商品清單（一次載入）
   useEffect(() => {
     fetch('/api/admin/cards/orders?action=logistics').then(r => r.json()).then(d => {
       if (d.companies) setLogisticsOpts(d.companies)
       else setLogisticsErr(d.error || 'F005 物流清單載入失敗')
     }).catch(e => setLogisticsErr(String(e)))
+    fetch('/api/admin/cards/orders?action=cards').then(r => r.json()).then(d => {
+      const items: SkuInfo[] = d.items || []
+      setCardOpts(items)
+      if (items[0]) setPickSku(items[0].sku_id)
+    })
     loadHistory()
   }, [])
 
@@ -89,24 +120,12 @@ export default function CardOrdersPage() {
     if (p.address) setAddress(p.address)
   }
 
-  // 從 BC 商品彈窗加入 SKU → 撈明細（份數價格）
-  async function addSkus(skuIds: string[]) {
-    setAddingSkus(true)
-    try {
-      const res = await fetch(`/api/admin/cards/orders?action=skus&skus=${skuIds.join(',')}`)
-      const d = await res.json()
-      const items: SkuInfo[] = d.items || []
-      setLines(prev => {
-        const have = new Set(prev.map(l => l.sku.sku_id))
-        const added = items.filter(i => !have.has(i.sku_id)).map(i => ({
-          sku: i,
-          copies: i.prices?.[0]?.copies || '1',
-          number: '1',
-        }))
-        return [...prev, ...added]
-      })
-      setShowPicker(false)
-    } finally { setAddingSkus(false) }
+  // 從卡類商品下拉加入明細
+  function addPicked() {
+    const sku = cardOpts.find(c => c.sku_id === pickSku)
+    if (!sku) { alert('請選擇商品'); return }
+    if (lines.some(l => l.sku.sku_id === sku.sku_id)) { alert('此商品已在明細中'); return }
+    setLines(prev => [...prev, { sku, copies: sku.prices?.[0]?.copies || '1', number: '1' }])
   }
 
   function updateLine(idx: number, patch: Partial<Pick<OrderLine, 'copies' | 'number'>>) {
@@ -158,6 +177,22 @@ export default function CardOrdersPage() {
     setExpandedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
   }
 
+  // F011 查訂單 → 卡號寫入卡片管理（manual_iccids）
+  const [syncingId, setSyncingId] = useState<string | null>(null)
+  async function syncIccids(rowId: string, orderId: string, channelOrderId: string) {
+    setSyncingId(rowId)
+    try {
+      const res = await fetch('/api/admin/cards/orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_iccids', order_id: orderId, channel_order_id: channelOrderId }),
+      })
+      const d = await res.json()
+      if (!res.ok) { alert(`同步失敗：${d.error || '未知錯誤'}`); return }
+      if (!d.iccids?.length) { alert(d.note || 'BC 尚未配卡，稍後再同步'); return }
+      alert(`同步完成：取得 ${d.iccids.length} 個卡號，新寫入卡片管理 ${d.inserted} 筆，狀態/效期已同步 ${d.status_synced ?? 0} 張`)
+    } finally { setSyncingId(null) }
+  }
+
   const inputCls = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm'
   const requiredMark = <span className="text-red-500 mr-0.5">*</span>
 
@@ -166,17 +201,42 @@ export default function CardOrdersPage() {
       <h1 className="text-2xl font-bold">卡片訂單</h1>
       <p className="mt-1 text-sm text-gray-500">手動下實體卡訂單（F002 商品 / F003 價格 / F005 物流 / F006 下單）</p>
 
+      {/* 分頁籤：下單 / 訂單明細 */}
+      <div className="mt-4 flex gap-1 border-b border-gray-200">
+        {([['create', '下單'], ['history', '訂單明細']] as const).map(([key, label]) => (
+          <button key={key}
+            onClick={() => { setTab(key); if (key === 'history') loadHistory() }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'create' && (<>
       {/* 商品 + 訂單金額 */}
       <div className="mt-6 bg-white border border-gray-200 rounded-lg p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="font-semibold text-sm">商品明細</h2>
-          <button onClick={() => setShowPicker(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">
-            <Plus className="w-3.5 h-3.5" /> 新增商品
-          </button>
+          <div className="flex items-center gap-2">
+            <select value={pickSku} onChange={e => setPickSku(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm min-w-64">
+              {cardOpts.length === 0 && <option value="">載入中…</option>}
+              {cardOpts.map(c => (
+                <option key={c.sku_id} value={c.sku_id}>
+                  {c.name}（{getProductTypeLabel(c.type || '')}）{c.prices?.[0]?.settlementPrice ? ` ¥${c.prices[0].settlementPrice}` : ''}
+                </option>
+              ))}
+            </select>
+            <button onClick={addPicked}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">
+              <Plus className="w-3.5 h-3.5" /> 加入
+            </button>
+          </div>
         </div>
         {lines.length === 0 ? (
-          <p className="mt-4 text-sm text-gray-400 text-center py-6">尚未加入商品，點「新增商品」從 BC 商品挑選</p>
+          <p className="mt-4 text-sm text-gray-400 text-center py-6">尚未加入商品，從上方選擇實體卡商品後按「加入」</p>
         ) : (
           <>
             <table className="mt-3 w-full text-xs">
@@ -320,8 +380,10 @@ export default function CardOrdersPage() {
           )}
         </div>
       </div>
+      </>)}
 
-      {/* 歷史 F006 */}
+      {tab === 'history' && (
+      /* 訂單明細（F006 歷史） */
       <div className="mt-4 bg-white border border-gray-200 rounded-lg p-4">
         <h2 className="font-semibold text-sm">近期下單紀錄（F006）</h2>
         {history.length === 0 ? (
@@ -344,6 +406,14 @@ export default function CardOrdersPage() {
                       {h.status === 'success' ? `成功 → ${resp?.tradeData?.orderId || ''}` : '失敗'}
                     </span>
                     {h.error_message && <span className="text-red-500 truncate">{h.error_message}</span>}
+                    {h.status === 'success' && (
+                      <button
+                        onClick={e => { e.stopPropagation(); syncIccids(h.id, resp?.tradeData?.orderId || '', req?.tradeData?.channelOrderId || '') }}
+                        disabled={syncingId === h.id}
+                        className="ml-auto px-2.5 py-1 bg-emerald-600 text-white text-[10px] rounded hover:bg-emerald-700 disabled:opacity-60 whitespace-nowrap">
+                        {syncingId === h.id ? '同步中…' : '同步卡號 (F011)'}
+                      </button>
+                    )}
                   </div>
                   {expanded && (
                     <div className="border-t border-gray-100 p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -361,19 +431,8 @@ export default function CardOrdersPage() {
           </div>
         )}
       </div>
-
-      {showPicker && (
-        <BcMatchModal
-          mode="add"
-          title="選擇 BC 商品（實體卡）"
-          subtitle="F002 商品清單；價格為 F003 結算價"
-          defaultKind="sim"
-          existingSkus={new Set(lines.map(l => l.sku.sku_id))}
-          onAdd={addSkus}
-          adding={addingSkus}
-          onClose={() => setShowPicker(false)}
-        />
       )}
+
     </div>
   )
 }

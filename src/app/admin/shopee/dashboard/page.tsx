@@ -66,6 +66,7 @@ interface DashboardData {
   unsettled: GroupData
   backfilled?: GroupData
   product_stats?: TreeItem[]
+  aftersale?: { count: number; card_count: number; refund_cny: number; refund_twd: number }
 }
 
 function StatCards({ title, subtitle, cards }: { title: string; subtitle?: string; cards: { label: string; value: string; sub: string; icon: typeof ShoppingCart; color: string }[] }) {
@@ -211,6 +212,15 @@ export default function ShopeeDashboardPage() {
       ) : data ? (
         <div className="mt-6 space-y-8">
           <div>
+            {data?.aftersale && data.aftersale.count > 0 && (
+              <div className="mb-6 flex items-center gap-4 bg-rose-50 border border-rose-200 rounded-xl px-5 py-3 text-sm">
+                <span className="font-semibold text-rose-700">本期售後</span>
+                <span className="text-rose-700">{data.aftersale.count} 筆售後單</span>
+                <span className="text-rose-700">退卡 {data.aftersale.card_count.toLocaleString()} 張</span>
+                <span className="text-rose-700 font-semibold">退回成本 NT$ {data.aftersale.refund_twd.toLocaleString()}（¥{data.aftersale.refund_cny.toLocaleString()}）</span>
+                <span className="text-xs text-rose-400">依售後日期統計</span>
+              </div>
+            )}
             <StatCards title="已結算" subtitle="已匯入金流 Excel 的訂單" cards={settledCards} />
             {(data.settled.orders?.length ?? 0) > 0 && (
               <div className="mt-3">

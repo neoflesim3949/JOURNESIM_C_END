@@ -25,7 +25,7 @@ export interface BcResult {
 
 // ── BC 商品對應彈窗（蝦皮訂單明細 / 商品對應V2 / 套餐管理 共用）──────
 // mode='match'：單選對應（onMatch）；mode='add'：勾選多個批量加入（onAdd）
-export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title, existingSkus, onAdd, adding, defaultKind = '' }: {
+export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title, existingSkus, onAdd, adding, defaultKind = '', requirePrice = true, autoSearch = false }: {
   subtitle?: string
   onMatch?: (skuId: string, copies: string) => void
   onClose: () => void
@@ -35,6 +35,8 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
   onAdd?: (skuIds: string[]) => void
   adding?: boolean
   defaultKind?: '' | 'sim' | 'esim'
+  requirePrice?: boolean   // false = 無 F003 價格的商品也顯示（實體卡/白卡常無價格）
+  autoSearch?: boolean     // true = 開窗即以預設條件自動查詢
 }) {
   const isAdd = mode === 'add'
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -95,6 +97,9 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
       setSpeedOpts(d.speeds || [])
       setOperatorOpts(d.operators || [])
     })
+    // 開窗自動查詢（實體卡等無國家可篩的情境）
+    if (autoSearch) doSearch()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function doSearch() {
@@ -239,7 +244,7 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
           <div className="flex items-center gap-3">
             <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && doSearch()}
               placeholder="搜索套餐名稱或 SKU ID" className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-            <span className="text-xs text-gray-400 whitespace-nowrap">符合：{results.filter(r => r.copies_options.length > 0).length} 個</span>
+            <span className="text-xs text-gray-400 whitespace-nowrap">符合：{results.filter(r => !requirePrice || r.copies_options.length > 0).length} 個</span>
             <button onClick={doSearch} disabled={searching}
               className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {searching ? '搜尋中...' : '查 詢'}
@@ -272,8 +277,8 @@ export function BcMatchModal({ subtitle, onMatch, onClose, mode = 'match', title
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {(() => {
-                  // 0 規格（無價格規格）= 沒有可賣商品，不顯示
-                  let sorted = results.filter(r => r.copies_options.length > 0)
+                  // 0 規格（無價格規格）= 沒有可賣商品，預設不顯示；requirePrice=false 時照列（實體卡）
+                  let sorted = results.filter(r => !requirePrice || r.copies_options.length > 0)
                   if (sortFlow) {
                     sorted = [...sorted].sort((a, b) => sortFlow === 'asc' ? (a.capacity_kb ?? 0) - (b.capacity_kb ?? 0) : (b.capacity_kb ?? 0) - (a.capacity_kb ?? 0))
                   } else if (sortSpeed) {

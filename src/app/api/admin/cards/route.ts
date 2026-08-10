@@ -38,13 +38,16 @@ export async function POST(request: Request) {
       : undefined
 
     // 撈出要同步的 ICCID 清單
+    // 全量同步時只挑：已開卡(0)/使用中(1)/尚未同步過(null) — 失效/已用盡/報廢等終態不會再變，略過省 F010 額度
     const allIds: string[] = []
     if (filterIccids) {
       allIds.push(...filterIccids)
     } else {
       let off = 0
       while (true) {
-        const { data } = await supabase.from('manual_iccids').select('iccid').range(off, off + 999)
+        const { data } = await supabase.from('manual_iccids').select('iccid')
+          .or('card_status.in.(0,1),card_status.is.null')
+          .range(off, off + 999)
         if (!data || data.length === 0) break
         allIds.push(...data.map(r => r.iccid))
         if (data.length < 1000) break

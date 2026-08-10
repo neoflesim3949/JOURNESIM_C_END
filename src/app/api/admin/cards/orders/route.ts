@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getLogisticsCompanies, createSimOrder } from '@/lib/billionconnect'
+import { getLogisticsCompanies, createSimOrder, getOrderInfo } from '@/lib/billionconnect'
+import { refreshCardExpiry } from '@/lib/card-expiry-sync'
+
+// 同步卡號會對每張卡打 F010（500 張 = 10 批），給足執行時間
+export const maxDuration = 300
 
 // 卡片訂單（後台手動下實體卡）
 // GET  ?action=logistics          → F005 物流公司清單
@@ -21,6 +25,28 @@ export async function GET(request: Request) {
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 })
     }
+  }
+
+  if (action === 'shipinfo') {
+    // 常用收貨資訊（存 system_settings，全後台共用）
+    const supabase = createAdminClient()
+    const { data } = await supabase.from('system_settings')
+      .select('value').eq('key', 'card_order_ship_info').maybeSingle()
+    let info: Record<string, string> = {}
+    try { info = JSON.parse(data?.value || '{}') } catch { /* 壞資料回空 */ }
+    return NextResponse.json({ info })
+  }
+
+  if (action === 'cards') {
+    // 實體卡商品：卡類型（單次/多次/硬卡/卡+套餐組合），上架中
+    const CARD_TYPES = ['210', '211', '212', '311', '3101', '3102', '3103', '3104']
+    const supabase = createAdminClient()
+    const { data } = await supabase.from('bc_products')
+      .select('sku_id, name, type, days, prices, cost_price')
+      .in('type', CARD_TYPES)
+      .or('is_active.is.null,is_active.eq.true')
+      .order('name')
+    return NextResponse.json({ items: data || [] })
   }
 
   if (action === 'skus') {
@@ -45,6 +71,21 @@ export async function GET(request: Request) {
   return NextResponse.json({ error: '未知 action' }, { status: 400 })
 }
 
+// PUT — 儲存常用收貨資訊
+export async function PUT(request: Request) {
+  if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const body = await request.json().catch(() => ({}))
+  const info = (body.info || {}) as Record<string, string>
+  const supabase = createAdminClient()
+  const { error } = await supabase.from('system_settings').upsert({
+    key: 'card_order_ship_info',
+    value: JSON.stringify(info),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'key' })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}
+
 interface SubOrderInput {
   device_sku_id: string
   plan_sku_id?: string
@@ -55,6 +96,39 @@ interface SubOrderInput {
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await request.json().catch(() => ({}))
+
+  // ─── 同步卡號：F011 查訂單 → ICCID 寫入 manual_iccids（卡片管理）───
+  if (body.action === 'sync_iccids') {
+    const orderId = String(body.order_id || '').trim()
+    const channelOrderId = String(body.channel_order_id || '').trim()
+    if (!orderId && !channelOrderId) return NextResponse.json({ error: '缺少訂單號' }, { status: 400 })
+    try {
+      // BC F011 用 orderId 查會回 1016 Multiple main orders exist（BC 端行為），一律優先用渠道單號查
+      const info = await getOrderInfo(channelOrderId ? { channelOrderId } : { orderId })
+      const iccids: string[] = []
+      for (const sub of info?.subOrderList || []) {
+        const arr = Array.isArray(sub.iccid) ? sub.iccid : (sub.iccid ? [sub.iccid] : [])
+        for (const ic of arr) if (ic) iccids.push(String(ic))
+      }
+      if (iccids.length === 0) {
+        return NextResponse.json({ ok: true, iccids: [], inserted: 0, note: 'BC 尚未配卡（出貨後才有卡號），稍後再同步' })
+      }
+      const supabase = createAdminClient()
+      const rows = iccids.map(ic => ({ iccid: ic, type: 'sim', note: `卡片訂單 ${channelOrderId || info?.channelOrderId || orderId}` }))
+      const { error, count } = await supabase.from('manual_iccids')
+        .upsert(rows, { onConflict: 'iccid', ignoreDuplicates: true, count: 'exact' })
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      // 順便同步狀態＋效期（F010，每批 50 張）
+      let statusSynced = 0
+      for (let i = 0; i < iccids.length; i += 50) {
+        statusSynced += await refreshCardExpiry(supabase, iccids.slice(i, i + 50))
+      }
+      return NextResponse.json({ ok: true, iccids, inserted: count ?? 0, status_synced: statusSynced })
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 })
+    }
+  }
+
   const subOrders = (body.sub_orders || []) as SubOrderInput[]
   if (!Array.isArray(subOrders) || subOrders.length === 0) {
     return NextResponse.json({ error: '請至少加入一項商品' }, { status: 400 })

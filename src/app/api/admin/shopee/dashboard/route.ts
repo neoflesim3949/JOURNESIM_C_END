@@ -266,7 +266,28 @@ export async function GET(request: Request) {
   const bfPlatformRate = bfRevenue > 0 ? (bfPlatformFees / bfRevenue) * 100 : 0
   const bfProfitRate = bfRevenue > 0 ? (bfProfit / bfRevenue) * 100 : 0
 
+  // ─── 售後統計（售後日期 created_at 在範圍內；bc_aftersales 未建表時回零）───
+  let asCount = 0, asCards = 0, asCny = 0, asTwd = 0
+  try {
+    let aq = supabase.from('bc_aftersales').select('card_count, refund_cny, refund_twd')
+    if (from) aq = aq.gte('created_at', from)
+    if (to) aq = aq.lte('created_at', to + 'T23:59:59')
+    const { data: asData } = await aq.limit(10000)
+    for (const r of asData || []) {
+      asCount++
+      asCards += r.card_count || 0
+      asCny += Number(r.refund_cny) || 0
+      asTwd += Number(r.refund_twd) || 0
+    }
+  } catch { /* 表不存在時忽略 */ }
+
   return NextResponse.json({
+    aftersale: {
+      count: asCount,
+      card_count: asCards,
+      refund_cny: Math.round(asCny * 100) / 100,
+      refund_twd: Math.round(asTwd),
+    },
     settled: {
       order_count: settledOrderIds.length,
       card_count: settledCardCount,

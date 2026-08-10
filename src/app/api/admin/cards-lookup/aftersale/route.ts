@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createAfterSale, getOrderInfo } from '@/lib/billionconnect'
+import { recordBcAftersale } from '@/lib/aftersale-record'
 
 // POST — 直接以 ICCID + (orderId 或 channelOrderId) 申請售後（F017）
 // body: { iccid, channelSubOrderId, channelOrderId?, orderId?, reason }
@@ -46,6 +48,11 @@ export async function POST(request: Request) {
       unSubscribeFlow: '1',
       returnCardOrNot: '0',
       receivingState: '1',
+    })
+    // 生成售後訂單（含退回成本推算）
+    await recordBcAftersale(createAdminClient(), {
+      afterSaleId: result.afterSaleId, channelOrderId, channelSubOrderId,
+      iccids: [iccid], reason, source: 'cards_lookup',
     })
     return NextResponse.json({ ok: true, afterSaleId: result.afterSaleId })
   } catch (err) {

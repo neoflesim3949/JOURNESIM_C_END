@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { createAfterSale, getOrderInfo } from '@/lib/billionconnect'
+import { recordBcAftersale } from '@/lib/aftersale-record'
 
 // POST — 批次售後：依 channelOrderId 分組，每組打一次 F017
 // body: {
@@ -71,6 +73,11 @@ export async function POST(request: Request) {
         receivingState: '1',
       })
       results.push({ channelOrderId, iccids: g.iccids, ok: true, afterSaleId: r.afterSaleId })
+      // 生成售後訂單（含退回成本推算），不影響主流程
+      await recordBcAftersale(createAdminClient(), {
+        afterSaleId: r.afterSaleId, channelOrderId, channelSubOrderId,
+        iccids: g.iccids, reason, source: String(body.source || 'cards_lookup'),
+      })
     } catch (err) {
       results.push({ channelOrderId, iccids: g.iccids, ok: false, error: err instanceof Error ? err.message : String(err) })
     }
