@@ -25,6 +25,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     after_sale_id: r.after_sale_id,
     refund_cny: r.refund_cny != null ? Number(r.refund_cny) : null,
     refund_twd: r.refund_twd != null ? Number(r.refund_twd) : null,
+    status: r.status,
     ok: r.status !== 'failed',
     error: null,
   }))

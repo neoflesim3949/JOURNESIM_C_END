@@ -165,7 +165,7 @@ export default function ShopeeOrderDetailPage() {
   }
 
   // 售後紀錄（F017 呼叫紀錄，依渠道單號比對）
-  interface AfterSaleRecord { id: string; created_at: string; channel_order_id: string; channel_sub_order_id: string | null; reason: string; iccids: string[]; card_count: number; after_sale_id: string | null; refund_cny: number | null; refund_twd: number | null; ok: boolean; error: string | null }
+  interface AfterSaleRecord { id: string; created_at: string; channel_order_id: string; channel_sub_order_id: string | null; reason: string; iccids: string[]; card_count: number; after_sale_id: string | null; refund_cny: number | null; refund_twd: number | null; status: string; ok: boolean; error: string | null }
   const [aftersales, setAftersales] = useState<AfterSaleRecord[]>([])
   // 手動加入品項
   const [addingItem, setAddingItem] = useState(false)
@@ -639,14 +639,20 @@ export default function ShopeeOrderDetailPage() {
         const platformFees = amsFee + txFee + otherFee + processingFee
         const platformRate = originalPrice > 0 ? ((platformFees / originalPrice) * 100) : 0
         const totalCost = items.reduce((sum, i) => sum + ((i.cost_twd ?? 0) * i.quantity), 0)
-        // 預計入帳 = 原價 - 優惠券 - 平台費用
-        const expectedAmount = originalPrice - sellerCoupon - platformFees
+        // 售後退回成本（bc_aftersales）：退卡後 BC 退回的成本，抵減商品成本（已取消/已重新下單的不計）
+        const aftersaleRefund = aftersales.filter(a => a.status !== 'cancelled' && a.status !== 'reordered').reduce((sum, a) => sum + (a.refund_twd ?? 0), 0)
+        const netCost = totalCost - aftersaleRefund
+        // 預計入帳 = 原價 - 優惠券 - 平台費用 - 退款 - 退貨運費 + 損失賠償（金流單上已知的扣/補款都納入）
+        const refundAmt = Math.abs(s?.refund_amount ?? 0)
+        const returnShipFee = Math.abs(s?.return_shipping_fee ?? 0)
+        const damageComp = s?.damage_compensation ?? 0
+        const expectedAmount = originalPrice - sellerCoupon - platformFees - refundAmt - returnShipFee + damageComp
         // 實際或預計入帳金額
         const displayAmount = walletAmount ?? (totalCost > 0 ? expectedAmount : null)
         const isEstimated = walletAmount === null && displayAmount !== null
         // 毛利率
         const grossMargin = originalPrice > 0 && displayAmount !== null ? ((displayAmount / originalPrice) * 100) : null
-        const netProfit = displayAmount !== null ? displayAmount - totalCost : null
+        const netProfit = displayAmount !== null ? displayAmount - netCost : null
         const netRate = originalPrice > 0 && netProfit !== null ? ((netProfit / originalPrice) * 100) : null
         // 金流異常
         const hasDiscrepancy = walletAmount !== null && Math.abs(expectedAmount - walletAmount) > 1
@@ -719,6 +725,12 @@ export default function ShopeeOrderDetailPage() {
                 </div>
                 <div className="border-t border-gray-200 my-2" />
                 <div className="flex justify-between"><span className="text-gray-500">商品成本：</span><span className={totalCost > 0 ? 'text-gray-700' : 'text-gray-400'}>{totalCost > 0 ? `NT$ ${totalCost}` : '-'}</span></div>
+                {aftersaleRefund > 0 && (
+                  <>
+                    <div className="flex justify-between"><span className="text-gray-500">售後退回成本：</span><span className="text-green-600">+NT$ {Math.round(aftersaleRefund)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">淨成本：</span><span className={netCost > 0 ? 'text-gray-700' : 'text-gray-400'}>NT$ {Math.round(netCost)}</span></div>
+                  </>
+                )}
                 <div className="flex justify-between font-semibold">
                   <span>{isEstimated ? '預計淨利：' : '淨利：'}</span>
                   <span className={netProfit !== null ? (netProfit >= 0 ? (isEstimated ? 'text-blue-600' : 'text-green-600') : 'text-red-500') : 'text-gray-400'}>
@@ -733,7 +745,7 @@ export default function ShopeeOrderDetailPage() {
                 </div>
                 {hasDiscrepancy && (
                   <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600">
-                    ⚠ 金流異常：商品原價(NT${originalPrice}) - 優惠券(NT${sellerCoupon}) - 平台費用(NT${platformFees.toFixed(0)}) = NT${expectedAmount.toFixed(0)}，與入帳金額(NT${walletAmount}) 差額 NT${Math.abs(expectedAmount - (walletAmount ?? 0)).toFixed(0)}
+                    ⚠ 金流異常：原價(NT${originalPrice}) - 優惠券(NT${sellerCoupon}) - 平台費用(NT${platformFees.toFixed(0)}){refundAmt > 0 ? ` - 退款(NT$${refundAmt})` : ''}{returnShipFee > 0 ? ` - 退貨運費(NT$${returnShipFee})` : ''}{damageComp !== 0 ? ` + 賠償(NT$${damageComp})` : ''} = NT${expectedAmount.toFixed(0)}，與入帳金額(NT${walletAmount}) 差額 NT${Math.abs(expectedAmount - (walletAmount ?? 0)).toFixed(0)}
                   </div>
                 )}
               </div>
@@ -988,6 +1000,7 @@ export default function ShopeeOrderDetailPage() {
                 <th className="px-2 py-2 text-left border-b">原因</th>
                 <th className="px-2 py-2 text-right border-b">退回成本</th>
                 <th className="px-2 py-2 text-left border-b">狀態</th>
+                <th className="px-2 py-2 border-b"></th>
               </tr>
             </thead>
             <tbody>
@@ -1007,9 +1020,34 @@ export default function ShopeeOrderDetailPage() {
                     {a.refund_twd != null && <div className="text-gray-400">NT$ {Math.round(a.refund_twd)}</div>}
                   </td>
                   <td className="px-2 py-2">
-                    {a.ok
-                      ? <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px]">已送出</span>
-                      : <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px]" title={a.error || ''}>失敗</span>}
+                    {a.status === 'cancelled'
+                      ? <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-[10px]">已取消</span>
+                      : a.status === 'reordered'
+                        ? <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px]">已重新下單</span>
+                        : a.ok
+                          ? <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px]">已送出</span>
+                          : <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px]" title={a.error || ''}>失敗</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    {a.status !== 'cancelled' && a.status !== 'reordered' && a.after_sale_id && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`確定取消售後單 ${a.after_sale_id}？\n未審核 → F018 取消，套餐直接恢復；\n已審核成功 → 自動以 F007 充值原套餐回同一批卡（重新下單）。`)) return
+                          const res = await fetch('/api/admin/shopee/aftersales', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'cancel', id: a.id }),
+                          })
+                          const d = await res.json()
+                          if (!res.ok) { alert(d.error || '取消失敗'); return }
+                          alert(d.mode === 'reordered'
+                            ? `售後已審核無法取消，已自動重新下單\nBC 訂單號：${d.order_id}（渠道單 ${d.channel_order_id}）`
+                            : '已取消售後，套餐恢復')
+                          loadAftersales()
+                        }}
+                        className="px-2 py-1 text-[10px] border border-red-300 text-red-500 rounded hover:bg-red-50 whitespace-nowrap">
+                        取消售後
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

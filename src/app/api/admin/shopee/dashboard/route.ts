@@ -76,6 +76,20 @@ export async function GET(request: Request) {
   const settledOrderIds = [...settledOrderIdSet]
   const unsettledOrderIds = inRangeOrderIds.filter(id => !settledOrderIdSet.has(id))
 
+  // ─── 售後退回成本（bc_aftersales）：依訂單歸屬抵減該單商品成本（不限售後日期）───
+  const refundByOrder = new Map<string, number>()
+  try {
+    for (let i = 0; i < inRangeOrderIds.length; i += 500) {
+      const batch = inRangeOrderIds.slice(i, i + 500)
+      const { data } = await supabase.from('bc_aftersales').select('shopee_order_id, refund_twd')
+        .or('status.is.null,status.not.in.(cancelled,reordered)').in('shopee_order_id', batch)
+      for (const r of data || []) {
+        if (!r.shopee_order_id) continue
+        refundByOrder.set(r.shopee_order_id, (refundByOrder.get(r.shopee_order_id) || 0) + (Number(r.refund_twd) || 0))
+      }
+    }
+  } catch { /* 表未建時忽略 */ }
+
   // 帳號 id → 名稱（已/未結算明細共用）
   const { data: accRows } = await supabase.from('shopee_accounts').select('id, name')
   const accMap = new Map((accRows || []).map(a => [a.id, a.name]))
@@ -159,6 +173,14 @@ export async function GET(request: Request) {
         itemsTotalByOrder.set(it.shopee_order_id, (itemsTotalByOrder.get(it.shopee_order_id) || 0) + itRev)
       }
     }
+    // 售後退回成本抵減（已結算組）
+    for (const oid of settledOrderIds) {
+      const rf = refundByOrder.get(oid) || 0
+      if (rf > 0) {
+        settledCost -= rf
+        costByOrder.set(oid, (costByOrder.get(oid) || 0) - rf)
+      }
+    }
   }
 
   let settledPlatformFees = 0, settledWallet = 0
@@ -236,6 +258,8 @@ export async function GET(request: Request) {
             oCards += it.quantity ?? 0
           }
         }
+        // 售後退回成本抵減（未結算組）
+        oCost -= refundByOrder.get(o.id) || 0
         const oRev = itemsTotal > 0 ? itemsTotal : (o.product_total ?? 0)
         unsettledRevenue += oRev; unsettledCost += oCost; unsettledCardCount += oCards
         // 已回填：所有商品都已填卡號(iccid_filled/bc_ordered/completed)、但尚未全部送出BC
@@ -272,6 +296,7 @@ export async function GET(request: Request) {
   let asCount = 0, asCards = 0, asCny = 0, asTwd = 0
   try {
     let aq = supabase.from('bc_aftersales').select('card_count, refund_cny, refund_twd')
+      .or('status.is.null,status.not.in.(cancelled,reordered)')
     if (from) aq = aq.gte('created_at', from)
     if (to) aq = aq.lte('created_at', to + 'T23:59:59')
     const { data: asData } = await aq.limit(10000)

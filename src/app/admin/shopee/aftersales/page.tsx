@@ -111,6 +111,7 @@ export default function ShopeeAftersalesPage() {
                 <th className="px-3 py-2 text-left border-b">原因</th>
                 <th className="px-3 py-2 text-right border-b">退回成本</th>
                 <th className="px-3 py-2 text-left border-b">來源</th>
+                <th className="px-3 py-2 text-left border-b">狀態</th>
               </tr>
             </thead>
             <tbody>
@@ -135,6 +136,36 @@ export default function ShopeeAftersalesPage() {
                       {r.refund_twd != null && <div className="text-gray-400">NT$ {Math.round(Number(r.refund_twd))}</div>}
                     </td>
                     <td className="px-3 py-2">{SOURCE_LABEL[r.source || ''] || r.source || '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {r.status === 'cancelled' ? (
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-[10px]">已取消</span>
+                      ) : r.status === 'reordered' ? (
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-[10px]">已重新下單</span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px]">已送出</span>
+                          {r.after_sale_id && (
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`確定取消售後單 ${r.after_sale_id}？\n未審核 → F018 取消，套餐直接恢復；\n已審核成功 → 自動以 F007 充值原套餐回同一批卡（重新下單）。`)) return
+                                const res = await fetch('/api/admin/shopee/aftersales', {
+                                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'cancel', id: r.id }),
+                                })
+                                const d = await res.json()
+                                if (!res.ok) { alert(d.error || '取消失敗'); return }
+                                alert(d.mode === 'reordered'
+                                  ? `售後已審核無法取消，已自動重新下單\nBC 訂單號：${d.order_id}（渠道單 ${d.channel_order_id}）`
+                                  : '已取消售後，套餐恢復')
+                                load(page)
+                              }}
+                              className="px-2 py-1 text-[10px] border border-red-300 text-red-500 rounded hover:bg-red-50">
+                              取消售後
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 )
               })}

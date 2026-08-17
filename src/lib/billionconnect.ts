@@ -224,6 +224,13 @@ export async function createAfterSale(data: BCAfterSaleInput) {
 }
 
 // =====================================================
+// F018 — 取消售後申請（僅限未審核的售後單；取消後套餐恢復，無需重新下單）
+// =====================================================
+export async function cancelAfterSale(afterSaleId: string) {
+  return callBC<null>('F018', { afterSaleId })
+}
+
+// =====================================================
 // F020 — 查詢售後資訊
 // =====================================================
 export async function getAfterSaleInfo(afterSaleId: string) {
