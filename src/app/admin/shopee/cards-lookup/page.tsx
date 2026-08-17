@@ -476,7 +476,15 @@ export default function CardsLookupPage() {
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
             {loading ? '查詢中…' : '查詢'}
           </button>
-          {rows.length > 0 && <span className="text-xs text-gray-500">已查詢 {rows.length} 筆</span>}
+          {rows.length > 0 && (() => {
+            // 未使用 = 所有查詢結果中 planStatus=0 的套餐數（不受「只顯示未使用」開關影響）
+            let unused = 0
+            for (const r of rows) {
+              if (!r.plan.ok) continue
+              for (const o of r.plan.orders || []) for (const s of o.subOrderList || []) if ((s.planStatus || '') === '0') unused++
+            }
+            return <span className="text-xs text-gray-500">已查詢 {rows.length} 筆 · <span className="text-amber-600 font-medium">未使用 {unused} 筆</span></span>
+          })()}
           {error && <span className="text-xs text-red-600">{error}</span>}
           <label className="ml-auto flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer">
             <input type="checkbox" checked={onlyUnused} onChange={e => setOnlyUnused(e.target.checked)} />

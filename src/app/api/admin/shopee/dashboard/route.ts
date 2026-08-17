@@ -32,7 +32,8 @@ export async function GET(request: Request) {
 
   if (dateField === 'order_date') {
     // 用訂單日期撈所有訂單
-    let oq = supabase.from('shopee_orders').select('id').neq('order_status', '不成立')
+    // 排除不成立；order_status 為 NULL（如金流誤匯洗掉狀態的訂單）仍要納入，neq 會連 NULL 排除故用 or
+    let oq = supabase.from('shopee_orders').select('id').or('order_status.is.null,order_status.neq.不成立')
     if (accountId) oq = oq.eq('shopee_account_id', accountId)
     if (from) oq = oq.gte('order_date', from)
     if (to) oq = oq.lte('order_date', to + 'T23:59:59')
@@ -204,8 +205,9 @@ export async function GET(request: Request) {
     }
   }
   settledOrders.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-  // 利潤 = 商品總價 − 平台費用 − 商品成本
-  const settledProfit = settledRevenue - settledPlatformFees - settledCost
+  // 已結算利潤改用實收：入帳 − 商品成本。
+  // 「總價 − 平台費用」會漏掉退款/賣家優惠券/退貨運費等扣款（實測每月差 1.4k~9k），入帳是實拿金額不會漏
+  const settledProfit = settledWallet - settledCost
   const settledPlatformRate = settledRevenue > 0 ? (settledPlatformFees / settledRevenue) * 100 : 0
   const settledProfitRate = settledRevenue > 0 ? (settledProfit / settledRevenue) * 100 : 0
 
