@@ -60,6 +60,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
         { href: '/admin/params/referral', label: '聯盟行銷設定' },
         { href: '/admin/marketing/tiers', label: '會員等級管理' },
+        { href: '/admin/marketing/redirects', label: '轉址短網址' },
     ]
   },
   {
