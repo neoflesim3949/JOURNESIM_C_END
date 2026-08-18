@@ -12,12 +12,19 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
-        // 子網域整域轉址：rsp.flesim.com/* → rsp.billionconnect.com/*（路徑與 query 原樣帶過去）
-        // 需在 Vercel 專案加上 rsp.flesim.com 網域＋DNS CNAME 指到 Vercel 才會生效
+        // SM-DP+ 位址轉換：只轉 eSIM RSP 協定路徑（LPA 打的都是 /gsma/rsp2/es9plus/...）
+        // 規則有順序性：這條要放在下面的通用規則之前
+        source: '/gsma/:path*',
+        has: [{ type: 'host', value: 'rsp.flesim.com' }],
+        destination: 'https://rsp.billionconnect.com/gsma/:path*',
+        permanent: false,   // 302：之後要改目的地不會被瀏覽器永久快取
+      },
+      {
+        // 瀏覽器直接打 rsp.flesim.com（非 RSP 協定路徑）→ 導回官網，不露出 BC 網域
         source: '/:path*',
         has: [{ type: 'host', value: 'rsp.flesim.com' }],
-        destination: 'https://rsp.billionconnect.com/:path*',
-        permanent: false,   // 302：之後要改目的地不會被瀏覽器永久快取
+        destination: 'https://www.flesim.com',
+        permanent: false,
       },
     ]
   },
