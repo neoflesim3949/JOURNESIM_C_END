@@ -62,7 +62,7 @@ export async function GET(request: Request) {
     stats[d.subdomain] = { count: count || 0, last: last?.created_at || null }
   }
   const { data: recent } = await supabase.from('rsp_requests')
-    .select('subdomain, path, user_agent, target_host, created_at')
+    .select('subdomain, path, method, body, user_agent, target_host, iccid, created_at')
     .order('created_at', { ascending: false }).limit(50)
 
   return NextResponse.json({ domains: domains || [], stats, recent: recent || [] })

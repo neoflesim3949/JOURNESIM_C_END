@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Plus, Trash2, Loader2, ShieldCheck, RefreshCw } from 'lucide-react'
 
 interface RspDomain {
@@ -11,7 +11,21 @@ interface RspDomain {
   note: string | null
   created_at: string
 }
-interface RspRequest { subdomain: string; path: string; user_agent: string | null; target_host: string | null; created_at: string }
+interface RspRequest { subdomain: string; path: string; method: string | null; body: string | null; user_agent: string | null; target_host: string | null; iccid: string | null; created_at: string }
+
+// ES9+ 動作中文對照（路徑最後一段）
+const RSP_ACTION_LABEL: Record<string, string> = {
+  initiateAuthentication: '① 發起認證',
+  authenticateClient: '② 驗證手機',
+  getBoundProfilePackage: '③ 下載 Profile',
+  handleNotification: '④ 安裝結果回報',
+  cancelSession: '取消流程',
+  __check: '後台檢測',
+}
+function rspAction(path: string): string {
+  const seg = path.split('?')[0].split('/').filter(Boolean).pop() || ''
+  return RSP_ACTION_LABEL[seg] || seg || '—'
+}
 interface CheckResult { host: string; cname: { ok: boolean; value: string }; redirect: { ok: boolean; location: string; error?: string }; ok: boolean }
 
 export default function RspAdminPage() {
@@ -27,6 +41,8 @@ export default function RspAdminPage() {
   // 檢測
   const [checking, setChecking] = useState<string | null>(null)
   const [checkResults, setCheckResults] = useState<Record<string, CheckResult>>({})
+  // 請求展開（看 body）
+  const [expandedReq, setExpandedReq] = useState<Set<number>>(new Set())
 
   async function load() {
     setLoading(true)
@@ -203,22 +219,42 @@ export default function RspAdminPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-2 py-1.5 text-left border-b">時間</th>
+                <th className="px-2 py-1.5 text-left border-b">動作</th>
                 <th className="px-2 py-1.5 text-left border-b">子網域</th>
                 <th className="px-2 py-1.5 text-left border-b">路徑</th>
+                <th className="px-2 py-1.5 text-left border-b">ICCID（安裝回報）</th>
                 <th className="px-2 py-1.5 text-left border-b">轉往</th>
                 <th className="px-2 py-1.5 text-left border-b">UA</th>
               </tr>
             </thead>
             <tbody>
-              {recent.map((r, i) => (
-                <tr key={i} className="border-b">
-                  <td className="px-2 py-1.5 whitespace-nowrap">{new Date(r.created_at).toLocaleString('zh-TW')}</td>
-                  <td className="px-2 py-1.5 font-mono">{r.subdomain}</td>
-                  <td className="px-2 py-1.5 font-mono max-w-xs truncate" title={r.path}>{r.path}</td>
-                  <td className="px-2 py-1.5 font-mono">{r.target_host || '—'}</td>
-                  <td className="px-2 py-1.5 text-gray-500 max-w-[200px] truncate" title={r.user_agent || ''}>{r.user_agent || '—'}</td>
-                </tr>
-              ))}
+              {recent.map((r, i) => {
+                const expanded = expandedReq.has(i)
+                return (
+                  <Fragment key={i}>
+                    <tr className="border-b cursor-pointer hover:bg-gray-50"
+                      onClick={() => setExpandedReq(prev => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s })}>
+                      <td className="px-2 py-1.5 whitespace-nowrap">{new Date(r.created_at).toLocaleString('zh-TW')}</td>
+                      <td className="px-2 py-1.5 whitespace-nowrap font-medium">{rspAction(r.path)}</td>
+                      <td className="px-2 py-1.5 font-mono">{r.subdomain}</td>
+                      <td className="px-2 py-1.5 font-mono max-w-xs truncate" title={r.path}>{r.method ? `${r.method} ` : ''}{r.path}</td>
+                      <td className="px-2 py-1.5 font-mono">{r.iccid ? <span className="text-emerald-700 font-semibold">{r.iccid}</span> : '—'}</td>
+                      <td className="px-2 py-1.5 font-mono">{r.target_host || '—'}</td>
+                      <td className="px-2 py-1.5 text-gray-500 max-w-[200px] truncate" title={r.user_agent || ''}>{r.user_agent || '—'}</td>
+                    </tr>
+                    {expanded && (
+                      <tr className="border-b bg-gray-50">
+                        <td colSpan={7} className="px-3 py-2">
+                          <div className="text-[10px] text-gray-500 mb-1">Request Body{r.body && r.body.length >= 8000 ? '（已截斷至 8000 字元）' : ''}</div>
+                          <pre className="text-[10px] bg-white border border-gray-200 rounded p-2 overflow-auto max-h-64 whitespace-pre-wrap break-all font-mono">
+                            {r.body ? (() => { try { return JSON.stringify(JSON.parse(r.body), null, 2) } catch { return r.body } })() : '（無 body：GET 請求或未記錄）'}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}
