@@ -10,22 +10,14 @@ const nextConfig: NextConfig = {
     ],
   },
   async redirects() {
+    // RSP 子網域（rsp / rsp1 / rsp2 ...）：
+    //  - /gsma/*（SM-DP+ 協定路徑）不在這裡處理 → 由 middleware 查 rsp_domains 表動態轉址
+    //    （next.config redirects 先於 middleware 執行，所以這裡必須排除 /gsma）
+    //  - 其他路徑（瀏覽器打開）→ 導回官網，不露出上游 RSP 網域
+    const RSP_HOST = { type: 'host' as const, value: '^rsp\\d*\\.flesim\\.com$' }
     return [
-      {
-        // SM-DP+ 位址轉換：只轉 eSIM RSP 協定路徑（LPA 打的都是 /gsma/rsp2/es9plus/...）
-        // 規則有順序性：這條要放在下面的通用規則之前
-        source: '/gsma/:path*',
-        has: [{ type: 'host', value: 'rsp.flesim.com' }],
-        destination: 'https://rsp.billionconnect.com/gsma/:path*',
-        permanent: false,   // 302：之後要改目的地不會被瀏覽器永久快取
-      },
-      {
-        // 瀏覽器直接打 rsp.flesim.com（非 RSP 協定路徑）→ 導回官網，不露出 BC 網域
-        source: '/:path*',
-        has: [{ type: 'host', value: 'rsp.flesim.com' }],
-        destination: 'https://www.flesim.com',
-        permanent: false,
-      },
+      { source: '/', has: [RSP_HOST], destination: 'https://www.flesim.com', permanent: false },
+      { source: '/:path((?!gsma).*)', has: [RSP_HOST], destination: 'https://www.flesim.com', permanent: false },
     ]
   },
   async headers() {

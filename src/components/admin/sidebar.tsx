@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, ShoppingCart, RefreshCw, LogOut,
-  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark, FileText, Plane
+  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark, FileText, Plane, Link2
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -60,7 +60,6 @@ const NAV_ITEMS: NavItem[] = [
     children: [
         { href: '/admin/params/referral', label: '聯盟行銷設定' },
         { href: '/admin/marketing/tiers', label: '會員等級管理' },
-        { href: '/admin/marketing/redirects', label: '轉址短網址' },
     ]
   },
   {
@@ -91,6 +90,13 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: '/admin/travel', label: '旅行社管理' },
       { href: '/travel', label: '旅行社後台（預覽）' },
+    ],
+  },
+  {
+    href: '/admin/urls', label: '網址管理', icon: Link2,
+    children: [
+      { href: '/admin/marketing/redirects', label: '短網址管理' },
+      { href: '/admin/params/rsp', label: 'RSP 管理' },
     ],
   },
   { href: '/admin/sync', label: 'BC 同步', icon: RefreshCw },
