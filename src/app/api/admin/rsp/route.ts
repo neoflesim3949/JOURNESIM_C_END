@@ -11,6 +11,74 @@ import { createAdminClient } from '@/lib/supabase/admin'
 const SUB_RE = /^rsp\d*$/
 const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i
 
+// ── ES9+ body 解碼對照：Base64 → DER，抽出可讀關鍵欄位（不是解密，是解編碼）──
+function bcdSwap(buf: Buffer): string {
+  let s = ''
+  for (const b of buf) s += (b & 0x0f).toString(16) + ((b >> 4) & 0x0f).toString(16)
+  return s.replace(/f+$/i, '')
+}
+function derIccid(buf: Buffer): string | null {
+  for (let i = 0; i + 12 <= buf.length; i++) {
+    if (buf[i] === 0x5a && buf[i + 1] === 0x0a) {
+      const v = bcdSwap(buf.subarray(i + 2, i + 12))
+      if (/^89\d{16,18}$/.test(v)) return v
+    }
+  }
+  return null
+}
+function derStrings(buf: Buffer, min = 5): string[] {
+  const out: string[] = []; let cur = ''
+  for (const b of buf) {
+    if (b >= 0x20 && b <= 0x7e) cur += String.fromCharCode(b)
+    else { if (cur.length >= min) out.push(cur); cur = '' }
+  }
+  if (cur.length >= min) out.push(cur)
+  return [...new Set(out)]
+}
+// 回傳 [{ label, value }]，供後台右欄對照顯示
+function decodeRspBody(path: string, body: string | null): { label: string; value: string }[] {
+  const action = path.split('?')[0].split('/').filter(Boolean).pop() || ''
+  const out: { label: string; value: string }[] = []
+  if (!body) {
+    if (action === '__check') out.push({ label: '說明', value: '後台檢測請求（非手機安裝）' })
+    return out
+  }
+  let json: Record<string, unknown>
+  try { json = JSON.parse(body) } catch { return out }
+
+  const b64ToBuf = (v: unknown): Buffer | null => {
+    if (typeof v !== 'string' || !/^[A-Za-z0-9+/=]{20,}$/.test(v) || v.length % 4 !== 0) return null
+    try { return Buffer.from(v, 'base64') } catch { return null }
+  }
+  // 各動作挑重點欄位
+  if (action === 'initiateAuthentication') {
+    if (typeof json.smdpAddress === 'string') out.push({ label: 'SM-DP+ 位址', value: json.smdpAddress })
+    if (b64ToBuf(json.euiccChallenge)) out.push({ label: '手機挑戰碼', value: '16 bytes 隨機（防重放）' })
+  } else if (action === 'authenticateClient') {
+    const buf = b64ToBuf(json.authenticateServerResponse)
+    if (buf) {
+      const strs = derStrings(buf)
+      const addr = strs.find(s => /flesim|billionconnect|rsp/i.test(s))
+      if (addr) out.push({ label: 'SM-DP+ 位址', value: addr })
+      const eum = strs.find(s => /Giesecke|Thales|Gemalto|IDEMIA|G\+D|Sm@rtSIM|EUM|SIM/i.test(s))
+      if (eum) out.push({ label: 'eUICC 廠商/型號', value: eum })
+      const prod = strs.find(s => /^[A-Z]{2}-[A-Z]{2}-/.test(s))
+      if (prod) out.push({ label: '產品識別碼', value: prod })
+    }
+  } else if (action === 'getBoundProfilePackage') {
+    out.push({ label: 'Profile 內容', value: '🔒 加密（僅手機晶片可解，中途不可見）' })
+  } else if (action === 'handleNotification') {
+    const buf = b64ToBuf(json.pendingNotification)
+    if (buf) {
+      const ic = derIccid(buf)
+      if (ic) out.push({ label: '安裝卡號 ICCID', value: ic })
+      const addr = derStrings(buf).find(s => /flesim|billionconnect|rsp/i.test(s))
+      if (addr) out.push({ label: '回報對象', value: addr })
+    }
+  }
+  return out
+}
+
 export async function GET(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(request.url)
@@ -65,7 +133,10 @@ export async function GET(request: Request) {
     .select('subdomain, path, method, body, user_agent, target_host, iccid, created_at')
     .order('created_at', { ascending: false }).limit(50)
 
-  return NextResponse.json({ domains: domains || [], stats, recent: recent || [] })
+  // 附上每筆的「可讀對照」（Base64/DER 解析出的關鍵欄位）
+  const withDecoded = (recent || []).map(r => ({ ...r, decoded: decodeRspBody(r.path, r.body) }))
+
+  return NextResponse.json({ domains: domains || [], stats, recent: withDecoded })
 }
 
 export async function POST(request: Request) {

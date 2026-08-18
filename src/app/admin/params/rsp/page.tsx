@@ -11,7 +11,7 @@ interface RspDomain {
   note: string | null
   created_at: string
 }
-interface RspRequest { subdomain: string; path: string; method: string | null; body: string | null; user_agent: string | null; target_host: string | null; iccid: string | null; created_at: string }
+interface RspRequest { subdomain: string; path: string; method: string | null; body: string | null; user_agent: string | null; target_host: string | null; iccid: string | null; created_at: string; decoded?: { label: string; value: string }[] }
 
 // ES9+ 動作中文對照（路徑最後一段）
 const RSP_ACTION_LABEL: Record<string, string> = {
@@ -223,6 +223,7 @@ export default function RspAdminPage() {
                 <th className="px-2 py-1.5 text-left border-b">子網域</th>
                 <th className="px-2 py-1.5 text-left border-b">路徑</th>
                 <th className="px-2 py-1.5 text-left border-b">ICCID（安裝回報）</th>
+                <th className="px-2 py-1.5 text-left border-b">解析對照</th>
                 <th className="px-2 py-1.5 text-left border-b">轉往</th>
                 <th className="px-2 py-1.5 text-left border-b">UA</th>
               </tr>
@@ -239,12 +240,24 @@ export default function RspAdminPage() {
                       <td className="px-2 py-1.5 font-mono">{r.subdomain}</td>
                       <td className="px-2 py-1.5 font-mono max-w-xs truncate" title={r.path}>{r.method ? `${r.method} ` : ''}{r.path}</td>
                       <td className="px-2 py-1.5 font-mono">{r.iccid ? <span className="text-emerald-700 font-semibold">{r.iccid}</span> : '—'}</td>
+                      <td className="px-2 py-1.5 max-w-[280px]">
+                        {r.decoded && r.decoded.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {r.decoded.map((d, k) => (
+                              <div key={k} className="flex gap-1">
+                                <span className="text-gray-400 whitespace-nowrap">{d.label}：</span>
+                                <span className="font-medium break-all">{d.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-2 py-1.5 font-mono">{r.target_host || '—'}</td>
                       <td className="px-2 py-1.5 text-gray-500 max-w-[200px] truncate" title={r.user_agent || ''}>{r.user_agent || '—'}</td>
                     </tr>
                     {expanded && (
                       <tr className="border-b bg-gray-50">
-                        <td colSpan={7} className="px-3 py-2">
+                        <td colSpan={8} className="px-3 py-2">
                           <div className="text-[10px] text-gray-500 mb-1">Request Body{r.body && r.body.length >= 8000 ? '（已截斷至 8000 字元）' : ''}</div>
                           <pre className="text-[10px] bg-white border border-gray-200 rounded p-2 overflow-auto max-h-64 whitespace-pre-wrap break-all font-mono">
                             {r.body ? (() => { try { return JSON.stringify(JSON.parse(r.body), null, 2) } catch { return r.body } })() : '（無 body：GET 請求或未記錄）'}

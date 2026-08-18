@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { rebrandEsim } from '@/lib/rsp-brand'
 
 // GET — 公開 eSIM 安裝資料（僅公開必要欄位，不包含訂單資訊）
 export async function GET(_request: Request, { params }: { params: Promise<{ iccid: string }> }) {
@@ -24,12 +25,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ icc
     // 多張卡：依此 ICCID 對應到該卡的 LPA/QR（不可回整筆的單一值）
     const cards = Array.isArray(shopeeItem.esim_cards) ? shopeeItem.esim_cards as { iccid?: string; lpa_code?: string; qr_code_url?: string }[] : []
     const card = cards.find(c => c.iccid === iccid)
-    return NextResponse.json({
+    return NextResponse.json(await rebrandEsim({
       iccid,
       qr_code_url: (card ? card.qr_code_url : shopeeItem.qr_code_url) || null,
       lpa_code: (card ? card.lpa_code : shopeeItem.lpa_code) || null,
+      sm_dp_address: null,
       source: 'shopee',
-    })
+    }))
   }
 
   // 再查 esim_profiles（C-END 一般訂單）
@@ -39,14 +41,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ icc
     .maybeSingle()
 
   if (profile) {
-    return NextResponse.json({
+    return NextResponse.json(await rebrandEsim({
       iccid,
       qr_code_url: profile.qr_code_url || null,
       lpa_code: profile.qr_code_data || null,
       activation_code: profile.activation_code || null,
       sm_dp_address: profile.sm_dp_address || null,
       source: 'cend',
-    })
+    }))
   }
 
   return NextResponse.json({ error: '找不到此 eSIM' }, { status: 404 })

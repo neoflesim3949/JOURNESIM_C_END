@@ -49,6 +49,28 @@ LPA:1$rsp.flesim.com$<activationCode>
 - **LPA 會跟隨 HTTP 302**：原以為 SM-DP+（SGP.22 ES9+）不吃 HTTP 轉址、必須 BC 掛我們的憑證；實測 iOS 安裝成功，證明 LPA 對 ES9+ 請求會跟隨 302 到 `rsp.billionconnect.com` 後繼續完成流程。
 - 用 **302 不用 301**：不被客戶端永久快取，之後要換 RSP 供應商或改目的地，改 `next.config.ts` 重新部署即可全量生效。
 
+### 為什麼分流前綴是 `/gsma/`（標準依據，非 BC 專屬設定）
+
+依據 **GSMA SGP.22 — Remote SIM Provisioning (RSP) Technical Specification**（eSIM 消費型裝置的國際標準），手機 LPA 與 SM-DP+ 伺服器之間的介面（**ES9+**）在 HTTP 綁定下，端點路徑**固定**為：
+
+```
+POST https://<SM-DP+位址>/gsma/rsp2/es9plus/<功能名>
+```
+
+功能名就是一次下載流程依序打的幾個端點：
+
+| 順序 | 功能名 | 動作 |
+|---|---|---|
+| ① | `initiateAuthentication` | 發起認證（手機報身分＋丟挑戰碼） |
+| ② | `authenticateClient` | 驗證手機（SM-DP+ 回簽章＋出示憑證鏈） |
+| ③ | `getBoundProfilePackage` | 下載 profile（加密本體，僅晶片可解） |
+| ④ | `handleNotification` | 安裝結果回報（帶本次安裝的 ICCID） |
+| — | `cancelSession` | 取消流程 |
+
+- **這是強制標準**：所有手機（iOS / Android 的 LPA）與所有 RSP 伺服器（含 BC）都必須照這個路徑實作，否則互不相通 → 用 `/gsma/` 當分流前綴是安全的（一定命中 eSIM 流量、不會誤中瀏覽器流量）。
+- `rsp2` 是規格大版本（SGP.22 v2）；未來若有 v3 端點會是 `/gsma/rsp3/...`。我們的規則寫 `/gsma/:path*` 整個前綴，**兩版都涵蓋**，不用因升版改規則。
+- 公開文件位置見文末〈參考〉。
+
 ### 維運（2026-08-18 起改為動態管理）
 
 - **RSP 管理頁**（參數管理 → RSP 管理）：`rsp` / `rsp1` / `rsp2`… 各子網域對應的目標 RSP 主機存在 `rsp_domains` 表（migration 079），後台即改即生效，不用重新部署。
@@ -89,3 +111,16 @@ GET /r/{slug}                              （src/app/r/[slug]/route.ts，公開
 | 匹配維度 | Host（整個子網域） | 路徑 slug（一條一條） |
 | 統計 | 無 | 點擊數＋明細 |
 | 適用 | SM-DP+ 位址、整域品牌化 | 行銷活動、QR、標籤 |
+
+---
+
+## 參考：GSMA SGP.22 標準文件（公開下載）
+
+`/gsma/rsp2/es9plus/...` 路徑與各功能名的依據，是 GSMA 免費公開的 eSIM 規格，任何人可下載：
+
+- **規格總覽頁（各版本入口）**：https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/
+- **最新穩定版 v2.6.1**：https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-22-technical-specification-v2-6-1/
+- **v2.4**：https://www.gsma.com/solutions-and-impact/technologies/esim/gsma_resources/sgp-22-technical-specification-v2-4/
+- **PDF 直連（v2.6）**：https://www.gsma.com/solutions-and-impact/technologies/esim/wp-content/uploads/2024/09/SGP.22-v2.6.pdf
+
+ES9+ 的 HTTP 綁定與端點路徑定義在規格的「ES9+ interface / Function binding」章節；ASN.1 資料結構（本文件用到的 ICCID、ProfileInstallationResult、AuthenticateServerResponse 等）定義在附錄的 ASN.1 module。
