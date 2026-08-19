@@ -148,68 +148,39 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1')
     const pageSize = parseInt(searchParams.get('pageSize') || '50')
 
-    interface CardRow {
-      iccid: string; type: 'esim' | 'sim'; note: string | null; status: string
-      card_type?: string | null; card_status?: string | null; expiration_date?: string | null
-      postponed_month?: string | null; max_delay_month?: string | null; usage_count?: string | null
-      bc_synced_at?: string | null
-      activation_start_time?: string | null; activation_end_time?: string | null
-    }
-    const allCards: CardRow[] = []
-
-    // 只從 manual_iccids 讀取 + 快取欄位；分批拉取避免 Supabase 預設 1000 筆上限
-    let mf = 0
-    while (true) {
-      const { data: batch } = await supabase.from('manual_iccids')
-        .select('iccid, type, note, card_type, card_status, expiration_date, postponed_month, max_delay_month, usage_count, bc_synced_at, activation_start_time, activation_end_time')
-        .range(mf, mf + 999)
-      if (!batch || batch.length === 0) break
-      for (const m of batch) {
-        allCards.push({
-          iccid: m.iccid,
-          type: (m.type === 'esim' ? 'esim' : 'sim') as 'esim' | 'sim',
-          note: m.note,
-          status: 'manual',
-          card_type: m.card_type,
-          card_status: m.card_status,
-          expiration_date: m.expiration_date,
-          postponed_month: m.postponed_month,
-          max_delay_month: m.max_delay_month,
-          usage_count: m.usage_count,
-          bc_synced_at: m.bc_synced_at,
-          activation_start_time: m.activation_start_time,
-          activation_end_time: m.activation_end_time,
-        })
-      }
-      if (batch.length < 1000) break
-      mf += 1000
-    }
-
-    // 篩選
+    // 篩選全部下推 SQL（篩選欄位都是 manual_iccids 現成欄位），只撈當頁
     const cardType = searchParams.get('card_type') || ''
     const cardStatus = searchParams.get('card_status') || ''
     const expireFrom = searchParams.get('expire_from') || ''
     const expireTo = searchParams.get('expire_to') || ''
 
-    let filtered = allCards
-    if (search) {
-      const q = search.toLowerCase()
-      filtered = filtered.filter((c) =>
-        c.iccid.toLowerCase().includes(q) ||
-        (c.note || '').toLowerCase().includes(q)
-      )
-    }
-    if (cardType) filtered = filtered.filter(c => (c.card_type || '') === cardType)
-    if (cardStatus) filtered = filtered.filter(c => (c.card_status || '') === cardStatus)
-    if (expireFrom) filtered = filtered.filter(c => (c.expiration_date || '') >= expireFrom)
-    if (expireTo) filtered = filtered.filter(c => (c.expiration_date || '') <= expireTo + ' 23:59:59')
+    let q = supabase.from('manual_iccids')
+      .select('iccid, type, note, card_type, card_status, expiration_date, postponed_month, max_delay_month, usage_count, bc_synced_at, activation_start_time, activation_end_time', { count: 'exact' })
+    if (search) q = q.or(`iccid.ilike.%${search}%,note.ilike.%${search}%`)
+    if (cardType) q = q.eq('card_type', cardType)
+    if (cardStatus) q = q.eq('card_status', cardStatus)
+    if (expireFrom) q = q.gte('expiration_date', expireFrom)
+    if (expireTo) q = q.lte('expiration_date', expireTo + ' 23:59:59')
+    q = q.order('created_at', { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1)
 
-    // 分頁
-    const total = filtered.length
-    const start = (page - 1) * pageSize
-    const paged = filtered.slice(start, start + pageSize)
+    const { data: batch, count } = await q
+    const paged = (batch || []).map(m => ({
+      iccid: m.iccid,
+      type: (m.type === 'esim' ? 'esim' : 'sim') as 'esim' | 'sim',
+      note: m.note,
+      status: 'manual',
+      card_type: m.card_type,
+      card_status: m.card_status,
+      expiration_date: m.expiration_date,
+      postponed_month: m.postponed_month,
+      max_delay_month: m.max_delay_month,
+      usage_count: m.usage_count,
+      bc_synced_at: m.bc_synced_at,
+      activation_start_time: m.activation_start_time,
+      activation_end_time: m.activation_end_time,
+    }))
 
-    return NextResponse.json({ data: paged, total })
+    return NextResponse.json({ data: paged, total: count || 0 })
   }
 
   // ─── expiry：F010 卡片有效期 ──────────────────────────────

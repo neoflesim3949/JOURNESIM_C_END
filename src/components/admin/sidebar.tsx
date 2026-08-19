@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, ShoppingCart, RefreshCw, LogOut,
-  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark, FileText, Plane, Link2
+  Users, Wifi, UserCog, Globe, ChevronDown, Image, CreditCard, Gift, Landmark, FileText, Plane, Link2, BarChart3
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -90,6 +90,13 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: '/admin/travel', label: '旅行社管理' },
       { href: '/travel', label: '旅行社後台（預覽）' },
+    ],
+  },
+  {
+    href: '/admin/stats', label: '統計專區', icon: BarChart3,
+    children: [
+      { href: '/admin/stats', label: '統計分析' },
+      { href: '/admin/stats/detail', label: '統計明細列表' },
     ],
   },
   {
