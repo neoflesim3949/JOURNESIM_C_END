@@ -7,13 +7,12 @@ import { syncCardPlanDetails } from '@/lib/card-plan-detail-sync'
 // 主體 card_plans（F012 同步）；補：卡狀態(manual_iccids)、成本/蝦皮訂單(shopee_order_items)、售後(bc_aftersales)、安裝(rsp_requests)
 export const maxDuration = 300
 
-// POST — 手動觸發方案同步（F012 → card_plans）。候選判斷用 card_plans 自己的資料（synced_at + card_status 快照），
-// 完全不看 manual_iccids 的 plan 欄位，與卡片管理互不干擾：
-//   規則1（首次一定撈）：card_plans 沒任何紀錄的卡（含無方案的庫存號段，會一直被視為待撈——可接受）
-//   規則2（兩者都終態才停）：撈過的卡，只有「快照卡狀態終態(2/3/4/5) AND 無活方案(0/1)」才跳過
-//   規則3（久未同步）：撈過的卡要隔 12 小時才再撈
-//   規則4：每次限量
-const TERMINAL_CARD = new Set(['2', '3', '4', '5'])
+// POST — 手動觸發方案同步（F012 → card_plans）。規則簡化（不需狀態表）：
+//   - 卡「失效/報廢」(card_status 3/5) → 停撈（不會有新方案，自然收斂）
+//   - 其餘（含無訂單卡，實測 F012 都撈得到方案）→ 撈；撈過就進 card_plans、自然離開待撈清單
+//   - 已撈過的非失效卡：隔 12 小時可再撈（可能有新方案/充值）
+//   - 優先「從沒撈過」的卡，讓「同步全部」逐批跑完；每次限量
+const DEAD_CARD = new Set(['3', '5'])   // 失效 / 報廢
 export async function POST(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await request.json().catch(() => ({}))
@@ -21,39 +20,32 @@ export async function POST(request: Request) {
   const supabase = createAdminClient()
   const staleMs = Date.now() - 12 * 3600 * 1000
 
-  // 從 card_plans 聚合每卡狀態（統計自己這份快照）：最新同步時間、是否有活方案、卡狀態快照
-  const state = new Map<string, { syncedMs: number; planActive: boolean; cardStatus: string | null }>()
+  // 已嘗試過的卡 → 最後同步時間（獨立狀態表；含 subs=0 的已開卡，避免重複撈）
+  const syncedMsByIccid = new Map<string, number>()
   for (let from = 0; ; from += 1000) {
-    const { data } = await supabase.from('card_plans').select('iccid, plan_status, card_status, synced_at').range(from, from + 999)
+    const { data } = await supabase.from('card_plan_sync_state').select('iccid, synced_at').range(from, from + 999)
     if (!data || data.length === 0) break
-    for (const p of data) {
-      const cur = state.get(p.iccid) || { syncedMs: 0, planActive: false, cardStatus: null }
-      const ms = p.synced_at ? new Date(p.synced_at).getTime() : 0
-      if (ms >= cur.syncedMs) { cur.syncedMs = ms; cur.cardStatus = p.card_status }  // 取最新一筆的卡狀態快照
-      if (p.plan_status === '0' || p.plan_status === '1') cur.planActive = true
-      state.set(p.iccid, cur)
-    }
+    for (const s of data) syncedMsByIccid.set(s.iccid, s.synced_at ? new Date(s.synced_at).getTime() : 0)
     if (data.length < 1000) break
   }
 
-  // 掃 manual_iccids 母體挑候選：優先「從沒撈過」，再「久未同步且未兩者終態」
+  // 掃 manual_iccids（帶 card_status 當失效閘）：優先從沒撈過，再久未同步
   const firstPull: string[] = []
   const restale: string[] = []
   for (let from = 0; ; from += 1000) {
-    const { data } = await supabase.from('manual_iccids').select('iccid').range(from, from + 999)
+    const { data } = await supabase.from('manual_iccids').select('iccid, card_status').range(from, from + 999)
     if (!data || data.length === 0) break
     for (const m of data) {
-      const st = state.get(m.iccid)
-      if (!st) { if (firstPull.length < limit) firstPull.push(m.iccid); continue }
-      if (st.syncedMs >= staleMs) continue                                    // 12h 內不重撈
-      const bothTerminal = TERMINAL_CARD.has(st.cardStatus || '') && !st.planActive
-      if (!bothTerminal) restale.push(m.iccid)
+      if (DEAD_CARD.has(m.card_status || '')) continue          // 失效/報廢 → 停撈
+      const ms = syncedMsByIccid.get(m.iccid)
+      if (ms === undefined) { if (firstPull.length < limit) firstPull.push(m.iccid); continue }
+      if (ms < staleMs) restale.push(m.iccid)                    // 12h 外可再撈（可能有新方案）
     }
     if (data.length < 1000) break
     if (firstPull.length >= limit) break
   }
   const iccids = [...firstPull, ...restale].slice(0, limit)
-  if (iccids.length === 0) return NextResponse.json({ ok: true, picked: 0, cards: 0, plans: 0, note: '目前沒有待同步的卡' })
+  if (iccids.length === 0) return NextResponse.json({ ok: true, picked: 0, cards: 0, plans: 0, usage: 0, note: '目前沒有待同步的卡（都撈過或已失效）' })
   const res = await syncCardPlanDetails(supabase, iccids)
   return NextResponse.json({ ok: true, picked: iccids.length, ...res })
 }
@@ -100,11 +92,13 @@ async function loadOrderForPage(supabase: ReturnType<typeof createAdminClient>, 
   return new Map([...map].map(([k, v]) => [k, { costTwd: v.costTwd, orderNumber: v.orderNumber }]))
 }
 
+const PLAN_TYPE_LABEL: Record<string, string> = { '0': '總量型', '1': '單日型' }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function composeRow(p: any, sets: EnrichMaps, orderMap: Map<string, { costTwd: number | null; orderNumber: string | null }>) {
   const ic = p.iccid as string
   const ord = orderMap.get(ic)
   const countries = Array.isArray(p.countries) ? p.countries as string[] : []
+  const planType = p.plan_type ?? null   // card_plans 自己的快照
   return {
     iccid: ic,
     card_status: p.card_status ?? null,   // card_plans 自己的快照（不掃 manual_iccids）
@@ -117,6 +111,8 @@ function composeRow(p: any, sets: EnrichMaps, orderMap: Map<string, { costTwd: n
     bc_sku_name: p.sku_name || null,
     copies: p.copies || null,
     total_days: p.total_days ?? null,
+    plan_type: planType,
+    plan_type_label: planType != null ? (PLAN_TYPE_LABEL[planType] || planType) : null,
     cost_twd: ord?.costTwd ?? null,
     order_number: ord?.orderNumber ?? null,
     aftersale: sets.refundedIccids.has(ic),
@@ -128,7 +124,7 @@ function composeRow(p: any, sets: EnrichMaps, orderMap: Map<string, { costTwd: n
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function baseQuery(supabase: ReturnType<typeof createAdminClient>, sp: URLSearchParams, sets: EnrichMaps): any {
   let q = supabase.from('card_plans')
-    .select('iccid, sub_order_id, order_id, sku_name, copies, total_days, plan_status, plan_start_time, plan_end_time, countries, card_status', { count: 'exact' })
+    .select('iccid, sub_order_id, order_id, sku_id, sku_name, plan_type, copies, total_days, plan_status, plan_start_time, plan_end_time, countries, card_status', { count: 'exact' })
   const search = (sp.get('search') || '').trim()
   if (search) q = q.ilike('iccid', `%${search}%`)
   const ps = sp.get('plan_status'); if (ps) q = q.eq('plan_status', ps)
@@ -141,7 +137,15 @@ function baseQuery(supabase: ReturnType<typeof createAdminClient>, sp: URLSearch
   const inst = sp.get('installed')
   if (inst === '1') q = installed.length ? q.in('iccid', installed) : q.eq('iccid', '__none__')
   else if (inst === '0' && installed.length) q = q.not('iccid', 'in', `(${installed.join(',')})`)
-  return q.order('plan_start_time', { ascending: false, nullsFirst: false })
+  // 排序：可點欄位（iccid / plan_start_time / plan_end_time）；預設依 ICCID 分組
+  const sortBy = sp.get('sort_by') || ''
+  const asc = sp.get('sort_dir') === 'asc'
+  if (['iccid', 'plan_start_time', 'plan_end_time'].includes(sortBy)) {
+    q = q.order(sortBy, { ascending: asc, nullsFirst: false })
+    if (sortBy !== 'iccid') q = q.order('iccid', { ascending: true })   // 次序：同排序值時仍照卡號穩定
+    return q
+  }
+  return q.order('iccid', { ascending: true }).order('plan_start_time', { ascending: false, nullsFirst: false })
 }
 
 export async function GET(request: Request) {
@@ -156,8 +160,8 @@ export async function GET(request: Request) {
 
   // 匯出：套 SQL 篩選後分批串出（只此路徑會掃較多列，屬下載行為）
   if (sp.get('action') === 'export') {
-    const cols = ['iccid', 'card_status', 'plan_status', 'plan_start_time', 'plan_end_time', 'countries', 'bc_order_id', 'bc_sku_name', 'copies', 'total_days', 'cost_twd', 'order_number', 'aftersale', 'installed_at']
-    const head = 'ICCID,卡片狀態,套餐狀態,啟用時間,到期時間,國家,BC單號,套餐(BC),份數,總天數,成本,蝦皮訂單,售後,安裝時間'
+    const cols = ['iccid', 'card_status', 'plan_status', 'plan_start_time', 'plan_end_time', 'countries', 'bc_order_id', 'bc_sku_name', 'copies', 'total_days', 'plan_type_label', 'cost_twd', 'order_number', 'aftersale', 'installed_at']
+    const head = 'ICCID,卡片狀態,套餐狀態,啟用時間,到期時間,國家,BC單號,套餐(BC),份數,總天數,類型,成本,蝦皮訂單,售後,安裝時間'
     const esc = (v: unknown) => { const s = Array.isArray(v) ? v.join(' / ') : (v == null ? '' : String(v)); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
     const lines: string[] = [head]
     for (let from = 0; ; from += 500) {

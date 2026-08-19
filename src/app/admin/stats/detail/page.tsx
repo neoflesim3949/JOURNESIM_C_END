@@ -15,6 +15,7 @@ interface Row {
   bc_sku_name: string | null
   copies: string | null
   total_days: number | null
+  plan_type_label: string | null
   cost_twd: number | null
   order_number: string | null
   aftersale: boolean
@@ -37,7 +38,10 @@ export default function StatsDetailPage() {
   const [needSync, setNeedSync] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [usageModal, setUsageModal] = useState<Row | null>(null)
-  const pageSize = 50
+  const [pageSize, setPageSize] = useState(50)
+  const [sortBy, setSortBy] = useState('')            // '' | iccid | plan_start_time | plan_end_time
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [jump, setJump] = useState('')
 
   function params(extra?: Record<string, string>) {
     const p = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...extra })
@@ -46,8 +50,20 @@ export default function StatsDetailPage() {
     if (planStatus) p.set('plan_status', planStatus)
     if (aftersale) p.set('aftersale', aftersale)
     if (installed) p.set('installed', installed)
+    if (sortBy) { p.set('sort_by', sortBy); p.set('sort_dir', sortDir) }
     return p
   }
+
+  // 點欄位排序：同欄切 asc/desc，換欄預設 desc
+  function toggleSort(col: string) {
+    const dir = sortBy === col && sortDir === 'desc' ? 'asc' : 'desc'
+    setSortBy(col); setSortDir(dir)
+    setPage(1)
+    const pr = params({ page: '1', sort_by: col, sort_dir: dir })
+    setLoading(true)
+    fetch(`/api/admin/stats/cards?${pr}`).then(r => r.json()).then(d => { setRows(d.data || []); setTotal(d.total || 0); setNeedSync(!!d.needSync) }).finally(() => setLoading(false))
+  }
+  function sortIcon(col: string) { return sortBy === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ⇅' }
 
   async function load(p = page) {
     setLoading(true)
@@ -69,7 +85,7 @@ export default function StatsDetailPage() {
       })
       const d = await res.json()
       if (!res.ok) { alert(d.error || '同步失敗'); return }
-      alert(d.note || `同步完成：查詢 ${d.picked} 張卡，寫入 ${d.plans} 筆方案`)
+      alert(d.note || `同步完成：查詢 ${d.picked} 張卡，寫入 ${d.plans} 筆方案、${d.usage ?? 0} 筆使用量`)
       setPage(1); load(1)
     } finally { setSyncing(false) }
   }
@@ -133,15 +149,16 @@ export default function StatsDetailPage() {
           <table className="w-full text-xs whitespace-nowrap">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-3 py-2 text-left border-b">ICCID</th>
+                <th className="px-3 py-2 text-left border-b cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('iccid')}>ICCID{sortIcon('iccid')}</th>
                 <th className="px-3 py-2 text-left border-b">卡片狀態</th>
                 <th className="px-3 py-2 text-left border-b">套餐狀態</th>
-                <th className="px-3 py-2 text-left border-b">啟用時間</th>
-                <th className="px-3 py-2 text-left border-b">到期時間</th>
+                <th className="px-3 py-2 text-left border-b cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('plan_start_time')}>啟用時間{sortIcon('plan_start_time')}</th>
+                <th className="px-3 py-2 text-left border-b cursor-pointer select-none hover:text-blue-600" onClick={() => toggleSort('plan_end_time')}>到期時間{sortIcon('plan_end_time')}</th>
                 <th className="px-3 py-2 text-left border-b">國家</th>
                 <th className="px-3 py-2 text-left border-b">BC 單號</th>
                 <th className="px-3 py-2 text-left border-b">套餐 (BC)</th>
                 <th className="px-3 py-2 text-left border-b">份數（天數）</th>
+                <th className="px-3 py-2 text-left border-b">類型</th>
                 <th className="px-3 py-2 text-right border-b">成本</th>
                 <th className="px-3 py-2 text-left border-b">售後</th>
                 <th className="px-3 py-2 text-left border-b">安裝</th>
@@ -151,10 +168,12 @@ export default function StatsDetailPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr><td colSpan={13} className="px-3 py-10 text-center text-gray-400">無符合資料</td></tr>
-              ) : rows.map(r => (
-                <tr key={`${r.iccid}-${r.bc_order_id}-${r.bc_sku_name}`} className="border-b hover:bg-gray-50">
-                  <td className="px-3 py-2 font-mono">{r.iccid}</td>
-                  <td className="px-3 py-2">{CARD_STATUS[r.card_status || ''] || r.card_status || '—'}</td>
+              ) : rows.map((r, i) => {
+                const groupTop = i === 0 || rows[i - 1].iccid !== r.iccid   // 同卡第一列才顯示卡號/狀態
+                return (
+                <tr key={`${r.iccid}-${r.bc_order_id}-${r.bc_sku_name}-${i}`} className={`hover:bg-gray-50 ${groupTop ? 'border-t border-gray-200' : ''}`}>
+                  <td className="px-3 py-2 font-mono">{groupTop ? r.iccid : ''}</td>
+                  <td className="px-3 py-2">{groupTop ? (CARD_STATUS[r.card_status || ''] || r.card_status || '—') : ''}</td>
                   <td className="px-3 py-2">{PLAN_STATUS[r.plan_status || ''] || r.plan_status || '—'}</td>
                   <td className="px-3 py-2">{r.plan_start_time ? String(r.plan_start_time).slice(0, 16) : '—'}</td>
                   <td className="px-3 py-2">{r.plan_end_time ? String(r.plan_end_time).slice(0, 16) : '—'}</td>
@@ -162,6 +181,7 @@ export default function StatsDetailPage() {
                   <td className="px-3 py-2 font-mono">{r.bc_order_id || '—'}</td>
                   <td className="px-3 py-2 max-w-xs truncate" title={r.bc_sku_name || ''}>{r.bc_sku_name || '—'}</td>
                   <td className="px-3 py-2">{r.copies ? `${r.copies} 份${r.total_days != null ? `（${r.total_days} 天）` : ''}` : '—'}</td>
+                  <td className="px-3 py-2">{r.plan_type_label ? <span className={`px-2 py-0.5 rounded-full text-[10px] ${r.plan_type_label === '單日型' ? 'bg-amber-100 text-amber-700' : 'bg-sky-100 text-sky-700'}`}>{r.plan_type_label}</span> : '—'}</td>
                   <td className="px-3 py-2 text-right font-mono">{r.cost_twd != null ? `NT$ ${Math.round(r.cost_twd)}` : '—'}</td>
                   <td className="px-3 py-2">{r.aftersale ? <span className="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px]">已退</span> : '—'}</td>
                   <td className="px-3 py-2">{r.installed_at ? <span className="text-emerald-700" title={new Date(r.installed_at).toLocaleString('zh-TW')}>✓ {String(r.installed_at).slice(0, 10)}</span> : '—'}</td>
@@ -172,17 +192,33 @@ export default function StatsDetailPage() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-xs text-gray-500">共 {total.toLocaleString()} 張卡</span>
+          <div className="flex items-center justify-between px-4 py-3 flex-wrap gap-2">
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <span>共 {total.toLocaleString()} 筆</span>
+              <label className="flex items-center gap-1">每頁
+                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); setTimeout(() => load(1), 0) }}
+                  className="px-1.5 py-1 border border-gray-300 rounded">
+                  {[20, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>條
+              </label>
+            </div>
             <div className="flex items-center gap-1">
               <button onClick={() => { const p = Math.max(1, page - 1); setPage(p); load(p) }} disabled={page <= 1}
                 className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">上一頁</button>
               <span className="px-3 py-1 text-sm">{page} / {totalPages || 1}</span>
               <button onClick={() => { const p = Math.min(totalPages, page + 1); setPage(p); load(p) }} disabled={page >= totalPages}
                 className="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50">下一頁</button>
+              <div className="flex items-center gap-1 ml-2 text-xs text-gray-500">跳至
+                <input value={jump} onChange={e => setJump(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={e => { if (e.key === 'Enter') { const p = Math.min(Math.max(1, Number(jump) || 1), totalPages || 1); setPage(p); load(p); setJump('') } }}
+                  placeholder={String(page)} className="w-14 px-2 py-1 border border-gray-300 rounded text-center" />
+                <button onClick={() => { const p = Math.min(Math.max(1, Number(jump) || 1), totalPages || 1); setPage(p); load(p); setJump('') }}
+                  className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-50">前往</button>
+              </div>
             </div>
           </div>
         </div>
