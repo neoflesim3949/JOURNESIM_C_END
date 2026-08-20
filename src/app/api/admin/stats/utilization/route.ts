@@ -61,13 +61,19 @@ export async function GET(request: Request) {
     { key: 'gt50', label: '> 50 GB', test: (u: number) => u >= 50 * GB },
   ].map(b => ({ ...b, plans: 0, cards: new Set<string>(), usage: 0 }))
 
-  // 天數利用率級距（單日型；窗口鎖在 plan_start + total_days，比率上限 100%）
+  // 天數利用率級距（單日型；窗口鎖在 plan_start + total_days，比率上限 100%）；每 10% 一格
   const dayBuckets = [
     { key: '0', label: '0%（沒用）', lo: -1, hi: 0 },
-    { key: '25', label: '1–25%', lo: 0, hi: 0.25 },
-    { key: '50', label: '26–50%', lo: 0.25, hi: 0.5 },
-    { key: '75', label: '51–75%', lo: 0.5, hi: 0.75 },
-    { key: '100', label: '76–100%', lo: 0.75, hi: 1.0001 },
+    { key: '10', label: '1–10%', lo: 0, hi: 0.10 },
+    { key: '20', label: '11–20%', lo: 0.10, hi: 0.20 },
+    { key: '30', label: '21–30%', lo: 0.20, hi: 0.30 },
+    { key: '40', label: '31–40%', lo: 0.30, hi: 0.40 },
+    { key: '50', label: '41–50%', lo: 0.40, hi: 0.50 },
+    { key: '60', label: '51–60%', lo: 0.50, hi: 0.60 },
+    { key: '70', label: '61–70%', lo: 0.60, hi: 0.70 },
+    { key: '80', label: '71–80%', lo: 0.70, hi: 0.80 },
+    { key: '90', label: '81–90%', lo: 0.80, hi: 0.90 },
+    { key: '100', label: '91–100%', lo: 0.90, hi: 1.0001 },
   ].map(b => ({ ...b, plans: 0 }))
 
   let zeroPlans = 0

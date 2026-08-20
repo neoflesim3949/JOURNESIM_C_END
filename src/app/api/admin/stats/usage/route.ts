@@ -13,6 +13,8 @@ export async function GET(request: Request) {
   const dim = sp.get('dim') || 'global'
   const from = sp.get('from') || ''
   const to = sp.get('to') || ''
+  // 每日趨勢：沒指定區間時預設近 30 天
+  const effFrom = (dim === 'global' && !from) ? new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10) : from
   const supabase = createAdminClient()
 
   // iccid → 方案對照：一張卡取出現最多次的 (SKU, copies)
@@ -54,7 +56,7 @@ export async function GET(request: Request) {
   let total = 0
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount')
-    if (from) q = q.gte('used_date', from)
+    if (effFrom) q = q.gte('used_date', effFrom)
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break
@@ -122,7 +124,7 @@ export async function GET(request: Request) {
       : [],
   }))
   // global 依日期排序（舊到新）；其餘依用量排序
-  if (dim === 'global') rows = rows.sort((x, y) => x.key.localeCompare(y.key))
+  if (dim === 'global') rows = rows.sort((x, y) => y.key.localeCompare(x.key))   // 新到舊（近的在上面）
   else rows = rows.sort((x, y) => y.usage - x.usage)
 
   const avgCardDay = totalCardDays.size > 0 ? Math.round(total / totalCardDays.size) : 0
