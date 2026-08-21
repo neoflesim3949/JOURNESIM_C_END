@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useUrlState, useUrlStateBatch } from '@/lib/use-url-state'
 import { Upload, Search, Package, ChevronRight, Settings, Printer, X, Edit3, Plus, Send } from 'lucide-react'
 import { BcMatchModal } from '@/components/admin/bc-match-modal'
+import DateRange from '@/components/admin/DateRange'
 import { hydratePrintSettings, savePrintSettings } from '@/lib/print-settings'
 import * as XLSX from 'xlsx'
 
@@ -543,22 +544,14 @@ export default function ShopeeOrdersPage() {
           <button onClick={() => setUrl({ search: searchInput, page: 1 })} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
         </div>
         <div className="flex flex-wrap gap-2 items-center text-xs">
-          <span className="text-gray-500">訂單日期：</span>
-          <input type="date" value={filterOrderDateFrom} onChange={e => setUrl({ order_date_from: e.target.value, page: 1 })}
-            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
-          <span className="text-gray-400">~</span>
-          <input type="date" value={filterOrderDateTo} onChange={e => setUrl({ order_date_to: e.target.value, page: 1 })}
-            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <DateRange from={filterOrderDateFrom} to={filterOrderDateTo}
+            onFrom={v => setUrl({ order_date_from: v, page: 1 })} onTo={v => setUrl({ order_date_to: v, page: 1 })} label="訂單日期" />
           <button onClick={() => { const r = monthRange(0); setUrl({ order_date_from: r.from, order_date_to: r.to, page: 1 }) }}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">本期</button>
           <button onClick={() => { const r = monthRange(-1); setUrl({ order_date_from: r.from, order_date_to: r.to, page: 1 }) }}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">上期</button>
-          <span className="text-gray-500 ml-2">匯入日期：</span>
-          <input type="date" value={filterCreatedFrom} onChange={e => setUrl({ created_from: e.target.value, page: 1 })}
-            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
-          <span className="text-gray-400">~</span>
-          <input type="date" value={filterCreatedTo} onChange={e => setUrl({ created_to: e.target.value, page: 1 })}
-            className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+          <DateRange from={filterCreatedFrom} to={filterCreatedTo}
+            onFrom={v => setUrl({ created_from: v, page: 1 })} onTo={v => setUrl({ created_to: v, page: 1 })} label="匯入日期" />
           <button onClick={() => { const r = monthRange(0); setUrl({ created_from: r.from, created_to: r.to, page: 1 }) }}
             className="px-2 py-1.5 border border-gray-300 rounded text-xs hover:bg-gray-50">本期</button>
           <button onClick={() => { const r = monthRange(-1); setUrl({ created_from: r.from, created_to: r.to, page: 1 }) }}

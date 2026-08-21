@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import { Loader2, Download, ChevronDown, ChevronRight } from 'lucide-react'
 
 interface SkuRow {
@@ -27,7 +28,7 @@ export default function StatsAnalysisPage() {
   const [tab, setTab] = useState<'sku' | 'usage' | 'util' | 'expiry' | 'lifecycle' | 'lag' | 'travel'>('sku')
   return (
     <div>
-      <h1 className="text-2xl font-bold">統計分析</h1>
+      <h1 className="text-2xl font-bold">方案統計分析</h1>
       <div className="mt-4 flex gap-1 border-b border-gray-200 flex-wrap">
         {([['sku', '方案分析'], ['usage', '數據用量'], ['util', '利用率'], ['expiry', '到期提醒'], ['lifecycle', '生命週期'], ['lag', '開通時效'], ['travel', '出行分析']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
@@ -124,12 +125,7 @@ function SkuAnalysis() {
 
       {/* 篩選 */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-          <span className="text-xs text-gray-500">啟用</span>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-          <span className="text-gray-400 text-sm">~</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-        </div>
+        <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
         <select value={planType} onChange={e => setPlanType(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
           <option value="">全部類型</option>
           <option value="0">總量型</option>
@@ -292,12 +288,7 @@ function UsageAnalysis() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">日期</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
           <button onClick={() => load()} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
@@ -513,12 +504,7 @@ function SkuCoverage() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">方案覆蓋國家 · 依實際使用國家數排行（點列展開看各國用量）</p>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">日期</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
           <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
@@ -659,12 +645,7 @@ function ComboCoverage() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">國家組合分佈 · 每支 SKU 的方案在啟用期間去了哪些地區組合（SKU →「幾國」→ 實際國家組合）</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">啟用</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
           <select value={planStatus} onChange={e => setPlanStatus(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="">全部套餐狀態</option>
             <option value="0">未使用</option>
@@ -836,12 +817,7 @@ function PureCombo() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">國家組合 × 方案 ·「幾國」→ 實際國家組合 → 使用該組合的方案（點組合展開看方案）</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">啟用</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
           <select value={planStatus} onChange={e => setPlanStatus(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="">全部套餐狀態</option>
             <option value="0">未使用</option>
@@ -1024,12 +1000,7 @@ function UtilizationAnalysis() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">用量分佈 · 每方案在啟用期間的總用量級距；天數利用率 · 單日型「買的天數 vs 實際有用量的天數」</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">啟用</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
           <select value={planType} onChange={e => setPlanType(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="">全部類型</option>
             <option value="0">總量型</option>
@@ -1379,12 +1350,7 @@ function ActivationLagAnalysis() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">下單 → 開通 間隔 · 下單時間（優先蝦皮購買，其次 BC 建單）到數據啟用（先到「統計明細列表」同步才會有下單時間）</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">下單</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="下單" />
           <select value={source} onChange={e => setSource(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             <option value="">全部來源</option>
             <option value="shopee">蝦皮購買</option>
@@ -1555,12 +1521,7 @@ function TravelArrival() {
         <div className="flex items-center gap-2 flex-wrap">
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()}
             placeholder="搜尋國家" className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">出行日</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="出行日" />
           <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
@@ -1655,12 +1616,7 @@ function TravelDaily() {
         <div className="flex items-center gap-2 flex-wrap">
           <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()}
             placeholder="搜尋國家" className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">日期</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
           <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
@@ -1769,12 +1725,7 @@ function TravelPath() {
           <select value={minStops} onChange={e => setMinStops(Number(e.target.value))} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>最少 {n} 國</option>)}
           </select>
-          <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1.5">
-            <span className="text-xs text-gray-500">啟用</span>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
-          </div>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
           <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV

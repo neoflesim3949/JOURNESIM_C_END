@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import Link from 'next/link'
 import { FileText, Search, RefreshCw } from 'lucide-react'
 
@@ -107,9 +108,7 @@ export default function InvoiceListPage() {
         </div>
         <div className="flex gap-2 items-center flex-wrap text-sm">
           <span className="text-xs text-gray-500">發票日期</span>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs" />
-          <span className="text-xs text-gray-400">到</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs" />
+          <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} label="日期" />
           <button onClick={() => setPreset('today')} className="px-2 py-1 border border-gray-300 rounded text-xs hover:bg-gray-50">本日</button>
           <button onClick={() => setPreset('week')} className="px-2 py-1 border border-gray-300 rounded text-xs hover:bg-gray-50">本週</button>
           <button onClick={() => setPreset('month')} className="px-2 py-1 border border-gray-300 rounded text-xs hover:bg-gray-50">本月</button>

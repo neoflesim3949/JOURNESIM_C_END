@@ -1,9 +1,31 @@
 import crypto from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-const BC_URL = process.env.BILLIONCONNECT_URL!
-const APP_KEY = process.env.BILLIONCONNECT_APP_KEY!
-const APP_SECRET = process.env.BILLIONCONNECT_APP_SECRET!
+// BC 參數：優先讀「參數管理」作用中的渠道設定檔（bc_profiles/bc_active），沒有才用環境變數（含 60s 快取）
+export interface BcProfile { id: string; name: string; url: string; appKey: string; appSecret: string }
+let _bcCfg: { url: string; appKey: string; appSecret: string; at: number } | null = null
+export function clearBcConfigCache() { _bcCfg = null }
+export async function getBcConfig(): Promise<{ url: string; appKey: string; appSecret: string }> {
+  if (_bcCfg && Date.now() - _bcCfg.at < 60_000) return _bcCfg
+  let url = process.env.BILLIONCONNECT_URL || ''
+  let appKey = process.env.BILLIONCONNECT_APP_KEY || ''
+  let appSecret = process.env.BILLIONCONNECT_APP_SECRET || ''
+  try {
+    const supabase = createAdminClient()
+    const { data } = await supabase.from('system_settings').select('key, value').in('key', ['bc_profiles', 'bc_active'])
+    const rawProfiles = data?.find(r => r.key === 'bc_profiles')?.value
+    const activeId = data?.find(r => r.key === 'bc_active')?.value
+    const profiles: BcProfile[] = rawProfiles ? JSON.parse(rawProfiles) : []
+    const p = profiles.find(x => x.id === activeId) || profiles[0]
+    if (p) {
+      if (p.url) url = p.url
+      if (p.appKey) appKey = p.appKey
+      if (p.appSecret) appSecret = p.appSecret
+    }
+  } catch { /* DB 讀不到 / 壞資料就沿用 env */ }
+  _bcCfg = { url, appKey, appSecret, at: Date.now() }
+  return _bcCfg
+}
 
 // 大量讀取端點（國家/商品/價格清單）成功時回應可達數 MB，不存巨大 body，避免 bc_api_logs 膨脹拖垮寫入
 const BULK_TRADE_TYPES = new Set(['F001', 'F002', 'F003'])
@@ -44,8 +66,8 @@ async function logBcApi(entry: {
 // =====================================================
 // 簽名工具
 // =====================================================
-function generateSign(body: object): string {
-  const plaintext = APP_SECRET + JSON.stringify(body)
+function generateSign(body: object, appSecret: string): string {
+  const plaintext = appSecret + JSON.stringify(body)
   return crypto.createHash('md5').update(plaintext, 'utf8').digest('hex')
 }
 
@@ -66,7 +88,8 @@ async function callBC<T>(tradeType: string, tradeData: object = {}): Promise<T> 
     tradeData,
   }
 
-  const sign = generateSign(body)
+  const cfg = await getBcConfig()
+  const sign = generateSign(body, cfg.appSecret)
   const startTime = Date.now()
 
   // 加逾時保護：BC 無回應時不會無限期卡住（否則整支同步會掛死）
@@ -74,11 +97,11 @@ async function callBC<T>(tradeType: string, tradeData: object = {}): Promise<T> 
   const timer = setTimeout(() => controller.abort(), 45_000)
   let res: Response
   try {
-    res = await fetch(BC_URL, {
+    res = await fetch(cfg.url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json;charset=UTF-8',
-        'x-channel-id': APP_KEY,
+        'x-channel-id': cfg.appKey,
         'x-sign-method': 'md5',
         'x-sign-value': sign,
       },

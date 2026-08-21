@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { refreshCardExpiry } from '@/lib/card-expiry-sync'
+import { getBcConfig } from '@/lib/billionconnect'
 
-const APP_SECRET = process.env.BILLIONCONNECT_APP_SECRET!
-
-function verifySign(body: string, signValue: string): boolean {
-  const expected = crypto.createHash('md5').update(APP_SECRET + body, 'utf8').digest('hex')
+async function verifySign(body: string, signValue: string): Promise<boolean> {
+  const { appSecret } = await getBcConfig()
+  const expected = crypto.createHash('md5').update(appSecret + body, 'utf8').digest('hex')
   return expected === signValue
 }
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signValue = request.headers.get('x-sign-value') || ''
 
-  if (!verifySign(rawBody, signValue)) {
+  if (!(await verifySign(rawBody, signValue))) {
     const failBody = { tradeCode: '9999', tradeMsg: 'Invalid signature' }
     try {
       const supabaseLog = createAdminClient()

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 
@@ -57,9 +58,7 @@ export default function VoidsPage() {
 
       <div className="mt-4 bg-white border border-gray-200 rounded-lg p-3 flex gap-2 items-center flex-wrap text-sm">
         <span className="text-xs text-gray-500">發票日期</span>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs" />
-        <span className="text-xs text-gray-400">到</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs" />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} label="日期" />
         <button onClick={() => { setPage(1); load() }} className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">篩選</button>
       </div>
 

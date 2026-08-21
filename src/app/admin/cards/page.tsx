@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import { Search, CreditCard, RefreshCw, X, Database, Calendar, Plus, Trash2, Upload } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
@@ -349,11 +350,7 @@ export default function AdminCardsPage() {
         </select>
 
         <span className="text-xs text-gray-500 ml-2">有效期：</span>
-        <input type="date" value={filterExpireFrom} onChange={e => setFilterExpireFrom(e.target.value)}
-          className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
-        <span className="text-xs text-gray-400">~</span>
-        <input type="date" value={filterExpireTo} onChange={e => setFilterExpireTo(e.target.value)}
-          className="px-2 py-1.5 border border-gray-300 rounded text-xs" />
+        <DateRange from={filterExpireFrom} to={filterExpireTo} onFrom={setFilterExpireFrom} onTo={setFilterExpireTo} label="效期" />
 
         <button onClick={() => { setPage(1); load() }} className="px-3 py-1.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">篩選</button>
         <button onClick={() => { setFilterCardType(''); setFilterCardStatus(''); setFilterExpireFrom(''); setFilterExpireTo(''); setPage(1); setTimeout(load, 0) }}

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, ChevronDown, ChevronRight } from 'lucide-react'
 import { TreeTable, type TreeItem } from '@/components/admin/dashboard/HotRankings'
+import DateRange from '@/components/admin/DateRange'
 
 interface DetailOrder { id: string; order_number: string; buyer: string; account: string; date: string | null; status: string; revenue: number; cost: number; cards: number; fees?: number; wallet?: number }
 interface GroupData {
@@ -127,12 +128,11 @@ export default function ShopeeDashboardPage() {
     setTo(fmtTW(now))
     setFrom(fmtTW(new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000)))
   }
-
-  async function load() {
+  async function load(f = from, l = to) {
     setLoading(true)
     const params = new URLSearchParams({ date_field: dateField })
-    if (from) params.set('from', from)
-    if (to) params.set('to', to)
+    if (f) params.set('from', f)
+    if (l) params.set('to', l)
     if (selectedAccount) params.set('account_id', selectedAccount)
     const res = await fetch(`/api/admin/shopee/dashboard?${params}`)
     if (res.ok) setData(await res.json())
@@ -188,15 +188,11 @@ export default function ShopeeDashboardPage() {
             <option value="order_date">訂單日期</option>
             <option value="created_at">匯入日期</option>
           </select>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-          <span className="text-gray-400">~</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
           <button onClick={() => pickMonth(0)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">本期</button>
           <button onClick={() => pickMonth(-1)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">上期</button>
           <button onClick={pickLast30} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">近30天</button>
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={() => load()} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700">查詢</button>
           <button onClick={async () => {
             if (!confirm('回填所有已下單商品的成本價？')) return
             const res = await fetch('/api/admin/shopee/backfill-cost', { method: 'POST' })

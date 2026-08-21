@@ -95,8 +95,11 @@ const NAV_ITEMS: NavItem[] = [
   {
     href: '/admin/stats', label: '統計專區', icon: BarChart3,
     children: [
-      { href: '/admin/stats', label: '統計分析' },
+      { href: '/admin/stats', label: '方案統計分析' },
       { href: '/admin/stats/detail', label: '統計明細列表' },
+      { href: '/admin/stats/order-analysis', label: '訂單統計分析' },
+      { href: '/admin/stats/history-orders', label: '歷史採購訂單明細' },
+      { href: '/admin/stats/history-aftersales', label: '歷史採購售後明細' },
     ],
   },
   {
@@ -119,6 +122,7 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/params', label: '參數管理', icon: Globe,
     children: [
       { href: '/admin/params/settings', label: '系統設定' },
+      { href: '/admin/params/bc', label: 'BC 參數設定' },
       { href: '/admin/params/ads', label: '廣告追蹤' },
       { href: '/admin/params/exchange-rate', label: '匯率管理' },
       { href: '/admin/params/countries', label: '國家 MCC 管理' },

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 
@@ -59,9 +60,7 @@ export default function AllowancesPage() {
 
       <div className="mt-4 bg-white border border-gray-200 rounded-lg p-3 flex gap-2 items-center flex-wrap text-sm">
         <span className="text-xs text-gray-500">折讓日期</span>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs" />
-        <span className="text-xs text-gray-400">到</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs" />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} label="日期" />
         <select value={status} onChange={e => setStatus(e.target.value)} className="px-2 py-1 border border-gray-300 rounded text-xs">
           <option value="">全部狀態</option>
           <option value="active">有效</option>

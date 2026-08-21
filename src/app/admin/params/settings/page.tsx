@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Save, CreditCard, Smartphone, Shield } from 'lucide-react'
+import { Save, CreditCard, Smartphone } from 'lucide-react'
 import { RichEditor } from '@/components/admin/rich-editor'
 
 interface Setting {
@@ -150,24 +150,6 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      {/* Test Mode */}
-      <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Shield className="w-5 h-5 text-orange-500" />
-            <div>
-              <div className="font-medium">測試模式</div>
-              <div className="text-xs text-gray-500">開啟時不會呼叫 BillionConnect API 建立真實訂單</div>
-            </div>
-          </div>
-          <button
-            onClick={() => handleChange('test_mode', getValue('test_mode') === 'true' ? 'false' : 'true')}
-            className={`relative w-12 h-6 rounded-full transition-colors ${getValue('test_mode') === 'true' ? 'bg-orange-500' : 'bg-gray-300'}`}
-          >
-            <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${getValue('test_mode') === 'true' ? 'left-6' : 'left-0.5'}`} />
-          </button>
-        </div>
-      </div>
 
       {/* TapPay Settings */}
       <div className="mt-6 bg-white p-5 rounded-xl border border-gray-200">

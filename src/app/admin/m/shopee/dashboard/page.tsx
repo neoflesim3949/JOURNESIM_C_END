@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, RefreshCw } from 'lucide-react'
 import { MobileShopeeNav } from '@/components/admin/mobile-shopee-nav'
 
@@ -111,9 +112,7 @@ export default function MobileShopeeDashboard() {
           </select>
         </div>
         <div className="flex items-center gap-1.5">
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="flex-1 min-w-0 px-2 py-2 border border-gray-300 rounded-lg text-sm" />
-          <span className="text-gray-400">~</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="flex-1 min-w-0 px-2 py-2 border border-gray-300 rounded-lg text-sm" />
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => pickMonth(0)} className="flex-1 py-2 border border-gray-300 text-sm rounded-lg">本期</button>

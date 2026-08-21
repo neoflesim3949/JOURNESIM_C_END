@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 
@@ -72,9 +73,7 @@ export default function ShopeeAftersalesPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1">
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-sm outline-none" />
+            <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
           </div>
           <button onClick={() => pickMonth(0)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">本月</button>
           <button onClick={() => pickMonth(-1)} className="px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">上月</button>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import crypto from 'crypto'
 import { checkAdminAuth } from '@/lib/admin'
+import { getBcConfig } from '@/lib/billionconnect'
 import { POST as bcWebhookPost } from '@/app/api/webhooks/billionconnect/route'
 
 // POST { payload } — 手動貼入 BC callback 內容（{"tradeType":"N009","tradeData":{...}}），
@@ -26,8 +27,8 @@ export async function POST(request: Request) {
   }
 
   const raw = JSON.stringify(p)
-  const sign = crypto.createHash('md5')
-    .update((process.env.BILLIONCONNECT_APP_SECRET || '') + raw, 'utf8').digest('hex')
+  const { appSecret } = await getBcConfig()
+  const sign = crypto.createHash('md5').update(appSecret + raw, 'utf8').digest('hex')
 
   try {
     const res = await bcWebhookPost(new Request('http://internal/api/webhooks/billionconnect', {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import DateRange from '@/components/admin/DateRange'
 import { Search, Loader2, Calendar, Printer } from 'lucide-react'
 
 interface PlanSub {
@@ -338,11 +339,7 @@ export default function CardsLookupPage() {
             <Calendar className="w-4 h-4" /> 查詢本月到期
           </button>
           <div className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-2 py-1">
-            <input type="date" value={rangeFrom} onChange={e => setRangeFrom(e.target.value)}
-              className="text-sm outline-none" />
-            <span className="text-gray-400 text-sm">~</span>
-            <input type="date" value={rangeTo} onChange={e => setRangeTo(e.target.value)}
-              className="text-sm outline-none" />
+            <DateRange from={rangeFrom} to={rangeTo} onFrom={setRangeFrom} onTo={setRangeTo} label="日期" />
             <button onClick={() => loadExpiring('range')}
               className="ml-1 px-3 py-1 bg-amber-600 text-white text-sm rounded-md hover:bg-amber-700">查詢區間到期</button>
           </div>
