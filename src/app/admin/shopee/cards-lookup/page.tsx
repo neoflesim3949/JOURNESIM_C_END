@@ -522,79 +522,100 @@ export default function CardsLookupPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.flatMap(r => {
-                const subs: { sub: PlanSub; order: PlanOrder }[] = []
-                if (r.plan.ok) {
-                  for (const o of r.plan.orders || []) {
-                    for (const s of o.subOrderList || []) {
-                      if (onlyUnused && (s.planStatus || '') !== '0') continue
-                      subs.push({ sub: s, order: o })
-                    }
+              {(() => {
+                // 每張卡 → 可顯示的 subs，並依 BC 訂單號分組（同單相鄰、框起來）
+                interface Blk { r: Row; subs: { sub: PlanSub; order: PlanOrder }[]; orderId: string }
+                const blocks: Blk[] = []
+                for (const r of rows) {
+                  const subs: { sub: PlanSub; order: PlanOrder }[] = []
+                  if (r.plan.ok) for (const o of r.plan.orders || []) for (const s of o.subOrderList || []) {
+                    if (onlyUnused && (s.planStatus || '') !== '0') continue
+                    subs.push({ sub: s, order: o })
                   }
+                  if (subs.length === 0) { if (onlyUnused) continue; blocks.push({ r, subs: [], orderId: '' }) }
+                  else blocks.push({ r, subs, orderId: subs[0].order.orderId || '' })
                 }
-                // 只顯示未使用 → 無未使用套餐的整列就不顯示
-                if (subs.length === 0) {
-                  if (onlyUnused) return []
-                  return [(
-                    <tr key={r.iccid} className="border-b hover:bg-gray-50">
-                      <td className="px-3 py-2"></td>
-                      <td className="px-3 py-2 font-mono">{r.iccid}</td>
-                      <td className="px-3 py-2">{CARD_STATUS[r.card?.status || ''] || r.card?.status || '—'}</td>
-                      <td className="px-3 py-2">{r.card?.expirationDate || '—'}</td>
-                      <td className="px-3 py-2 text-gray-400" colSpan={6}>{r.plan.ok ? '無套餐記錄' : <span className="text-red-600">F012 失敗：{r.plan.error}</span>}</td>
-                      <td className="px-3 py-2">—</td>
-                      <td className="px-3 py-2">—</td>
-                    </tr>
-                  )]
-                }
-                return subs.map(({ sub, order }, i) => {
-                  const key = `${r.iccid}|${sub.channelSubOrderId || ''}`
-                  // 我們的 channelSubOrderId 格式 FL...{S|E}{idx}，可以還原 channelOrderId
-                  const derivable = !!sub.channelSubOrderId && /[SE]\d+$/.test(sub.channelSubOrderId)
-                  const noChannel = !order.channelOrderId && !derivable
-                  return (
-                  <tr key={`${r.iccid}-${i}`} className={`border-b hover:bg-gray-50 ${noChannel ? 'bg-amber-50' : ''}`}>
-                    <td className="px-3 py-2">
-                      <input type="checkbox" checked={selected.has(key)}
-                        onChange={() => toggleSelect(key)}
-                        disabled={noChannel}
-                        title={noChannel ? '此卡無 channelOrderId，無法透過 F017 退卡' : ''} />
-                    </td>
-                    {i === 0 && (
-                      <>
-                        <td className="px-3 py-2 font-mono align-top" rowSpan={subs.length}>{r.iccid}</td>
-                        <td className="px-3 py-2 align-top" rowSpan={subs.length}>{CARD_STATUS[r.card?.status || ''] || r.card?.status || '—'}</td>
-                        <td className="px-3 py-2 align-top" rowSpan={subs.length}>{r.card?.expirationDate || '—'}</td>
-                      </>
-                    )}
-                    <td className="px-3 py-2">{sub.skuName || '—'}{sub.copies ? ` ×${sub.copies}` : ''}</td>
-                    <td className="px-3 py-2">{PLAN_STATUS[sub.planStatus || ''] || sub.planStatus || '—'}</td>
-                    <td className="px-3 py-2">{sub.planStartTime || '—'}</td>
-                    <td className="px-3 py-2">{sub.planEndTime || '—'}</td>
-                    <td className="px-3 py-2">{sub.remainingDays != null ? `${sub.remainingDays}/${sub.totalDays || '—'}` : '—'}</td>
-                    <td className="px-3 py-2">{fmtTraffic(sub.remainingTraffic)}</td>
-                    <td className="px-3 py-2">
-                      <div className="font-mono text-[10px] text-gray-600">{order.orderId || '—'}</div>
-                      <div className="font-mono text-[10px] text-gray-400">{sub.channelSubOrderId || '—'}</div>
-                      {noChannel && <div className="text-[10px] text-amber-700 mt-0.5">⚠️ 無渠道單號</div>}
-                    </td>
-                    <td className="px-3 py-2">
-                      {noChannel ? (
-                        <span className="text-[10px] text-amber-700" title="此卡是 BC 端直建（無 channelOrderId），需到 BC 後台手動退">
-                          需 BC 後台退
-                        </span>
-                      ) : (
-                        <button onClick={() => handleAfterSale(r.iccid, sub, order)}
-                          disabled={working === (sub.channelSubOrderId || r.iccid)}
-                          className="px-2 py-1 text-[11px] bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-60">
-                          {working === (sub.channelSubOrderId || r.iccid) ? '送出中…' : '申請售後'}
-                        </button>
+                // 依 BC 訂單號排序 → 同單相鄰
+                blocks.sort((a, b) => (a.orderId < b.orderId ? -1 : a.orderId > b.orderId ? 1 : 0))
+
+                let band = -1
+                return blocks.map((blk, bi) => {
+                  const { r, subs, orderId } = blk
+                  const prev = blocks[bi - 1], next = blocks[bi + 1]
+                  const grouped = !!orderId
+                  const gStart = grouped && (!prev || prev.orderId !== orderId)
+                  const gEnd = grouped && (!next || next.orderId !== orderId)
+                  if (gStart) band++
+                  const bg = grouped ? (band % 2 === 0 ? 'bg-blue-50/40' : 'bg-indigo-50/30') : ''
+                  const eL = grouped ? 'border-l-2 border-l-blue-500' : ''   // 整組左框
+                  const eR = grouped ? 'border-r-2 border-r-blue-500' : ''   // 整組右框
+
+                  if (subs.length === 0) {
+                    const eT = gStart ? 'border-t-2 border-t-blue-500' : ''
+                    const eB = gEnd ? 'border-b-2 border-b-blue-500' : ''
+                    return (
+                      <tr key={r.iccid} className={`${grouped ? '' : 'border-b'} hover:bg-gray-50 ${bg}`}>
+                        <td className={`px-3 py-2 ${eL} ${eT} ${eB}`}></td>
+                        <td className={`px-3 py-2 font-mono ${eT} ${eB}`}>{r.iccid}</td>
+                        <td className={`px-3 py-2 ${eT} ${eB}`}>{CARD_STATUS[r.card?.status || ''] || r.card?.status || '—'}</td>
+                        <td className={`px-3 py-2 ${eT} ${eB}`}>{r.card?.expirationDate || '—'}</td>
+                        <td className={`px-3 py-2 text-gray-400 ${eT} ${eB}`} colSpan={6}>{r.plan.ok ? '無套餐記錄' : <span className="text-red-600">F012 失敗：{r.plan.error}</span>}</td>
+                        <td className={`px-3 py-2 ${eT} ${eB}`}>—</td>
+                        <td className={`px-3 py-2 ${eR} ${eT} ${eB}`}>—</td>
+                      </tr>
+                    )
+                  }
+                  return subs.map(({ sub, order }, i) => {
+                    const key = `${r.iccid}|${sub.channelSubOrderId || ''}`
+                    const derivable = !!sub.channelSubOrderId && /[SE]\d+$/.test(sub.channelSubOrderId)
+                    const noChannel = !order.channelOrderId && !derivable
+                    const eT = gStart && i === 0 ? 'border-t-2 border-t-blue-500' : ''            // 組頭上框（每格）
+                    const eB = gEnd && i === subs.length - 1 ? 'border-b-2 border-b-blue-500' : ''  // 組尾下框（每格）
+                    const eBspan = gEnd ? 'border-b-2 border-b-blue-500' : ''                       // rowSpan 欄底框（跨到卡底）
+                    return (
+                    <tr key={`${r.iccid}-${i}`} className={`${grouped ? '' : 'border-b'} hover:brightness-95 ${noChannel ? 'bg-amber-50' : bg}`}>
+                      <td className={`px-3 py-2 ${eL} ${eT} ${eB}`}>
+                        <input type="checkbox" checked={selected.has(key)}
+                          onChange={() => toggleSelect(key)}
+                          disabled={noChannel}
+                          title={noChannel ? '此卡無 channelOrderId，無法透過 F017 退卡' : ''} />
+                      </td>
+                      {i === 0 && (
+                        <>
+                          <td className={`px-3 py-2 font-mono align-top ${eT} ${eBspan}`} rowSpan={subs.length}>{r.iccid}</td>
+                          <td className={`px-3 py-2 align-top ${eT} ${eBspan}`} rowSpan={subs.length}>{CARD_STATUS[r.card?.status || ''] || r.card?.status || '—'}</td>
+                          <td className={`px-3 py-2 align-top ${eT} ${eBspan}`} rowSpan={subs.length}>{r.card?.expirationDate || '—'}</td>
+                        </>
                       )}
-                    </td>
-                  </tr>
-                  )
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>{sub.skuName || '—'}{sub.copies ? ` ×${sub.copies}` : ''}</td>
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>{PLAN_STATUS[sub.planStatus || ''] || sub.planStatus || '—'}</td>
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>{sub.planStartTime || '—'}</td>
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>{sub.planEndTime || '—'}</td>
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>{sub.remainingDays != null ? `${sub.remainingDays}/${sub.totalDays || '—'}` : '—'}</td>
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>{fmtTraffic(sub.remainingTraffic)}</td>
+                      <td className={`px-3 py-2 ${eT} ${eB}`}>
+                        {i === 0 ? <div className="font-mono text-[11px] font-semibold text-blue-700">{order.orderId || '—'}</div> : <div className="font-mono text-[10px] text-gray-300">〃</div>}
+                        <div className="font-mono text-[10px] text-gray-400">{sub.channelSubOrderId || '—'}</div>
+                        {noChannel && <div className="text-[10px] text-amber-700 mt-0.5">⚠️ 無渠道單號</div>}
+                      </td>
+                      <td className={`px-3 py-2 ${eR} ${eT} ${eB}`}>
+                        {noChannel ? (
+                          <span className="text-[10px] text-amber-700" title="此卡是 BC 端直建（無 channelOrderId），需到 BC 後台手動退">
+                            需 BC 後台退
+                          </span>
+                        ) : (
+                          <button onClick={() => handleAfterSale(r.iccid, sub, order)}
+                            disabled={working === (sub.channelSubOrderId || r.iccid)}
+                            className="px-2 py-1 text-[11px] bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-60">
+                            {working === (sub.channelSubOrderId || r.iccid) ? '送出中…' : '申請售後'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    )
+                  })
                 })
-              })}
+              })()}
             </tbody>
           </table>
         </div>

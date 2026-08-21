@@ -141,6 +141,8 @@ export async function POST(request: Request) {
 
       const rec: Record<string, unknown> = {
         sku_id: p.skuId,
+        product_id: p.productId || null,       // BC 產品層 ID（同產品的多個 SKU 共用）
+        product_name: p.productName || null,
         name: p.name,
         type: p.type,
         sales_method: '5', // 保留欄位相容
