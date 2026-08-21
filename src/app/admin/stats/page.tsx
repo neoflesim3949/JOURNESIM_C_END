@@ -29,7 +29,7 @@ function fmtKB(kb: number) {
 }
 
 export default function StatsAnalysisPage() {
-  const [tab, setTab] = useState<'sku' | 'usage' | 'dailyavg' | 'days' | 'util' | 'expiry' | 'lifecycle' | 'lag' | 'travel'>('sku')
+  const [tab, setTab] = useState<'sku' | 'apn' | 'usage' | 'dailyavg' | 'days' | 'util' | 'expiry' | 'lifecycle' | 'lag' | 'travel'>('sku')
   const [excludeLegacy, setExcludeLegacy] = useState(true)
   return (
     <ExcludeLegacyCtx.Provider value={excludeLegacy}>
@@ -41,14 +41,14 @@ export default function StatsAnalysisPage() {
         </label>
       </div>
       <div className="mt-4 flex gap-1 border-b border-gray-200 flex-wrap">
-        {([['sku', '方案分析'], ['usage', '數據用量'], ['dailyavg', '日均量'], ['days', '使用天數'], ['util', '利用率'], ['expiry', '到期提醒'], ['lifecycle', '生命週期'], ['lag', '開通時效'], ['travel', '出行分析']] as const).map(([k, label]) => (
+        {([['sku', '方案分析（方案SKU）'], ['usage', '數據用量'], ['apn', 'APN'], ['travel', '目的地'], ['dailyavg', '日均用量'], ['days', '使用天數'], ['lifecycle', '生命週期'], ['expiry', '到期提醒'], ['util', '利用率'], ['lag', '開通延時']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
             {label}
           </button>
         ))}
       </div>
-      {tab === 'sku' ? <SkuSection /> : tab === 'usage' ? <UsageAnalysis /> : tab === 'dailyavg' ? <DailyAvgAnalysis /> : tab === 'days' ? <DaysAnalysis />
+      {tab === 'sku' ? <SkuSection /> : tab === 'apn' ? <ApnAnalysis /> : tab === 'usage' ? <UsageAnalysis /> : tab === 'dailyavg' ? <DailyAvgAnalysis /> : tab === 'days' ? <DaysAnalysis />
         : tab === 'util' ? <UtilizationAnalysis /> : tab === 'expiry' ? <ExpiryAnalysis /> : tab === 'lifecycle' ? <LifecycleAnalysis />
         : tab === 'lag' ? <ActivationLagAnalysis /> : <TravelAnalysis />}
     </div>
@@ -493,6 +493,285 @@ function SkuSection() {
       {sub === 'stat' ? <SkuAnalysis /> : sub === 'cov' ? <SkuCoverage /> : sub === 'combo' ? <ComboCoverage /> : <PureCombo />}
     </div>
   )
+}
+
+// ── APN 分析：APN × （依方案 / 依國家）──
+interface ApnChild { key: string; label: string; plans: number; cards: number; copies: number; share: number; usage: number; avg: number; avg_card_day: number }
+interface ApnRow { apn: string; plans: number; cards: number; copies: number; share: number; usage: number; avg: number; avg_card_day: number; children: ApnChild[] }
+// APN 分頁：依方案 / 依國家 / 熱力圖
+function ApnAnalysis() {
+  const [sub, setSub] = useState<'sku' | 'country' | 'heat'>('sku')
+  return (
+    <div>
+      <div className="mt-4 flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit flex-wrap">
+        {([['sku', '依方案'], ['country', '依國家'], ['heat', '熱力圖']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setSub(k)}
+            className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
+        ))}
+      </div>
+      {sub === 'heat' ? <ApnHeat /> : <ApnTable mode={sub} key={sub} />}
+    </div>
+  )
+}
+
+function ApnTable({ mode }: { mode: 'sku' | 'country' }) {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
+  const [rows, setRows] = useState<ApnRow[]>([])
+  const [totalPlans, setTotalPlans] = useState(0)
+  const [totalApns, setTotalApns] = useState(0)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [planStatus, setPlanStatus] = useState('')
+  const [planType, setPlanType] = useState('')
+
+  function params() {
+    const p = new URLSearchParams({ mode })
+    if (from) p.set('from', from); if (to) p.set('to', to)
+    if (planStatus) p.set('plan_status', planStatus); if (planType) p.set('plan_type', planType)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
+  }
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<{ rows?: ApnRow[]; total_plans?: number; total_apns?: number }>({
+    key: `apn:${mode}`, deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/apn?${params()}`,
+    apply: j => { setRows(j.rows || []); setTotalPlans(j.total_plans || 0); setTotalApns(j.total_apns || 0); setExpanded(new Set()) },
+    buildOpts: () => ({ from, to, plan_status: planStatus, plan_type: planType, mode, exclude_legacy: excludeLegacy }),
+  })
+
+  function exportCsv() {
+    const head = `APN,方案數,卡數,份數合計,總用量KB,平均每卡KB,平均每卡日KB,占比%,${mode === 'country' ? '國家' : '方案'}明細`
+    const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const body = rows.map(r => [r.apn, r.plans, r.cards, r.copies, r.usage, r.avg, r.avg_card_day, r.share, r.children.map(c => `${c.label}:${c.plans}`).join(' / ')].map(esc).join(',')).join('\n')
+    const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `apn-${mode}.csv`; a.click(); URL.revokeObjectURL(url)
+  }
+
+  const maxPlans = rows.length ? rows[0].plans : 0
+  const childLabel = mode === 'country' ? '國家' : '方案'
+
+  return (
+    <div>
+      <LogicNote items={[
+        '資料來源：card_plans（依 SKU 彙總）＋ bc_products.country_data 的每國 apn。',
+        '把每張卡的用量歸到其 SKU 涵蓋的 APN：依方案＝該 APN 由哪些方案(SKU)提供；依國家＝該 APN 覆蓋哪些國家。',
+        '方案數／卡數／份數合計＝使用該 APN 的方案的加總（卡數為不重複 ICCID）。',
+        '註：一個 SKU 常跨多國、含多個 APN，故各 APN 加總可能 > 全部方案數（這是覆蓋性統計，占比可能合計 > 100%）。',
+        '展開＝該 APN 對應的' + childLabel + '明細（依方案數排序）。',
+      ]} />
+      <div className="mt-4 flex items-center justify-end flex-wrap gap-2">
+        <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+          <Download className="w-4 h-4" /> 匯出 CSV
+        </button>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
+        <select value={planType} onChange={e => setPlanType(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
+          <option value="">全部類型</option><option value="0">總量型</option><option value="1">單日型</option>
+        </select>
+        <select value={planStatus} onChange={e => setPlanStatus(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
+          <option value="">全部套餐狀態</option><option value="0">未使用</option><option value="1">使用中</option><option value="2">使用結束</option><option value="3">已取消</option>
+        </select>
+        <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>
+        {computedAt && <span className="text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
+      </div>
+
+      {!loading && <p className="mt-3 text-xs text-gray-500">APN 種類 {totalApns.toLocaleString()} 個 · 方案數(去重) {totalPlans.toLocaleString()}</p>}
+
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : rows.length === 0 ? (
+        <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p>
+      ) : (
+        <div className="mt-2 bg-white border border-gray-200 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs">
+              <tr>
+                <th className="px-3 py-2 text-left border-b w-10">#</th>
+                <th className="px-3 py-2 text-left border-b">APN</th>
+                <th className="px-3 py-2 text-right border-b">方案數</th>
+                <th className="px-3 py-2 text-right border-b">卡數</th>
+                <th className="px-3 py-2 text-right border-b">份數合計</th>
+                <th className="px-3 py-2 text-right border-b">總用量</th>
+                <th className="px-3 py-2 text-right border-b">平均/卡</th>
+                <th className="px-3 py-2 text-right border-b">平均/卡日</th>
+                <th className="px-3 py-2 text-left border-b w-48">占比</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const open = expanded.has(r.apn)
+                return (
+                  <Fragment key={r.apn}>
+                    <tr className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => setExpanded(s => { const n = new Set(s); n.has(r.apn) ? n.delete(r.apn) : n.add(r.apn); return n })}>
+                      <td className="px-3 py-2 text-gray-400">{open ? <ChevronDown className="w-4 h-4 inline" /> : <ChevronRight className="w-4 h-4 inline" />} {i + 1}</td>
+                      <td className="px-3 py-2 font-mono">{r.apn}</td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold">{r.plans.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{r.cards.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{r.copies.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmtKB(r.usage)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-600">{fmtKB(r.avg)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-gray-600">{fmtKB(r.avg_card_day)}</td>
+                      <td className="px-3 py-2"><div className="flex items-center gap-2"><div className="flex-1 h-2 bg-gray-100 rounded"><div className="h-2 bg-blue-500 rounded" style={{ width: `${maxPlans ? (r.plans / maxPlans) * 100 : 0}%` }} /></div><span className="text-xs text-gray-500 w-10 text-right">{r.share}%</span></div></td>
+                    </tr>
+                    {open && r.children.map(c => (
+                      <tr key={r.apn + ':' + c.key} className="border-b bg-gray-50/50 text-xs">
+                        <td></td>
+                        <td className="px-3 py-1.5 text-gray-600"><span className="text-gray-400">└ </span>{c.label}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{c.plans.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{c.cards.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{c.copies.toLocaleString()}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{fmtKB(c.usage)}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-gray-500">{fmtKB(c.avg)}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-gray-500">{fmtKB(c.avg_card_day)}</td>
+                        <td className="px-3 py-1.5"><div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-gray-100 rounded"><div className="h-1.5 bg-indigo-400 rounded" style={{ width: `${c.share}%` }} /></div><span className="text-gray-400 w-10 text-right">{c.share}%</span></div></td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 通用用量熱力圖（row × 月份，可展開成 child 維度）──
+interface HeatNode { code: string; name: string; total: number; cards: number; by_month: Record<string, number> }
+interface HeatData { months: string[]; month_totals: Record<string, number>; rows: (HeatNode & { children: HeatNode[] })[]; total_countries: number; total_cards: number; total_usage: number }
+function HeatmapPanel({ rowParam, rowLabel, childOptions, keyPrefix, csvPrefix, logicItems }: {
+  rowParam: 'country' | 'apn'; rowLabel: string; childOptions: readonly (readonly [string, string])[]; keyPrefix: string; csvPrefix: string; logicItems: string[]
+}) {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
+  const [child, setChild] = useState<string>(childOptions[0][0])
+  const [d, setD] = useState<HeatData | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true); const [computing, setComputing] = useState(false); const [computedAt, setComputedAt] = useState('')
+  const mnt = useRef(false)
+
+  const snapKey = (c: string) => `${keyPrefix}:${c}`
+  function apply(j: HeatData | null) { setD(j); setExpanded(new Set()) }
+  async function loadCachedChild(c: string) {
+    setLoading(true)
+    const s = await loadSnapshot<HeatData>(snapKey(c))
+    if (s) { apply(s.payload); setComputedAt(s.meta.computed_at) } else { apply(null); setComputedAt('') }
+    setLoading(false)
+  }
+  async function computeChild(c = child) {
+    setComputing(true)
+    const p = new URLSearchParams({ row: rowParam, child: c })
+    if (from) p.set('from', from); if (to) p.set('to', to); if (search) p.set('search', search)
+    if (excludeLegacy) p.set('exclude_legacy', '1')
+    const res = await fetch(`/api/admin/stats/heat?${p}`)
+    if (res.ok) { const j = await res.json(); apply(j); setComputedAt(new Date().toISOString()); saveSnapshot(snapKey(c), j, { from, to, search, row: rowParam, child: c, exclude_legacy: excludeLegacy }) }
+    setComputing(false); setLoading(false)
+  }
+  useEffect(() => {
+    if (!mnt.current) { mnt.current = true; loadCachedChild(child); return }
+    computeChild(child)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [excludeLegacy])
+  function pickChild(c: string) { setChild(c); loadCachedChild(c) }
+
+  function exportCsv() {
+    if (!d) return
+    const head = [rowLabel, '合計KB', ...d.months].join(',')
+    const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+    const body = d.rows.map(r => [r.name, r.total, ...d.months.map(m => r.by_month[m] || 0)].map(esc).join(',')).join('\n')
+    const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${csvPrefix}-heat.csv`; a.click(); URL.revokeObjectURL(url)
+  }
+
+  const maxCell = d ? Math.max(1, ...d.rows.flatMap(r => d.months.map(m => r.by_month[m] || 0))) : 1
+  const shadeR = (v: number) => v <= 0 ? undefined : `rgba(220, 38, 38, ${0.08 + 0.85 * (v / maxCell)})`   // 母列＝紅
+  const shadeB = (v: number) => v <= 0 ? undefined : `rgba(37, 99, 235, ${0.08 + 0.85 * (v / maxCell)})`    // 子列＝藍
+  const childLabel = childOptions.find(o => o[0] === child)?.[1] || ''
+  const nCols = d ? d.months.length + 2 : 2
+
+  return (
+    <div>
+      <LogicNote items={logicItems} />
+      <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500">展開看：</span>
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            {childOptions.map(([k, label]) => (
+              <button key={k} onClick={() => pickChild(k)} className={`px-3 py-1.5 text-sm rounded-md ${child === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && computeChild()}
+            placeholder={`搜尋${rowLabel}`} className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
+          <button onClick={() => computeChild()} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
+          <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+            <Download className="w-4 h-4" /> CSV
+          </button>
+        </div>
+      </div>
+
+      {!loading && d && (
+        <p className="mt-3 text-xs text-gray-500">{rowLabel} {d.total_countries.toLocaleString()} 種 · 有流量卡數 {d.total_cards.toLocaleString()} 張 · 總流量 {fmtKB(d.total_usage || 0)}{d.total_countries > d.rows.length ? `（顯示前 ${d.rows.length}，可搜尋）` : ''} · 點列展開看{childLabel}</p>
+      )}
+
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> : d.rows.length === 0 ? (
+        <p className="mt-6 text-sm text-gray-400">無資料</p>
+      ) : (
+        <div className="mt-2 bg-white border border-gray-200 rounded-xl overflow-x-auto">
+          <table className="text-sm border-collapse">
+            <thead className="bg-gray-50 text-xs">
+              <tr>
+                <th className="px-3 py-2 text-left border-b sticky left-0 bg-gray-50 z-10">{rowLabel}</th>
+                <th className="px-3 py-2 text-right border-b sticky left-0 bg-gray-50">總流量</th>
+                {d.months.map(m => (<th key={m} className="px-2 py-2 text-center border-b whitespace-nowrap font-normal">{m.slice(2)}</th>))}
+              </tr>
+            </thead>
+            <tbody>
+              {d.rows.map(r => {
+                const open = expanded.has(r.code)
+                return (
+                  <Fragment key={r.code}>
+                    <tr className="border-b hover:bg-rose-50/30 cursor-pointer" onClick={() => setExpanded(s => { const n = new Set(s); n.has(r.code) ? n.delete(r.code) : n.add(r.code); return n })}>
+                      <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white max-w-[13rem] truncate text-xs" title={r.name}>{open ? <ChevronDown className="w-3.5 h-3.5 inline" /> : <ChevronRight className="w-3.5 h-3.5 inline" />} {r.name}</td>
+                      <td className="px-3 py-1.5 text-right font-mono font-semibold sticky left-0 bg-white">{fmtKB(r.total)}</td>
+                      {d.months.map(m => { const v = r.by_month[m] || 0; return <td key={m} className="px-2 py-1.5 text-center font-mono text-[11px] tabular-nums" style={{ background: shadeR(v) }} title={`${r.name} · ${m}：${fmtKB(v)}`}>{v > 0 ? fmtKB(v) : ''}</td> })}
+                    </tr>
+                    {open && (r.children.length === 0 ? (
+                      <tr className="border-b bg-blue-50/30"><td className="px-8 py-1.5 text-xs text-gray-400 sticky left-0 bg-blue-50/30" colSpan={nCols}>（無{childLabel}明細）</td></tr>
+                    ) : r.children.map(c => (
+                      <tr key={r.code + ':' + c.code} className="border-b bg-blue-50/20">
+                        <td className="px-3 py-1 whitespace-nowrap sticky left-0 bg-white max-w-[13rem] truncate text-[11px] text-gray-600" title={c.name}><span className="text-gray-300 ml-4">└ </span>{c.name}</td>
+                        <td className="px-3 py-1 text-right font-mono text-[11px] sticky left-0 bg-white text-gray-600">{fmtKB(c.total)}</td>
+                        {d.months.map(m => { const v = c.by_month[m] || 0; return <td key={m} className="px-2 py-1 text-center font-mono text-[10px] tabular-nums text-blue-800" style={{ background: shadeB(v) }} title={`${c.name} · ${m}：${fmtKB(v)}`}>{v > 0 ? fmtKB(v) : ''}</td> })}
+                      </tr>
+                    )))}
+                  </Fragment>
+                )
+              })}
+              <tr className="border-t-2 bg-gray-50 text-xs font-semibold">
+                <td className="px-3 py-2 sticky left-0 bg-gray-50">每月流量</td>
+                <td className="px-3 py-2 text-right font-mono sticky left-0 bg-gray-50">{fmtKB(d.total_usage || 0)}</td>
+                {d.months.map(m => <td key={m} className="px-2 py-2 text-center font-mono text-[11px]">{fmtKB(d.month_totals[m] || 0)}</td>)}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// APN 熱力圖：row=apn，展開看 國家 / 方案
+function ApnHeat() {
+  return <HeatmapPanel rowParam="apn" rowLabel="APN" keyPrefix="heat:apn" csvPrefix="apn"
+    childOptions={[['country', '國家'], ['sku', '方案']]}
+    logicItems={[
+      '資料來源：card_usage_daily · 格子＝該月該 APN 的 used_amount 加總。',
+      '每筆每日用量的國家(country_region_code) → 對到該卡方案在該國的 apn，故每筆用量精準歸一個 APN、可加總。',
+      '點列展開＝把該 APN 的用量再拆成「國家」或「方案」（上方切換）；母列紅、子列藍。',
+    ]} />
 }
 
 interface CoverageRow { sku_id: string; sku_name: string; country_count: number; usage: number; cards: number; avg: number; avg_card_day: number; countries: { code: string; name: string; usage: number; cards: number; avg: number; avg_card_day: number }[] }
@@ -1487,16 +1766,16 @@ function ActivationLagAnalysis() {
 
 // ── 出行分析：子分頁（出行地×月 / 每日在哪國） ──
 function TravelAnalysis() {
-  const [sub, setSub] = useState<'arrival' | 'daily' | 'path'>('arrival')
+  const [sub, setSub] = useState<'arrival' | 'daily' | 'usage' | 'path'>('arrival')
   return (
     <div>
       <div className="mt-4 flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit flex-wrap">
-        {([['arrival', '首次抵達（卡數）'], ['daily', '停留卡日（卡日）'], ['path', '出行路徑']] as const).map(([k, label]) => (
+        {([['arrival', '首次抵達（卡數）'], ['daily', '停留卡日（卡日）'], ['usage', '當地總流量'], ['path', '出行路徑']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setSub(k)}
             className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
         ))}
       </div>
-      {sub === 'arrival' ? <TravelArrival /> : sub === 'daily' ? <TravelDaily /> : <TravelPath />}
+      {sub === 'arrival' ? <TravelArrival /> : sub === 'daily' ? <TravelDaily /> : sub === 'usage' ? <TravelUsage /> : <TravelPath />}
     </div>
   )
 }
@@ -1697,6 +1976,18 @@ function TravelDaily() {
   )
 }
 
+// ── 當地總流量：國家 × 月份 矩陣（格子＝該月該國的總使用流量 KB） ──
+// 當地總流量：row=country，展開看 方案 / APN
+function TravelUsage() {
+  return <HeatmapPanel rowParam="country" rowLabel="國家" keyPrefix="heat:country" csvPrefix="usage"
+    childOptions={[['sku', '方案'], ['apn', 'APN']]}
+    logicItems={[
+      '資料來源：card_usage_daily · 格子＝該月該國的 used_amount 加總（總使用流量）。',
+      '同一天在多國會各自累計該國的用量；有流量卡數＝不重複卡。',
+      '點列展開＝把該國用量再拆成「方案」或「APN」（上方切換）；母列紅、子列藍。',
+    ]} />
+}
+
 // ── 出行路徑分析：外層＝國家集合（不分順序），展開＝各種順序的路徑 ──
 interface PathData {
   rows: { label: string; stops: number; plans: number; cards: number; pct: number; path_count: number
@@ -1837,7 +2128,7 @@ function TravelPath() {
   )
 }
 
-// ── 日均量：每卡「平均每日用量」的 100MB 級距分佈（匯總／一般／吃到飽）──
+// ── 日均量：每卡「平均每日用量」的 100MB 級距分佈（總覽／一般／吃到飽）──
 interface DailyAvgData {
   rows: { mb: number; all: number; general: number; unlimited: number }[]
   day_rows: { day: number; label: string; all: number; general: number; unlimited: number }[]
@@ -1873,7 +2164,7 @@ function DailyAvgAnalysis() {
 
   function exportCsv() {
     if (!d) return
-    const head = '日均量級距MB,匯總卡數,一般,吃到飽'
+    const head = '日均量級距MB,總覽卡數,一般,吃到飽'
     const esc = (v: unknown) => String(v ?? '')
     const body = d.rows.map(r => [r.mb, r.all, r.general, r.unlimited].map(esc).join(',')).join('\n')
     const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
@@ -1886,11 +2177,11 @@ function DailyAvgAnalysis() {
         '資料來源：card_usage_daily（有流量）＋ card_plans（iccid→SKU）＋ sku_meta（吃到飽標註）。',
         '每張卡「日均量」＝總用量 ÷ 有流量天數，往上進位到級距（70→100、120→200）。',
         '級距寬度：≤3G 每 100MB、>3G 每 1G；柱狀圖為卡數分佈。',
-        '匯總＝所有卡；一般＝SKU 未標吃到飽；吃到飽＝SKU 已在「方案列表」標為吃到飽。',
+        '總覽＝所有卡；一般＝SKU 未標吃到飽；吃到飽＝SKU 已在「方案列表」標為吃到飽。',
       ]} />
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-          {([['all', '匯總'], ['general', '一般'], ['unlimited', '吃到飽']] as const).map(([k, label]) => (
+          {([['all', '總覽'], ['general', '一般'], ['unlimited', '吃到飽']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setSub(k)} className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
           ))}
         </div>
@@ -1908,14 +2199,14 @@ function DailyAvgAnalysis() {
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">此分類卡數</div><div className="mt-1 text-2xl font-bold">{totalSel.toLocaleString()}</div></div>
-            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">匯總 / 一般 / 吃到飽</div><div className="mt-1 text-lg font-bold">{d.total_cards.toLocaleString()} / {d.general_cards.toLocaleString()} / {d.unlimited_cards.toLocaleString()}</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">總覽 / 一般 / 吃到飽</div><div className="mt-1 text-lg font-bold">{d.total_cards.toLocaleString()} / {d.general_cards.toLocaleString()} / {d.unlimited_cards.toLocaleString()}</div></div>
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">整體平均日均量</div><div className="mt-1 text-2xl font-bold">{fmtMb(d.avg_all_mb)}</div></div>
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">一般平均</div><div className="mt-1 text-2xl font-bold text-blue-600">{fmtMb(d.avg_general_mb)}</div></div>
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">吃到飽平均</div><div className="mt-1 text-2xl font-bold text-emerald-600">{fmtMb(d.avg_unlimited_mb)}</div></div>
           </div>
 
           <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
-            <h3 className="text-sm font-semibold mb-3">日均量分佈（≤3G每{step >= 1000 ? '1G' : step + 'M'} · &gt;3G每1G · {sub === 'all' ? '匯總' : sub === 'general' ? '一般' : '吃到飽'}）</h3>
+            <h3 className="text-sm font-semibold mb-3">日均量分佈（≤3G每{step >= 1000 ? '1G' : step + 'M'} · &gt;3G每1G · {sub === 'all' ? '總覽' : sub === 'general' ? '一般' : '吃到飽'}）</h3>
             {rows.length === 0 ? <p className="text-sm text-gray-400">無資料（先到「方案列表」標註吃到飽、並同步方案）</p> : (
               <div className="overflow-x-auto">
                 <div className="flex items-end gap-1 min-w-max border-b border-gray-200" style={{ height: 256 }}>
@@ -1970,7 +2261,7 @@ function DaysAnalysis() {
 
   function exportCsv() {
     if (!d) return
-    const head = '使用天數,匯總卡數,一般,吃到飽'
+    const head = '使用天數,總覽卡數,一般,吃到飽'
     const body = d.day_rows.map(r => [r.label, r.all, r.general, r.unlimited].join(',')).join('\n')
     const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'usage-days.csv'; a.click(); URL.revokeObjectURL(url)
@@ -1981,11 +2272,11 @@ function DaysAnalysis() {
       <LogicNote items={[
         '資料來源：card_usage_daily（有流量）＋ card_plans（iccid→SKU）＋ sku_meta（吃到飽標註）。',
         '每張卡「使用天數」＝有流量的不重複日期數；柱狀圖 1~30 天，超過 30 天併入「30+」。',
-        '匯總＝所有卡；一般＝SKU 未標吃到飽；吃到飽＝SKU 已標吃到飽。',
+        '總覽＝所有卡；一般＝SKU 未標吃到飽；吃到飽＝SKU 已標吃到飽。',
       ]} />
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-          {([['all', '匯總'], ['general', '一般'], ['unlimited', '吃到飽']] as const).map(([k, label]) => (
+          {([['all', '總覽'], ['general', '一般'], ['unlimited', '吃到飽']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setSub(k)} className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
           ))}
         </div>
@@ -2005,7 +2296,7 @@ function DaysAnalysis() {
           </div>
 
           <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
-            <h3 className="text-sm font-semibold mb-3">使用天數分佈（1~30 天 · &gt;30 · {sub === 'all' ? '匯總' : sub === 'general' ? '一般' : '吃到飽'}）</h3>
+            <h3 className="text-sm font-semibold mb-3">使用天數分佈（1~30 天 · &gt;30 · {sub === 'all' ? '總覽' : sub === 'general' ? '一般' : '吃到飽'}）</h3>
             {rows.length === 0 ? <p className="text-sm text-gray-400">無資料</p> : (
               <div className="overflow-x-auto">
                 <div className="flex items-end gap-1 min-w-max border-b border-gray-200" style={{ height: 256 }}>

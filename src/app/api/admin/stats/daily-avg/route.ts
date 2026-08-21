@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 日均量分佈：每張卡的「平均每日用量」＝總用量 ÷ 有流量天數，落在哪個 100MB 級距（未滿往上進位：70→100、120→200）
-//   依 sku_meta.is_unlimited 分：匯總 / 一般 / 吃到飽
+//   依 sku_meta.is_unlimited 分：總覽 / 一般 / 吃到飽
 // GET ?from=&to=（用量日期）&exclude_legacy=1
 const MB = 1024 // KB
 
