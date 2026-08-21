@@ -19,6 +19,21 @@ function applyTypeFilter(query: any, type: string) {
   return query.or(`type.in.(${ESIM_TYPES.join(',')}),rechargeable_product.eq.1`)
 }
 
+// 補上 F056 加速包報價（accel_prices.acceleratePrice），依 sku_id 對應到回傳列
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function attachAccelPrice(supabase: any, rows: any[]): Promise<any[]> {
+  if (!rows.length) return rows
+  const ids = rows.map(r => r.sku_id).filter(Boolean)
+  if (!ids.length) return rows
+  const priceBySku = new Map<string, number>()
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data, error } = await supabase.from('accel_prices').select('sku_id, accelerate_price').in('sku_id', ids.slice(i, i + 300))
+    if (error) return rows   // accel_prices 未建（094 未跑）→ 原樣回傳
+    for (const r of data || []) if (r.accelerate_price != null) priceBySku.set(r.sku_id, Number(r.accelerate_price))
+  }
+  return rows.map(r => ({ ...r, accelerate_price: priceBySku.get(r.sku_id) ?? null }))
+}
+
 // 掃出 country_data 含「任一」指定 MCC 的 sku_id 清單（JSONB 陣列，需 JS 過濾）
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function skusWithCountries(supabase: any, mccs: string[]): Promise<string[]> {
@@ -210,7 +225,8 @@ export async function GET(request: Request) {
       withPrice.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hant'))
     }
     const start = (page - 1) * pageSize
-    return NextResponse.json({ data: withPrice.slice(start, start + pageSize), total: withPrice.length, page, pageSize })
+    const paged = withPrice.slice(start, start + pageSize)
+    return NextResponse.json({ data: await attachAccelPrice(supabase, paged), total: withPrice.length, page, pageSize })
   }
 
   // 分頁
@@ -223,7 +239,7 @@ export async function GET(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({
-    data: data || [],
+    data: await attachAccelPrice(supabase, data || []),
     total: count || 0,
     page,
     pageSize,

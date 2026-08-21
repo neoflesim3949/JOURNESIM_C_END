@@ -355,6 +355,7 @@ export interface BCProduct {
   productName?: string
   validityPeroid?: string
   accelerationSupport?: string
+  acceleratePrice?: number | string | null
   pointContactType?: string
   pointContactHours?: string
   timeZone?: string

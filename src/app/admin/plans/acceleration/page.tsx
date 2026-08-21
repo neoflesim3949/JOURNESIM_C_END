@@ -14,6 +14,7 @@ interface BCProduct {
   limit_flow_speed: string | null; plan_type: string | null; sales_method: string | null
   prices: PriceItem[] | null; country_data: CountryItem[] | null
   _day_price?: number | null; _day_copies?: string | null
+  accelerate_price?: number | null
   is_active: boolean; desc: string | null; operator_info: string | null
   hotspot_support: string | null; acceleration_support: string | null
   usage_count: string | null; time_zone: string | null; point_contact_type: string | null
@@ -160,6 +161,7 @@ export default function AdminAccelerationPlansPage() {
                       </button>
                     ) : '結算價'}
                   </th>
+                  <th className="text-right px-4 py-3 font-medium w-24">加速價<span className="ml-1 text-[10px] text-gray-400">F056</span></th>
                   <th className="text-center px-4 py-3 font-medium w-14">詳情</th>
                 </tr>
               </thead>
@@ -191,6 +193,7 @@ export default function AdminAccelerationPlansPage() {
                         <td className="px-4 py-3 text-xs">{formatSpeed(product.limit_flow_speed)}</td>
                         <td className="px-4 py-3 text-xs">{filterDays ? `${filterDays} 天` : hasPrices ? `${prices.length} 規格` : prices.length === 1 ? `${unitDays * parseInt(prices[0].copies)} 天` : '-'}</td>
                         <td className="px-4 py-3 text-right text-xs">{filterDays ? (product._day_price != null ? `¥${product._day_price}` : '-') : prices.length === 1 ? `¥${prices[0].settlementPrice}` : '-'}</td>
+                        <td className="px-4 py-3 text-right text-xs font-medium text-violet-600">{product.accelerate_price != null ? `¥${product.accelerate_price}` : '-'}</td>
                         <td className="px-4 py-3 text-center">
                           <button onClick={(e) => { e.stopPropagation(); setDetailProduct(product) }}
                             className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded">
@@ -203,7 +206,7 @@ export default function AdminAccelerationPlansPage() {
                           <td colSpan={6} className="px-4 py-2"></td>
                           <td className="px-4 py-2 text-xs text-gray-700"><span className="text-gray-400">└ </span>{unitDays * parseInt(price.copies)} 天</td>
                           <td className="px-4 py-2 text-right text-xs font-medium">¥{price.settlementPrice}</td>
-                          <td></td>
+                          <td colSpan={2}></td>
                         </tr>
                       ))}
                     </Fragment>
