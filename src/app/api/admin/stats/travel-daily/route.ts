@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 出行地 × 月份（依每日）：國家 × 月份 矩陣，格子＝該月該國的「卡·日數」
 //   每筆每日用量＝一個卡日；同一天在多國各計一次（例：6/30 日+韓 → 日本+1、韓國+1）
@@ -14,6 +15,7 @@ export async function GET(request: Request) {
   const search = (sp.get('search') || '').trim().toLowerCase()
   const limit = Math.min(Number(sp.get('limit')) || 50, 300)
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   const byCountry = new Map<string, { name: string; total: number; byMonth: Map<string, number> }>()
   const monthSet = new Set<string>()
@@ -26,7 +28,7 @@ export async function GET(request: Request) {
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break
     for (const r of data) {
-      if (!r.iccid || (Number(r.used_amount) || 0) <= 0) continue
+      if (!r.iccid || (Number(r.used_amount) || 0) <= 0 || legacy.has(r.iccid)) continue
       const month = (r.used_date as string).slice(0, 7)
       const code = r.country_region_code || r.country || '—'
       monthSet.add(month)

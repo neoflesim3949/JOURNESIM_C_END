@@ -96,7 +96,8 @@ const NAV_ITEMS: NavItem[] = [
     href: '/admin/stats', label: '統計專區', icon: BarChart3,
     children: [
       { href: '/admin/stats', label: '方案統計分析' },
-      { href: '/admin/stats/detail', label: '統計明細列表' },
+      { href: '/admin/stats/detail', label: '方案統計明細列表' },
+      { href: '/admin/stats/sku-list', label: '方案列表' },
       { href: '/admin/stats/order-analysis', label: '訂單統計分析' },
       { href: '/admin/stats/history-orders', label: '歷史採購訂單明細' },
       { href: '/admin/stats/history-aftersales', label: '歷史採購售後明細' },

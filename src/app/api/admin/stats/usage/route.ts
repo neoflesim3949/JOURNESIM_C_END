@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 數據使用量分析（card_usage_daily，用量單位 KB）
 // GET ?dim=global|sku|country & from= & to=
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
   // 每日趨勢：沒指定區間時預設近 30 天
   const effFrom = (dim === 'global' && !from) ? new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10) : from
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   // iccid → 方案對照：一張卡取出現最多次的 (SKU, copies)
   //  - dim=sku：把用量歸到 SKU
@@ -61,6 +63,7 @@ export async function GET(request: Request) {
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break
     for (const r of data) {
+      if (legacy.has(r.iccid)) continue
       const amt = Number(r.used_amount) || 0
       total += amt
       const cardDayKey = `${r.iccid}|${r.used_date}`

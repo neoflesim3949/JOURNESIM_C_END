@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 下單 → 開通 間隔：card_plans.order_time（優先蝦皮，其次 BC 建單）到 plan_start_time（開通/啟用）
 // GET ?from=&to=（下單日期區間）&source=shopee|bc
@@ -11,6 +12,7 @@ export async function GET(request: Request) {
   const to = sp.get('to') || ''
   const source = sp.get('source') || ''
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   interface Row { iccid: string; sku_name: string | null; order_time: string; plan_start_time: string; order_time_source: string | null }
   const data: Row[] = []
@@ -45,6 +47,7 @@ export async function GET(request: Request) {
   const dayCount = new Array(31).fill(0)   // 0~30 天逐日
 
   for (const r of data) {
+    if (legacy.has(r.iccid)) continue
     const d = (new Date(r.plan_start_time).getTime() - new Date(r.order_time).getTime()) / 86400000  // 天
     daysArr.push(d)
     if (r.order_time_source === 'shopee') srcCount.shopee++

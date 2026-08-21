@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // SKU 使用統計：card_plans 依 SKU 彙總（方案數 / 卡數 / 份數合計）
 // GET ?from=&to=（啟用時間區間）&plan_status=&plan_type=
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
   const planStatus = sp.get('plan_status') || ''
   const planType = sp.get('plan_type') || ''
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   const agg = new Map<string, { sku_name: string; plan_type: string | null; plans: number; cards: Set<string>; copies: number; copiesDist: Map<string, number> }>()
   let totalPlans = 0
@@ -25,6 +27,7 @@ export async function GET(request: Request) {
     const { data } = await q.range(fromIdx, fromIdx + 999)
     if (!data || data.length === 0) break
     for (const p of data) {
+      if (legacy.has(p.iccid)) continue
       const key = p.sku_id || p.sku_name || '未知'
       let a = agg.get(key)
       if (!a) { a = { sku_name: p.sku_name || key, plan_type: p.plan_type, plans: 0, cards: new Set(), copies: 0, copiesDist: new Map() }; agg.set(key, a) }

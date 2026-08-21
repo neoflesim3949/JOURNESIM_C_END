@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 方案覆蓋組合：每支 SKU 的各方案，在啟用期間去了哪些地區
 //   mode=sku   ：SKU →（幾個國家）→（實際國家組合，各有幾張卡）
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   const planStatus = sp.get('plan_status') || ''
   const todayISO = sp.get('today') || ''
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   interface Plan {
     iccid: string; sub_order_id: string; sku_id: string | null; sku_name: string | null
@@ -32,7 +34,7 @@ export async function GET(request: Request) {
     plans.push(...(data as Plan[]))
     if (data.length < 1000) break
   }
-  const activePlans = plans.filter(p => p.plan_start_time)
+  const activePlans = plans.filter(p => p.plan_start_time && !legacy.has(p.iccid))
   const iccids = [...new Set(activePlans.map(p => p.iccid))]
 
   // 每卡每日用量（依 iccid 分組）

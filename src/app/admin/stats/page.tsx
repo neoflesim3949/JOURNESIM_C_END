@@ -1,8 +1,11 @@
 'use client'
 
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, createContext, useContext } from 'react'
 import DateRange from '@/components/admin/DateRange'
 import { Loader2, Download, ChevronDown, ChevronRight } from 'lucide-react'
+
+// 全域「排除舊SIMPOMATION」開關（各分頁共用；預設排除）
+const ExcludeLegacyCtx = createContext(true)
 
 interface SkuRow {
   sku_id: string
@@ -25,22 +28,30 @@ function fmtKB(kb: number) {
 }
 
 export default function StatsAnalysisPage() {
-  const [tab, setTab] = useState<'sku' | 'usage' | 'util' | 'expiry' | 'lifecycle' | 'lag' | 'travel'>('sku')
+  const [tab, setTab] = useState<'sku' | 'usage' | 'dailyavg' | 'days' | 'util' | 'expiry' | 'lifecycle' | 'lag' | 'travel'>('sku')
+  const [excludeLegacy, setExcludeLegacy] = useState(true)
   return (
+    <ExcludeLegacyCtx.Provider value={excludeLegacy}>
     <div>
-      <h1 className="text-2xl font-bold">方案統計分析</h1>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h1 className="text-2xl font-bold">方案統計分析</h1>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 whitespace-nowrap">
+          <input type="checkbox" checked={excludeLegacy} onChange={e => setExcludeLegacy(e.target.checked)} /> 排除舊SIMPOMATION（無逐日資料）
+        </label>
+      </div>
       <div className="mt-4 flex gap-1 border-b border-gray-200 flex-wrap">
-        {([['sku', '方案分析'], ['usage', '數據用量'], ['util', '利用率'], ['expiry', '到期提醒'], ['lifecycle', '生命週期'], ['lag', '開通時效'], ['travel', '出行分析']] as const).map(([k, label]) => (
+        {([['sku', '方案分析'], ['usage', '數據用量'], ['dailyavg', '日均量'], ['days', '使用天數'], ['util', '利用率'], ['expiry', '到期提醒'], ['lifecycle', '生命週期'], ['lag', '開通時效'], ['travel', '出行分析']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
             {label}
           </button>
         ))}
       </div>
-      {tab === 'sku' ? <SkuSection /> : tab === 'usage' ? <UsageAnalysis />
+      {tab === 'sku' ? <SkuSection /> : tab === 'usage' ? <UsageAnalysis /> : tab === 'dailyavg' ? <DailyAvgAnalysis /> : tab === 'days' ? <DaysAnalysis />
         : tab === 'util' ? <UtilizationAnalysis /> : tab === 'expiry' ? <ExpiryAnalysis /> : tab === 'lifecycle' ? <LifecycleAnalysis />
         : tab === 'lag' ? <ActivationLagAnalysis /> : <TravelAnalysis />}
     </div>
+    </ExcludeLegacyCtx.Provider>
   )
 }
 
@@ -70,6 +81,7 @@ function LogicNote({ items }: { items: string[] }) {
 }
 
 function SkuAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [rows, setRows] = useState<SkuRow[]>([])
   const [totalPlans, setTotalPlans] = useState(0)
   const [totalSkus, setTotalSkus] = useState(0)
@@ -86,6 +98,7 @@ function SkuAnalysis() {
     if (to) p.set('to', to)
     if (planStatus) p.set('plan_status', planStatus)
     if (planType) p.set('plan_type', planType)
+    if (excludeLegacy) p.set('exclude_legacy', '1')
     return p
   }
   async function load() {
@@ -94,7 +107,7 @@ function SkuAnalysis() {
     if (res.ok) { const d = await res.json(); setRows(d.rows || []); setTotalPlans(d.total_plans || 0); setTotalSkus(d.total_skus || 0) }
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function exportCsv() {
     const head = 'SKU名稱,類型,方案數,卡數,份數合計,占比%'
@@ -230,6 +243,7 @@ function SkuAnalysis() {
 interface CopiesCell { copies: string; usage: number; cards: number; avg: number; avg_card_day: number }
 interface UsageRow { key: string; label: string; usage: number; cards: number; avg: number; avg_card_day: number; share: number; copies_dist: CopiesCell[]; sku_dist: { sku_id: string; sku_name: string; usage: number; cards: number; avg: number; avg_card_day: number; copies_dist: CopiesCell[] }[] }
 function UsageAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [dim, setDim] = useState<'global' | 'sku' | 'country'>('global')
   const [rows, setRows] = useState<UsageRow[]>([])
   const [total, setTotal] = useState(0)
@@ -246,11 +260,12 @@ function UsageAnalysis() {
     const p = new URLSearchParams({ dim: d })
     if (from) p.set('from', from)
     if (to) p.set('to', to)
-    const res = await fetch(`/api/admin/stats/usage?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/usage?${p}`)
     if (res.ok) { const j = await res.json(); setRows(j.rows || []); setTotal(j.total || 0); setTotalCards(j.total_cards || 0); setTotalAvgCardDay(j.total_avg_card_day || 0) }
     setLoading(false)
   }
-  useEffect(() => { load('global') /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load('global') /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function pick(d: 'global' | 'sku' | 'country') { setDim(d); setExpanded(new Set()); setExpanded2(new Set()); load(d) }
   const maxUsage = rows.length ? Math.max(...rows.map(r => r.usage)) : 0
@@ -464,6 +479,7 @@ function SkuSection() {
 
 interface CoverageRow { sku_id: string; sku_name: string; country_count: number; usage: number; cards: number; avg: number; avg_card_day: number; countries: { code: string; name: string; usage: number; cards: number; avg: number; avg_card_day: number }[] }
 function SkuCoverage() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [rows, setRows] = useState<CoverageRow[]>([])
   const [totalSkus, setTotalSkus] = useState(0)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -476,11 +492,12 @@ function SkuCoverage() {
     const p = new URLSearchParams()
     if (from) p.set('from', from)
     if (to) p.set('to', to)
-    const res = await fetch(`/api/admin/stats/sku-countries?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/sku-countries?${p}`)
     if (res.ok) { const j = await res.json(); setRows(j.rows || []); setTotalSkus(j.total_skus || 0) }
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function exportCsv() {
     const head = 'SKU名稱,使用國家數,總用量KB,卡數,平均每卡KB,平均每卡每日KB'
@@ -600,6 +617,7 @@ interface ComboCell { label: string; names: string[]; size: number; plans: numbe
 interface SizeGroup { size: number; plans: number; cards: number; usage: number; avg: number; avg_card_day: number; combos: ComboCell[] }
 interface ComboSkuRow { sku_id: string; sku_name: string; plans: number; cards: number; usage: number; avg: number; avg_card_day: number; size_count: number; combo_count: number; size_groups: SizeGroup[] }
 function ComboCoverage() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [rows, setRows] = useState<ComboSkuRow[]>([])
   const [totalSkus, setTotalSkus] = useState(0)
   const [totalUsage, setTotalUsage] = useState(0)
@@ -617,11 +635,12 @@ function ComboCoverage() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (planStatus) p.set('plan_status', planStatus)
-    const res = await fetch(`/api/admin/stats/coverage-combos?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/coverage-combos?${p}`)
     if (res.ok) { const j = await res.json(); setRows(j.rows || []); setTotalSkus(j.total_skus || 0); setTotalUsage(j.total_usage || 0) }
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function exportCsv() {
     const head = 'SKU,國家數,國家組合,方案數,卡數,平均每卡KB,平均每卡每日KB,用量KB'
@@ -775,6 +794,7 @@ function ComboCoverage() {
 
 // ── 純國家組合（不分方案）：全體 →（幾個國家）→（實際國家組合）──
 function PureCombo() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [groups, setGroups] = useState<SizeGroup[]>([])
   const [summary, setSummary] = useState({ plans: 0, cards: 0, usage: 0, size_count: 0, combo_count: 0 })
   const [expanded, setExpanded] = useState<Set<number>>(new Set())      // 展開的國家數群組
@@ -791,11 +811,12 @@ function PureCombo() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (planStatus) p.set('plan_status', planStatus)
-    const res = await fetch(`/api/admin/stats/coverage-combos?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/coverage-combos?${p}`)
     if (res.ok) { const j = await res.json(); setGroups(j.size_groups || []); setSummary({ plans: j.plans || 0, cards: j.cards || 0, usage: j.usage || 0, size_count: j.size_count || 0, combo_count: j.combo_count || 0 }) }
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function exportCsv() {
     const head = '國家數,國家組合,方案數,卡數,平均每卡KB,平均每卡每日KB,用量KB'
@@ -967,6 +988,7 @@ interface UtilData {
   day_buckets: { key: string; label: string; plans: number; pct: number }[]
 }
 function UtilizationAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<UtilData | null>(null)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
@@ -980,11 +1002,12 @@ function UtilizationAnalysis() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (planType) p.set('plan_type', planType)
-    const res = await fetch(`/api/admin/stats/utilization?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/utilization?${p}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   const maxUsage = d ? Math.max(...d.usage_buckets.map(b => b.plans), 1) : 1
   const maxDay = d ? Math.max(...d.day_buckets.map(b => b.plans), 1) : 1
@@ -1062,6 +1085,7 @@ interface ExpiryData {
   status_labels: Record<string, string>
 }
 function ExpiryAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<ExpiryData | null>(null)
   const [loading, setLoading] = useState(true)
   const [includeDead, setIncludeDead] = useState(false)
@@ -1071,11 +1095,12 @@ function ExpiryAnalysis() {
     const today = new Date().toISOString().slice(0, 10)
     const p = new URLSearchParams({ today })
     if (includeDead) p.set('include_dead', '1')
-    const res = await fetch(`/api/admin/stats/expiry?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/expiry?${p}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [includeDead])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [includeDead, excludeLegacy])
 
   const maxB = d ? Math.max(...d.buckets.map(b => b.plans), 1) : 1
   const maxM = d ? Math.max(...d.monthly.map(m => m.plans), 1) : 1
@@ -1157,6 +1182,7 @@ interface LifecycleData {
   segments: { prefix: string; cards: number; activated: number; activated_pct: number; dead: number; dead_pct: number; status: { status: string; label: string; count: number }[] }[]
 }
 function LifecycleAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<LifecycleData | null>(null)
   const [loading, setLoading] = useState(true)
   const [seglen, setSeglen] = useState(10)
@@ -1164,11 +1190,11 @@ function LifecycleAnalysis() {
 
   async function load() {
     setLoading(true)
-    const res = await fetch(`/api/admin/stats/lifecycle?seglen=${seglen}`)
+    const res = await fetch(`/api/admin/stats/lifecycle?seglen=${seglen}${excludeLegacy ? '&exclude_legacy=1' : ''}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   const maxStatus = d ? Math.max(...d.status_dist.map(s => s.count), 1) : 1
   const maxSpan = d ? Math.max(...d.span_buckets.map(b => b.plans), 1) : 1
@@ -1319,6 +1345,7 @@ interface LagData {
   longest: { iccid: string; sku_name: string; order_time: string; plan_start_time: string; days: number; source: string | null }[]
 }
 function ActivationLagAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<LagData | null>(null)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
@@ -1331,11 +1358,12 @@ function ActivationLagAnalysis() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (source) p.set('source', source)
-    const res = await fetch(`/api/admin/stats/activation-lag?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/activation-lag?${p}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   const maxB = d ? Math.max(...d.buckets.map(b => b.plans), 1) : 1
 
@@ -1478,6 +1506,7 @@ interface TravelData {
   total_countries: number; total_cards: number
 }
 function TravelArrival() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<TravelData | null>(null)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
@@ -1490,11 +1519,12 @@ function TravelArrival() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (search) p.set('search', search)
-    const res = await fetch(`/api/admin/stats/travel?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/travel?${p}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function exportCsv() {
     if (!d) return
@@ -1573,6 +1603,7 @@ function TravelArrival() {
 
 // ── 在哪國（每月都計）：國家 × 月份 矩陣（格子＝該月在該國有流量的卡數；非首次） ──
 function TravelDaily() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<(TravelData & { total_card_days?: number }) | null>(null)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
@@ -1585,11 +1616,12 @@ function TravelDaily() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (search) p.set('search', search)
-    const res = await fetch(`/api/admin/stats/travel-daily?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/travel-daily?${p}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
 
   function exportCsv() {
     if (!d) return
@@ -1674,6 +1706,7 @@ interface PathData {
   stops_dist: { stops: number; plans: number }[]
 }
 function TravelPath() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<PathData | null>(null)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
@@ -1689,11 +1722,12 @@ function TravelPath() {
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (search) p.set('search', search)
-    const res = await fetch(`/api/admin/stats/travel-path?${p}`)
+        if (excludeLegacy) p.set('exclude_legacy', '1')
+        const res = await fetch(`/api/admin/stats/travel-path?${p}`)
     if (res.ok) setD(await res.json())
     setLoading(false)
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [minStops])
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [minStops, excludeLegacy])
 
   function exportCsv() {
     if (!d) return
@@ -1802,6 +1836,205 @@ function TravelPath() {
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── 日均量：每卡「平均每日用量」的 100MB 級距分佈（匯總／一般／吃到飽）──
+interface DailyAvgData {
+  rows: { mb: number; all: number; general: number; unlimited: number }[]
+  day_rows: { day: number; label: string; all: number; general: number; unlimited: number }[]
+  total_cards: number; general_cards: number; unlimited_cards: number
+  avg_all_mb: number; avg_general_mb: number; avg_unlimited_mb: number
+  avg_days_all: number; avg_days_general: number; avg_days_unlimited: number
+}
+function DailyAvgAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
+  const [sub, setSub] = useState<'all' | 'general' | 'unlimited'>('all')
+  const [d, setD] = useState<DailyAvgData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [step, setStep] = useState(100)
+
+  async function load() {
+    setLoading(true)
+    const p = new URLSearchParams({ step: String(step) })
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    if (excludeLegacy) p.set('exclude_legacy', '1')
+    const res = await fetch(`/api/admin/stats/daily-avg?${p}`)
+    if (res.ok) setD(await res.json())
+    setLoading(false)
+  }
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy, step])
+
+  const rows = d?.rows || []
+  const key = sub
+  const maxV = rows.length ? Math.max(1, ...rows.map(r => r[key])) : 1
+  const totalSel = sub === 'all' ? (d?.total_cards || 0) : sub === 'general' ? (d?.general_cards || 0) : (d?.unlimited_cards || 0)
+  const color = sub === 'unlimited' ? 'bg-emerald-500' : sub === 'general' ? 'bg-blue-500' : 'bg-violet-500'
+  const fmtMb = (mb: number) => mb >= 1000 ? `${(mb / 1000).toFixed(mb % 1000 ? 1 : 0)}G` : `${mb}M`
+
+  function exportCsv() {
+    if (!d) return
+    const head = '日均量級距MB,匯總卡數,一般,吃到飽'
+    const esc = (v: unknown) => String(v ?? '')
+    const body = d.rows.map(r => [r.mb, r.all, r.general, r.unlimited].map(esc).join(',')).join('\n')
+    const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'daily-avg.csv'; a.click(); URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div>
+      <LogicNote items={[
+        '資料來源：card_usage_daily（有流量）＋ card_plans（iccid→SKU）＋ sku_meta（吃到飽標註）。',
+        '每張卡「日均量」＝總用量 ÷ 有流量天數，往上進位到級距（70→100、120→200）。',
+        '級距寬度：≤3G 每 100MB、>3G 每 1G；柱狀圖為卡數分佈。',
+        '匯總＝所有卡；一般＝SKU 未標吃到飽；吃到飽＝SKU 已在「方案列表」標為吃到飽。',
+      ]} />
+      <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          {([['all', '匯總'], ['general', '一般'], ['unlimited', '吃到飽']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setSub(k)} className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={step} onChange={e => setStep(Number(e.target.value))} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
+            {[[100, '級距 100MB'], [200, '級距 200MB'], [500, '級距 500MB'], [1000, '級距 1GB']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="用量日" />
+          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Download className="w-4 h-4" /> CSV</button>
+        </div>
+      </div>
+
+      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+        <>
+          <div className="mt-4 flex gap-4 flex-wrap">
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">此分類卡數</div><div className="mt-1 text-2xl font-bold">{totalSel.toLocaleString()}</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">匯總 / 一般 / 吃到飽</div><div className="mt-1 text-lg font-bold">{d.total_cards.toLocaleString()} / {d.general_cards.toLocaleString()} / {d.unlimited_cards.toLocaleString()}</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">整體平均日均量</div><div className="mt-1 text-2xl font-bold">{fmtMb(d.avg_all_mb)}</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">一般平均</div><div className="mt-1 text-2xl font-bold text-blue-600">{fmtMb(d.avg_general_mb)}</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">吃到飽平均</div><div className="mt-1 text-2xl font-bold text-emerald-600">{fmtMb(d.avg_unlimited_mb)}</div></div>
+          </div>
+
+          <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
+            <h3 className="text-sm font-semibold mb-3">日均量分佈（≤3G每{step >= 1000 ? '1G' : step + 'M'} · &gt;3G每1G · {sub === 'all' ? '匯總' : sub === 'general' ? '一般' : '吃到飽'}）</h3>
+            {rows.length === 0 ? <p className="text-sm text-gray-400">無資料（先到「方案列表」標註吃到飽、並同步方案）</p> : (
+              <div className="overflow-x-auto">
+                <div className="flex items-end gap-1 min-w-max border-b border-gray-200" style={{ height: 256 }}>
+                  {rows.map(r => {
+                    const v = r[key]
+                    const h = v > 0 ? Math.max(2, Math.round((v / maxV) * 240)) : 0
+                    return (
+                      <div key={r.mb} className="flex flex-col items-center justify-end w-8 group" title={`≤${fmtMb(r.mb)}：${v} 卡`}>
+                        <span className="text-[10px] text-gray-500 mb-0.5 opacity-0 group-hover:opacity-100">{v}</span>
+                        <div className={`w-5 ${color} rounded-t`} style={{ height: h }} />
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-1 min-w-max mt-1">
+                  {rows.map(r => <div key={r.mb} className="w-8 text-center text-[9px] text-gray-400">{fmtMb(r.mb)}</div>)}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── 使用天數：每卡「有流量天數」的分佈（1~30 天、>30）──
+function DaysAnalysis() {
+  const excludeLegacy = useContext(ExcludeLegacyCtx)
+  const [sub, setSub] = useState<'all' | 'general' | 'unlimited'>('all')
+  const [d, setD] = useState<DailyAvgData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+
+  async function load() {
+    setLoading(true)
+    const p = new URLSearchParams()
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    if (excludeLegacy) p.set('exclude_legacy', '1')
+    const res = await fetch(`/api/admin/stats/daily-avg?${p}`)
+    if (res.ok) setD(await res.json())
+    setLoading(false)
+  }
+  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+
+  const rows = d?.day_rows || []
+  const key = sub
+  const maxV = rows.length ? Math.max(1, ...rows.map(r => r[key])) : 1
+  const totalSel = sub === 'all' ? (d?.total_cards || 0) : sub === 'general' ? (d?.general_cards || 0) : (d?.unlimited_cards || 0)
+  const avgDays = d ? (sub === 'all' ? d.avg_days_all : sub === 'general' ? d.avg_days_general : d.avg_days_unlimited) : 0
+  const color = sub === 'unlimited' ? 'bg-emerald-500' : sub === 'general' ? 'bg-blue-500' : 'bg-violet-500'
+
+  function exportCsv() {
+    if (!d) return
+    const head = '使用天數,匯總卡數,一般,吃到飽'
+    const body = d.day_rows.map(r => [r.label, r.all, r.general, r.unlimited].join(',')).join('\n')
+    const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'usage-days.csv'; a.click(); URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div>
+      <LogicNote items={[
+        '資料來源：card_usage_daily（有流量）＋ card_plans（iccid→SKU）＋ sku_meta（吃到飽標註）。',
+        '每張卡「使用天數」＝有流量的不重複日期數；柱狀圖 1~30 天，超過 30 天併入「30+」。',
+        '匯總＝所有卡；一般＝SKU 未標吃到飽；吃到飽＝SKU 已標吃到飽。',
+      ]} />
+      <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          {([['all', '匯總'], ['general', '一般'], ['unlimited', '吃到飽']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setSub(k)} className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="用量日" />
+          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Download className="w-4 h-4" /> CSV</button>
+        </div>
+      </div>
+
+      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+        <>
+          <div className="mt-4 flex gap-4 flex-wrap">
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">此分類卡數</div><div className="mt-1 text-2xl font-bold">{totalSel.toLocaleString()}</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">平均使用天數</div><div className={`mt-1 text-2xl font-bold ${color.replace('bg-', 'text-')}`}>{avgDays} 天</div></div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">整體 / 一般 / 吃到飽 均天數</div><div className="mt-1 text-lg font-bold">{d.avg_days_all} / {d.avg_days_general} / {d.avg_days_unlimited} 天</div></div>
+          </div>
+
+          <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
+            <h3 className="text-sm font-semibold mb-3">使用天數分佈（1~30 天 · &gt;30 · {sub === 'all' ? '匯總' : sub === 'general' ? '一般' : '吃到飽'}）</h3>
+            {rows.length === 0 ? <p className="text-sm text-gray-400">無資料</p> : (
+              <div className="overflow-x-auto">
+                <div className="flex items-end gap-1 min-w-max border-b border-gray-200" style={{ height: 256 }}>
+                  {rows.map(r => {
+                    const v = r[key]
+                    const h = v > 0 ? Math.max(2, Math.round((v / maxV) * 240)) : 0
+                    return (
+                      <div key={r.day} className="flex flex-col items-center justify-end w-8 group" title={`${r.label} 天：${v} 卡`}>
+                        <span className="text-[10px] text-gray-500 mb-0.5 opacity-0 group-hover:opacity-100">{v}</span>
+                        <div className={`w-5 ${color} rounded-t`} style={{ height: h }} />
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-1 min-w-max mt-1">
+                  {rows.map(r => <div key={r.day} className="w-8 text-center text-[9px] text-gray-400">{r.label}</div>)}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

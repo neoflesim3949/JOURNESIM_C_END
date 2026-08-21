@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 出行地 × 出行日期：每張卡在某國的「首次用量日期」= 出行日期（抵達），依月份彙總
 //   形成 國家 × 月份 的矩陣（格子 = 該月出行到該國的卡數）
@@ -13,6 +14,7 @@ export async function GET(request: Request) {
   const search = (sp.get('search') || '').trim().toLowerCase()
   const limit = Math.min(Number(sp.get('limit')) || 50, 300)
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   // 每張卡在每個國家的最早用量日期（抵達）
   const arrival = new Map<string, { name: string; date: string }>()  // key: iccid|code
@@ -23,7 +25,7 @@ export async function GET(request: Request) {
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break
     for (const r of data) {
-      if (!r.iccid || !r.used_date || (Number(r.used_amount) || 0) <= 0) continue
+      if (!r.iccid || !r.used_date || (Number(r.used_amount) || 0) <= 0 || legacy.has(r.iccid)) continue
       const code = r.country_region_code || r.country || '—'
       const key = `${r.iccid}|${code}`
       const d = (r.used_date as string).slice(0, 10)

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 方案覆蓋國家：每支 SKU 實際被使用（有流量）在幾個國家
 // GET ?from=&to=（使用日期區間）
@@ -10,6 +11,7 @@ export async function GET(request: Request) {
   const from = sp.get('from') || ''
   const to = sp.get('to') || ''
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   // iccid → SKU（取出現最多次的）
   const combo = new Map<string, Map<string, number>>()
@@ -42,6 +44,7 @@ export async function GET(request: Request) {
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break
     for (const r of data) {
+      if (legacy.has(r.iccid)) continue
       const sku = iccidToSku.get(r.iccid) || '(無方案對照)'
       const amt = Number(r.used_amount) || 0
       const cKey = r.country_region_code || r.country || '—'

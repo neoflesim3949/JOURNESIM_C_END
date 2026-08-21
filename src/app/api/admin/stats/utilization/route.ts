@@ -14,8 +14,20 @@ export async function GET(request: Request) {
   const from = sp.get('from') || ''
   const to = sp.get('to') || ''
   const planType = sp.get('plan_type') || ''
+  const excludeLegacy = sp.get('exclude_legacy') === '1'   // 排除舊 SIMPOMATION（無逐日資料）
   const todayISO = sp.get('today') || ''
   const supabase = createAdminClient()
+
+  // 舊 SIMPOMATION 卡集合（要排除時用）
+  const legacy = new Set<string>()
+  if (excludeLegacy) {
+    for (let f = 0; ; f += 1000) {
+      const { data } = await supabase.from('manual_iccids').select('iccid').ilike('note', '%舊SIMPOMATION%').range(f, f + 999)
+      if (!data || data.length === 0) break
+      for (const r of data) legacy.add(r.iccid)
+      if (data.length < 1000) break
+    }
+  }
 
   interface Plan { iccid: string; sub_order_id: string; total_days: number | null; plan_type: string | null; plan_start_time: string | null; plan_end_time: string | null }
   const plans: Plan[] = []
@@ -29,7 +41,7 @@ export async function GET(request: Request) {
     plans.push(...(data as Plan[]))
     if (data.length < 1000) break
   }
-  const active = plans.filter(p => p.plan_start_time)
+  const active = plans.filter(p => p.plan_start_time && !legacy.has(p.iccid))
   const iccids = [...new Set(active.map(p => p.iccid))]
 
   // 每卡每日用量（依 iccid 分組，含日期以算利用天數）

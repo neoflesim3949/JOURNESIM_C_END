@@ -37,6 +37,7 @@ export default function StatsDetailPage() {
   const [installed, setInstalled] = useState('')
   const [needSync, setNeedSync] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
   const [usageModal, setUsageModal] = useState<Row | null>(null)
   const [pageSize, setPageSize] = useState(50)
   const [sortBy, setSortBy] = useState('')            // '' | iccid | plan_start_time | plan_end_time
@@ -78,14 +79,23 @@ export default function StatsDetailPage() {
   function exportCsv() { window.open(`/api/admin/stats/cards?${params({ action: 'export' })}`, '_blank') }
 
   async function syncPlans() {
-    setSyncing(true)
+    setSyncing(true); setSyncMsg('')
+    const BATCH = 500
+    let cards = 0, plans = 0, usage = 0, rounds = 0
     try {
-      const res = await fetch('/api/admin/stats/cards', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 300 }),
-      })
-      const d = await res.json()
-      if (!res.ok) { alert(d.error || '同步失敗'); return }
-      alert(d.note || `同步完成：查詢 ${d.picked} 張卡，寫入 ${d.plans} 筆方案、${d.usage ?? 0} 筆使用量`)
+      while (true) {
+        const res = await fetch('/api/admin/stats/cards', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: BATCH }),
+        })
+        const d = await res.json()
+        if (!res.ok) { alert(d.error || '同步失敗'); break }
+        const picked = d.picked || 0
+        cards += picked; plans += d.plans || 0; usage += d.usage || 0; rounds++
+        setSyncMsg(`同步中…已處理 ${cards.toLocaleString()} 張（第 ${rounds} 批）`)
+        if (picked < BATCH) break   // 沒有更多待同步 → 撈完
+      }
+      setSyncMsg('')
+      alert(`同步完成：共 ${cards.toLocaleString()} 張、方案 ${plans.toLocaleString()} 筆、使用量 ${usage.toLocaleString()} 筆`)
       setPage(1); load(1)
     } finally { setSyncing(false) }
   }
@@ -96,13 +106,13 @@ export default function StatsDetailPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">統計明細列表</h1>
+          <h1 className="text-2xl font-bold">方案統計明細列表</h1>
           <p className="mt-1 text-sm text-gray-500">每張卡（ICCID）一列 · 全平台彙整（卡狀態 / 套餐 / 訂單 / 成本 / 售後 / 安裝）</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={syncPlans} disabled={syncing}
             className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-60">
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {syncing ? '同步中…' : '同步方案 (F012)'}
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} {syncing ? (syncMsg || '同步中…') : '同步方案 (F012)'}
           </button>
           <button onClick={exportCsv} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700">
             <Download className="w-4 h-4" /> 匯出 CSV

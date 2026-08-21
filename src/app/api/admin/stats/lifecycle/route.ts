@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 卡片生命週期：狀態分佈 / 啟用漏斗 / 啟用時長 / 號段分析
 // GET ?card_type=&seglen=（號段前綴長度，預設 10）
@@ -13,6 +14,7 @@ export async function GET(request: Request) {
   const cardType = sp.get('card_type') || ''
   const seglen = Math.min(Math.max(Number(sp.get('seglen')) || 10, 4), 18)
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   interface Card { iccid: string; card_status: string | null; card_type: string | null; activation_start_time: string | null; activation_end_time: string | null; created_at: string | null }
   const cards: Card[] = []
@@ -43,6 +45,7 @@ export async function GET(request: Request) {
   const dayDiff = (a: string, b: string) => Math.floor((new Date(a).getTime() - new Date(b).getTime()) / 86400000)
 
   for (const c of cards) {
+    if (legacy.has(c.iccid)) continue
     const st = c.card_status || '—'
     statusDist.set(st, (statusDist.get(st) || 0) + 1)
     if (c.activation_start_time) activated++

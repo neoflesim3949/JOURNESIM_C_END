@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 出行路徑分析：一張卡在一個方案期間，去過的國家「依首次出現日期」排成路徑（日本→韓國→香港）
 //   兩層：外層＝國家集合（不分順序），展開＝該集合內各種順序的路徑
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(sp.get('limit')) || 100, 500)
   const todayISO = sp.get('today') || new Date().toISOString().slice(0, 10)
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   interface Plan { iccid: string; sub_order_id: string; sku_name: string | null; plan_start_time: string | null; plan_end_time: string | null }
   const plans: Plan[] = []
@@ -52,6 +54,7 @@ export async function GET(request: Request) {
   const stopsDist = new Map<number, number>()
 
   for (const p of plans) {
+    if (legacy.has(p.iccid)) continue
     const start = dateOf(p.plan_start_time)
     const endRaw = dateOf(p.plan_end_time) || todayISO
     const end = endRaw > todayISO ? todayISO : endRaw

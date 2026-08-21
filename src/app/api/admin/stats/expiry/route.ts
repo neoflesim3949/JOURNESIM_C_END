@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 到期分佈提醒：卡片效期（manual_iccids.expiration_date）到期倒數
 // GET ?today=&card_status=（預設排除 已用盡/失效/報廢）&card_type=
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
   const todayISO = sp.get('today') || new Date().toISOString().slice(0, 10)
   const today = new Date(todayISO + 'T00:00:00Z')
   const supabase = createAdminClient()
+  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
   interface Card { iccid: string; card_status: string | null; card_type: string | null; expiration_date: string | null }
   const cards: Card[] = []
@@ -43,7 +45,7 @@ export async function GET(request: Request) {
   const upcoming: { iccid: string; card_status: string | null; card_type: string | null; expiration_date: string; days: number }[] = []
 
   // 篩選：預設排除 dead 狀態（除非指定狀態或 include_dead）
-  const pool = cards.filter(c => cardStatus || includeDead ? true : !DEAD.has(c.card_status || ''))
+  const pool = cards.filter(c => !legacy.has(c.iccid) && (cardStatus || includeDead ? true : !DEAD.has(c.card_status || '')))
   for (const c of pool) {
     if (!c.expiration_date) { buckets[5].plans++; continue }
     const d = daysBetween(c.expiration_date)
