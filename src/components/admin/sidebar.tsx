@@ -101,10 +101,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/stats/order-analysis', label: '訂單統計分析' },
       { href: '/admin/stats/history-orders', label: '歷史採購訂單明細' },
       { href: '/admin/stats/history-aftersales', label: '歷史採購售後明細' },
-      { href: '/admin/stats/cost-recalc', label: '成本重算（依方案）' },
-      { href: '/admin/stats/cost-recalc-volume', label: '成本重算（依流量均價）' },
-      { href: '/admin/stats/cost-recalc-volume5', label: '成本重算（依均用流量價）' },
-      { href: '/admin/stats/cost-recalc-volume1', label: '成本重算（依一日流量價）' },
+      { href: '/admin/stats/cost-recalc', label: '成本重算' },
     ],
   },
   {

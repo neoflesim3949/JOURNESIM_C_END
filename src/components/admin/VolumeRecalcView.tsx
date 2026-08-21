@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Loader2, Download } from 'lucide-react'
+import { Loader2, Download, Globe } from 'lucide-react'
 import DateRange from '@/components/admin/DateRange'
 
 interface FamRow {
@@ -11,11 +11,13 @@ interface FamRow {
   used_gb: number; mb_price: number; no_usage: number
 }
 interface MonthRow { ym: string; old: number; nw: number; savings: number }
+interface Snap { computed_at: string; opts?: { from?: string; to?: string; exclude_legacy?: boolean; scope?: string } }
 interface Data {
+  empty?: boolean
   summary: { cards: number; pending_cards: number; pending_old: number; pending_no_base: number; no_usage_cards: number; old_cost: number; new_cost: number; savings: number; savings_pct: number }
   months: MonthRow[]
   families: FamRow[]
-  params: { mode: string }
+  snapshot?: Snap
 }
 
 const yen = (n: number) => '¥' + Math.round(n).toLocaleString()
@@ -66,64 +68,75 @@ function TrendChart({ months }: { months: MonthRow[] }) {
   )
 }
 
-export default function CostRecalcVolume5Page() {
+export default function VolumeRecalcView({ variantParams, subtitle, logicItems, csvName }: {
+  variantParams: Record<string, string>; subtitle: string; logicItems: string[]; csvName: string
+}) {
   const [d, setD] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
+  const [computing, setComputing] = useState<'' | 'range' | 'all'>('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [excludeLegacy, setExcludeLegacy] = useState(true)
+  const [snap, setSnap] = useState<Snap | null>(null)
 
-  async function load() {
-    setLoading(true)
-    const p = new URLSearchParams()
-    p.set('mode', 'volume')
-    p.set('pergb_days', '5')
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
+  // 打開：讀最近一次快照，不重算
+  useEffect(() => {
+    (async () => {
+      setLoading(true)
+      const p = new URLSearchParams({ ...variantParams, cached: '1' })
+      const res = await fetch(`/api/admin/stats/cost-recalc?${p}`)
+      if (res.ok) { const j = await res.json(); if (!j.empty) { setD(j); setSnap(j.snapshot || null) } }
+      setLoading(false)
+    })() /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [])
+
+  async function compute(scope: 'range' | 'all') {
+    setComputing(scope)
+    const p = new URLSearchParams({ ...variantParams })
+    if (scope === 'range') { if (from) p.set('from', from); if (to) p.set('to', to) }
     if (excludeLegacy) p.set('exclude_legacy', '1')
     const res = await fetch(`/api/admin/stats/cost-recalc?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+    if (res.ok) { const j = await res.json(); setD(j); setSnap(j.snapshot || null) }
+    setComputing('')
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
 
   function exportCsv() {
-    if (!d) return
-    const head = '家族,地區,原始每日,卡數,可重算,總用量GB,MB單價,原成本,重算後,節省,節省%,1GB基準SKU,無用量卡'
+    if (!d?.families) return
+    const head = '原始商品,地區,每日,卡數,可重算,總用量GB,MB單價,原成本,重算後,節省,節省%,1GB基準SKU,無用量卡'
     const body = d.families.map(f => [f.family, f.region, f.gbs, f.cards, f.eligible ? 'Y' : 'N', f.used_gb, f.mb_price, f.old_cost, f.new_cost, f.savings, f.savings_pct, f.base_sku, f.no_usage].map(v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }).join(',')).join('\n')
     const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'cost-recalc-volume5.csv'; a.click(); URL.revokeObjectURL(url)
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = csvName; a.click(); URL.revokeObjectURL(url)
   }
 
-  const s = d?.summary
+  const s = d && !d.empty ? d.summary : null
+  const busy = computing !== ''
   return (
     <div>
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-bold">成本重算（依均用流量價）</h1>
-          <p className="mt-1 text-sm text-gray-500">用 1GB 基礎方案「5 天檔結算價 ÷ 5GB」當每GB價，家族內所有品項一律「每GB價 × 實際總用量」計價；逐原始商品(SKU)呈現（基礎以下不動；¥ CNY）</p>
-        </div>
-        <button onClick={exportCsv} disabled={!d?.families.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Download className="w-4 h-4" /> 匯出 CSV</button>
+        <p className="text-sm text-gray-500 max-w-3xl">{subtitle}</p>
+        <button onClick={exportCsv} disabled={!d?.families?.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Download className="w-4 h-4" /> 匯出 CSV</button>
       </div>
 
-      <LogicNote items={[
-        '納入範圍：與「成本重算（依方案）」相同——單日型、原 SKU 在 bc_products、已分組（組內≥1GB或吃到飽）或名稱≥1GB。基礎方案以下（<1GB）不動。',
-        '每GB價：取該組 1GB 基礎方案的「5 天檔」結算價 ÷ 5GB（5天=5GB）。以 5 天當代表性用量計價，一支基礎方案一個固定值；無 5 天檔時退回單日價。',
-        '重算後成本＝每GB價 × 該卡實際總用量(GB)；不分天數、不分原本幾GB或吃到飽，同家族一律套同一個每GB價。用量取自 card_usage_daily（F023）。',
-        '呈現：每個原始商品(SKU)一列；同家族的 SKU 都套用該家族基礎方案的每GB價（MB單價＝每GB價÷1024）。',
-        '舊成本＝原方案結算價 ×（依份數對應 tier，缺則 cost_price × 份數）。節省＝舊成本 − 重算後（可能為負＝純用量反而較貴）。沒有 1GB 基準者列「待處理」不計入。',
-      ]} />
+      <LogicNote items={logicItems} />
 
       <div className="mt-4 flex items-center gap-3 flex-wrap">
         <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="下單月份" />
         <label className="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer">
           <input type="checkbox" checked={excludeLegacy} onChange={e => setExcludeLegacy(e.target.checked)} /> 排除舊SIMPOMATION
         </label>
-        <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">重算</button>
+        <button onClick={() => compute('range')} disabled={busy} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          {computing === 'range' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} 計算（選定區間）
+        </button>
+        <button onClick={() => compute('all')} disabled={busy} className="flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700 disabled:opacity-50">
+          {computing === 'all' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />} 全域重算（全部到當日）
+        </button>
+        {snap && <span className="text-xs text-gray-400">上次計算：{new Date(snap.computed_at).toLocaleString('zh-TW')}（{snap.opts?.scope === 'all' ? '全部' : `${snap.opts?.from || '起'}~${snap.opts?.to || '迄'}`}{snap.opts?.exclude_legacy ? '·排除舊卡' : ''}）</span>}
       </div>
 
-      {loading || !d || !s ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 計算中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p>
+        : !s ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」或「全域重算」。</p> : (
         <>
+          {busy && <p className="mt-2 text-xs text-violet-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> 計算中，完成後會更新並自動存檔…</p>}
           <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">納入卡數</div><div className="mt-1 text-2xl font-bold">{s.cards.toLocaleString()}</div></div>
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">原採購成本</div><div className="mt-1 text-2xl font-bold text-rose-600">{yen(s.old_cost)}</div></div>
@@ -135,10 +148,10 @@ export default function CostRecalcVolume5Page() {
             <span className={s.no_usage_cards ? 'text-amber-600' : ''}>無逐日用量卡：{s.no_usage_cards.toLocaleString()}</span>
           </div>
 
-          {d.months.length > 0 && (
+          {d!.months.length > 0 && (
             <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
               <h3 className="text-sm font-semibold mb-2">成本趨勢（依下單月份）</h3>
-              <TrendChart months={d.months} />
+              <TrendChart months={d!.months} />
             </div>
           )}
 
@@ -150,9 +163,9 @@ export default function CostRecalcVolume5Page() {
                 </tr>
               </thead>
               <tbody>
-                {d.families.length === 0 ? (
+                {d!.families.length === 0 ? (
                   <tr><td colSpan={10} className="px-3 py-10 text-center text-gray-400">無資料</td></tr>
-                ) : d.families.map((f, i) => (
+                ) : d!.families.map((f, i) => (
                   <tr key={i} className={`border-b hover:bg-gray-50 ${f.eligible ? '' : 'bg-amber-50/40'}`}>
                     <td className="px-3 py-2 max-w-xs truncate" title={f.family}>{f.family}{!f.eligible && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">待處理</span>}</td>
                     <td className="px-3 py-2 text-xs text-gray-500">{f.gbs}</td>

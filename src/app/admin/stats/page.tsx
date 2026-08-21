@@ -1,8 +1,9 @@
 'use client'
 
-import { Fragment, useEffect, useState, createContext, useContext } from 'react'
+import { Fragment, useEffect, useRef, useState, createContext, useContext } from 'react'
 import DateRange from '@/components/admin/DateRange'
 import { Loader2, Download, ChevronDown, ChevronRight } from 'lucide-react'
+import { useSnapshotLoader, snapLabel, loadSnapshot, saveSnapshot } from '@/lib/analysis-snapshot'
 
 // 全域「排除舊SIMPOMATION」開關（各分頁共用；預設排除）
 const ExcludeLegacyCtx = createContext(true)
@@ -85,7 +86,6 @@ function SkuAnalysis() {
   const [rows, setRows] = useState<SkuRow[]>([])
   const [totalPlans, setTotalPlans] = useState(0)
   const [totalSkus, setTotalSkus] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [planStatus, setPlanStatus] = useState('')
@@ -101,13 +101,12 @@ function SkuAnalysis() {
     if (excludeLegacy) p.set('exclude_legacy', '1')
     return p
   }
-  async function load() {
-    setLoading(true)
-    const res = await fetch(`/api/admin/stats/sku?${params()}`)
-    if (res.ok) { const d = await res.json(); setRows(d.rows || []); setTotalPlans(d.total_plans || 0); setTotalSkus(d.total_skus || 0) }
-    setLoading(false)
-  }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<{ rows?: SkuRow[]; total_plans?: number; total_skus?: number }>({
+    key: 'sku', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/sku?${params()}`,
+    apply: d => { setRows(d.rows || []); setTotalPlans(d.total_plans || 0); setTotalSkus(d.total_skus || 0) },
+    buildOpts: () => ({ from, to, plan_status: planStatus, plan_type: planType, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     const head = 'SKU名稱,類型,方案數,卡數,份數合計,占比%'
@@ -151,7 +150,8 @@ function SkuAnalysis() {
           <option value="2">使用結束</option>
           <option value="3">已取消</option>
         </select>
-        <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+        <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>
+        {computedAt && <span className="text-xs text-gray-400">{snapLabel(computedAt)}</span>}
       </div>
 
       {/* 摘要 */}
@@ -252,22 +252,39 @@ function UsageAnalysis() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [expanded2, setExpanded2] = useState<Set<string>>(new Set())   // 國家維度：SKU 再展開份數
   const [loading, setLoading] = useState(true)
+  const [computing, setComputing] = useState(false)
+  const [computedAt, setComputedAt] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const mnt = useRef(false)
 
-  async function load(d = dim) {
+  type UsagePayload = { rows?: UsageRow[]; total?: number; total_cards?: number; total_avg_card_day?: number }
+  function apply(j: UsagePayload | null) {
+    setRows(j?.rows || []); setTotal(j?.total || 0); setTotalCards(j?.total_cards || 0); setTotalAvgCardDay(j?.total_avg_card_day || 0)
+  }
+  async function loadCachedDim(d: 'global' | 'sku' | 'country') {
     setLoading(true)
+    const s = await loadSnapshot<UsagePayload>(`usage:${d}`)
+    if (s) { apply(s.payload); setComputedAt(s.meta.computed_at) } else { apply(null); setComputedAt('') }
+    setLoading(false)
+  }
+  async function computeDim(d = dim) {
+    setComputing(true)
     const p = new URLSearchParams({ dim: d })
     if (from) p.set('from', from)
     if (to) p.set('to', to)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/usage?${p}`)
-    if (res.ok) { const j = await res.json(); setRows(j.rows || []); setTotal(j.total || 0); setTotalCards(j.total_cards || 0); setTotalAvgCardDay(j.total_avg_card_day || 0) }
-    setLoading(false)
+    if (excludeLegacy) p.set('exclude_legacy', '1')
+    const res = await fetch(`/api/admin/stats/usage?${p}`)
+    if (res.ok) { const j = await res.json(); apply(j); setComputedAt(new Date().toISOString()); saveSnapshot(`usage:${d}`, j, { from, to, dim: d, exclude_legacy: excludeLegacy }) }
+    setComputing(false); setLoading(false)
   }
-  useEffect(() => { load('global') /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  useEffect(() => {
+    if (!mnt.current) { mnt.current = true; loadCachedDim('global'); return }
+    computeDim(dim)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [excludeLegacy])
 
-  function pick(d: 'global' | 'sku' | 'country') { setDim(d); setExpanded(new Set()); setExpanded2(new Set()); load(d) }
+  function pick(d: 'global' | 'sku' | 'country') { setDim(d); setExpanded(new Set()); setExpanded2(new Set()); loadCachedDim(d) }
   const maxUsage = rows.length ? Math.max(...rows.map(r => r.usage)) : 0
 
   function exportCsv() {
@@ -304,12 +321,13 @@ function UsageAnalysis() {
         </div>
         <div className="flex items-center gap-2">
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
-          <button onClick={() => load()} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={() => computeDim()} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
         </div>
       </div>
+      {computedAt && <p className="mt-1 text-xs text-gray-400 text-right">{snapLabel(computedAt)}</p>}
 
       {!loading && (
         <div className="mt-4 flex gap-4">
@@ -483,21 +501,16 @@ function SkuCoverage() {
   const [rows, setRows] = useState<CoverageRow[]>([])
   const [totalSkus, setTotalSkus] = useState(0)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
 
-  async function load() {
-    setLoading(true)
-    const p = new URLSearchParams()
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/sku-countries?${p}`)
-    if (res.ok) { const j = await res.json(); setRows(j.rows || []); setTotalSkus(j.total_skus || 0) }
-    setLoading(false)
-  }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  function params() { const p = new URLSearchParams(); if (from) p.set('from', from); if (to) p.set('to', to); if (excludeLegacy) p.set('exclude_legacy', '1'); return p }
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<{ rows?: CoverageRow[]; total_skus?: number }>({
+    key: 'cov', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/sku-countries?${params()}`,
+    apply: j => { setRows(j.rows || []); setTotalSkus(j.total_skus || 0) },
+    buildOpts: () => ({ from, to, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     const head = 'SKU名稱,使用國家數,總用量KB,卡數,平均每卡KB,平均每卡每日KB'
@@ -522,7 +535,7 @@ function SkuCoverage() {
         <p className="text-sm text-gray-500">方案覆蓋國家 · 依實際使用國家數排行（點列展開看各國用量）</p>
         <div className="flex items-center gap-2">
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -623,24 +636,21 @@ function ComboCoverage() {
   const [totalUsage, setTotalUsage] = useState(0)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())     // 展開的 SKU
   const [expanded2, setExpanded2] = useState<Set<string>>(new Set())   // 展開的 size 群組
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [planStatus, setPlanStatus] = useState('')
 
-  async function load() {
-    setLoading(true)
-    const today = new Date().toISOString().slice(0, 10)
-    const p = new URLSearchParams({ today })
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (planStatus) p.set('plan_status', planStatus)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/coverage-combos?${p}`)
-    if (res.ok) { const j = await res.json(); setRows(j.rows || []); setTotalSkus(j.total_skus || 0); setTotalUsage(j.total_usage || 0) }
-    setLoading(false)
+  function params() {
+    const p = new URLSearchParams({ today: new Date().toISOString().slice(0, 10) })
+    if (from) p.set('from', from); if (to) p.set('to', to); if (planStatus) p.set('plan_status', planStatus)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<{ rows?: ComboSkuRow[]; total_skus?: number; total_usage?: number }>({
+    key: 'combo', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/coverage-combos?${params()}`,
+    apply: j => { setRows(j.rows || []); setTotalSkus(j.total_skus || 0); setTotalUsage(j.total_usage || 0) },
+    buildOpts: () => ({ from, to, plan_status: planStatus, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     const head = 'SKU,國家數,國家組合,方案數,卡數,平均每卡KB,平均每卡每日KB,用量KB'
@@ -672,7 +682,7 @@ function ComboCoverage() {
             <option value="2">使用結束</option>
             <option value="3">已取消</option>
           </select>
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -799,24 +809,21 @@ function PureCombo() {
   const [summary, setSummary] = useState({ plans: 0, cards: 0, usage: 0, size_count: 0, combo_count: 0 })
   const [expanded, setExpanded] = useState<Set<number>>(new Set())      // 展開的國家數群組
   const [expanded2, setExpanded2] = useState<Set<string>>(new Set())    // 展開的組合（看方案）
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [planStatus, setPlanStatus] = useState('')
 
-  async function load() {
-    setLoading(true)
-    const today = new Date().toISOString().slice(0, 10)
-    const p = new URLSearchParams({ mode: 'combo', today })
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (planStatus) p.set('plan_status', planStatus)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/coverage-combos?${p}`)
-    if (res.ok) { const j = await res.json(); setGroups(j.size_groups || []); setSummary({ plans: j.plans || 0, cards: j.cards || 0, usage: j.usage || 0, size_count: j.size_count || 0, combo_count: j.combo_count || 0 }) }
-    setLoading(false)
+  function params() {
+    const p = new URLSearchParams({ mode: 'combo', today: new Date().toISOString().slice(0, 10) })
+    if (from) p.set('from', from); if (to) p.set('to', to); if (planStatus) p.set('plan_status', planStatus)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<{ size_groups?: SizeGroup[]; plans?: number; cards?: number; usage?: number; size_count?: number; combo_count?: number }>({
+    key: 'pure', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/coverage-combos?${params()}`,
+    apply: j => { setGroups(j.size_groups || []); setSummary({ plans: j.plans || 0, cards: j.cards || 0, usage: j.usage || 0, size_count: j.size_count || 0, combo_count: j.combo_count || 0 }) },
+    buildOpts: () => ({ from, to, plan_status: planStatus, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     const head = '國家數,國家組合,方案數,卡數,平均每卡KB,平均每卡每日KB,用量KB'
@@ -846,7 +853,7 @@ function PureCombo() {
             <option value="2">使用結束</option>
             <option value="3">已取消</option>
           </select>
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!groups.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -990,24 +997,21 @@ interface UtilData {
 function UtilizationAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<UtilData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [planType, setPlanType] = useState('')
 
-  async function load() {
-    setLoading(true)
-    const today = new Date().toISOString().slice(0, 10)
-    const p = new URLSearchParams({ today })
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (planType) p.set('plan_type', planType)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/utilization?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+  function params() {
+    const p = new URLSearchParams({ today: new Date().toISOString().slice(0, 10) })
+    if (from) p.set('from', from); if (to) p.set('to', to); if (planType) p.set('plan_type', planType)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<UtilData>({
+    key: 'util', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/utilization?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, plan_type: planType, exclude_legacy: excludeLegacy }),
+  })
 
   const maxUsage = d ? Math.max(...d.usage_buckets.map(b => b.plans), 1) : 1
   const maxDay = d ? Math.max(...d.day_buckets.map(b => b.plans), 1) : 1
@@ -1029,11 +1033,11 @@ function UtilizationAnalysis() {
             <option value="0">總量型</option>
             <option value="1">單日型</option>
           </select>
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
         </div>
       </div>
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :(
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
             <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -1087,20 +1091,18 @@ interface ExpiryData {
 function ExpiryAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<ExpiryData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [includeDead, setIncludeDead] = useState(false)
 
-  async function load() {
-    setLoading(true)
-    const today = new Date().toISOString().slice(0, 10)
-    const p = new URLSearchParams({ today })
-    if (includeDead) p.set('include_dead', '1')
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/expiry?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+  function params() {
+    const p = new URLSearchParams({ today: new Date().toISOString().slice(0, 10) })
+    if (includeDead) p.set('include_dead', '1'); if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [includeDead, excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<ExpiryData>({
+    key: 'expiry', deps: [includeDead, excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/expiry?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ include_dead: includeDead, exclude_legacy: excludeLegacy }),
+  })
 
   const maxB = d ? Math.max(...d.buckets.map(b => b.plans), 1) : 1
   const maxM = d ? Math.max(...d.monthly.map(m => m.plans), 1) : 1
@@ -1115,12 +1117,17 @@ function ExpiryAnalysis() {
       ]} />
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">卡片效期到期倒數（manual_iccids.expiration_date）· 預設排除已用盡/失效/報廢</p>
-        <label className="flex items-center gap-2 text-sm text-gray-600">
-          <input type="checkbox" checked={includeDead} onChange={e => setIncludeDead(e.target.checked)} /> 含已用盡/失效/報廢
-        </label>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={includeDead} onChange={e => setIncludeDead(e.target.checked)} /> 含已用盡/失效/報廢
+          </label>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>
+          {computedAt && <span className="text-xs text-gray-400">{snapLabel(computedAt)}</span>}
+        </div>
       </div>
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p>
+        : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> : (
         <>
           <div className="mt-4 bg-white border border-gray-200 rounded-xl p-5">
             <h3 className="text-sm font-semibold mb-2">到期倒數分佈（基準日 {d.today}，共 {d.total.toLocaleString()} 張）</h3>
@@ -1184,17 +1191,15 @@ interface LifecycleData {
 function LifecycleAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<LifecycleData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [seglen, setSeglen] = useState(10)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  async function load() {
-    setLoading(true)
-    const res = await fetch(`/api/admin/stats/lifecycle?seglen=${seglen}${excludeLegacy ? '&exclude_legacy=1' : ''}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
-  }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<LifecycleData>({
+    key: 'lifecycle', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/lifecycle?seglen=${seglen}${excludeLegacy ? '&exclude_legacy=1' : ''}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ seglen, exclude_legacy: excludeLegacy }),
+  })
 
   const maxStatus = d ? Math.max(...d.status_dist.map(s => s.count), 1) : 1
   const maxSpan = d ? Math.max(...d.span_buckets.map(b => b.plans), 1) : 1
@@ -1216,11 +1221,11 @@ function LifecycleAnalysis() {
           <select value={seglen} onChange={e => setSeglen(Number(e.target.value))} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             {[8, 10, 12, 14, 16].map(n => <option key={n} value={n}>{n} 碼</option>)}
           </select>
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
         </div>
       </div>
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :(
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
             <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -1347,23 +1352,21 @@ interface LagData {
 function ActivationLagAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<LagData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [source, setSource] = useState('')
 
-  async function load() {
-    setLoading(true)
+  function params() {
     const p = new URLSearchParams()
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (source) p.set('source', source)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/activation-lag?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+    if (from) p.set('from', from); if (to) p.set('to', to); if (source) p.set('source', source)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<LagData>({
+    key: 'lag', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/activation-lag?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, source, exclude_legacy: excludeLegacy }),
+  })
 
   const maxB = d ? Math.max(...d.buckets.map(b => b.plans), 1) : 1
 
@@ -1384,11 +1387,11 @@ function ActivationLagAnalysis() {
             <option value="shopee">蝦皮購買</option>
             <option value="bc">BC 建單</option>
           </select>
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
         </div>
       </div>
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :(
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
             <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -1508,23 +1511,21 @@ interface TravelData {
 function TravelArrival() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<TravelData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [search, setSearch] = useState('')
 
-  async function load() {
-    setLoading(true)
+  function params() {
     const p = new URLSearchParams()
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (search) p.set('search', search)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/travel?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+    if (from) p.set('from', from); if (to) p.set('to', to); if (search) p.set('search', search)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<TravelData>({
+    key: 'travel-arrival', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/travel?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, search, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     if (!d) return
@@ -1549,10 +1550,10 @@ function TravelArrival() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">出行地 × 出行日期 · 每張卡在某國的首次用量日期＝出行日期，格子＝該月出行到該國的卡數</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()}
+          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && compute()}
             placeholder="搜尋國家" className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="出行日" />
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -1563,7 +1564,7 @@ function TravelArrival() {
         <p className="mt-3 text-xs text-gray-500">出行國家 {d.total_countries.toLocaleString()} 個 · 出行卡數 {d.total_cards.toLocaleString()} 張{d.total_countries > d.rows.length ? `（顯示前 ${d.rows.length}，可搜尋）` : ''}</p>
       )}
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : d.rows.length === 0 ? (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :d.rows.length === 0 ? (
         <p className="mt-6 text-sm text-gray-400">無資料（先到「SKU 分析 → 使用的 SKU」旁的統計明細列表同步使用量）</p>
       ) : (
         <div className="mt-2 bg-white border border-gray-200 rounded-xl overflow-x-auto">
@@ -1605,23 +1606,21 @@ function TravelArrival() {
 function TravelDaily() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<(TravelData & { total_card_days?: number }) | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [search, setSearch] = useState('')
 
-  async function load() {
-    setLoading(true)
+  function params() {
     const p = new URLSearchParams()
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (search) p.set('search', search)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/travel-daily?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+    if (from) p.set('from', from); if (to) p.set('to', to); if (search) p.set('search', search)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<TravelData & { total_card_days?: number }>({
+    key: 'travel-daily', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/travel-daily?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, search, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     if (!d) return
@@ -1646,10 +1645,10 @@ function TravelDaily() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">出行地 × 月份（依每日）· 國家 × 月份，格子＝該月該國的「卡·日數」（待幾天算幾天，同日多國各計）</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()}
+          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && compute()}
             placeholder="搜尋國家" className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -1660,7 +1659,7 @@ function TravelDaily() {
         <p className="mt-3 text-xs text-gray-500">出行國家 {d.total_countries.toLocaleString()} 個 · 有流量卡數 {d.total_cards.toLocaleString()} 張 · 卡日合計 {(d.total_card_days || 0).toLocaleString()}{d.total_countries > d.rows.length ? `（顯示前 ${d.rows.length}，可搜尋）` : ''}</p>
       )}
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : d.rows.length === 0 ? (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :d.rows.length === 0 ? (
         <p className="mt-6 text-sm text-gray-400">無資料</p>
       ) : (
         <div className="mt-2 bg-white border border-gray-200 rounded-xl overflow-x-auto">
@@ -1708,26 +1707,23 @@ interface PathData {
 function TravelPath() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [d, setD] = useState<PathData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [search, setSearch] = useState('')
   const [minStops, setMinStops] = useState(2)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  async function load() {
-    setLoading(true)
-    const today = new Date().toISOString().slice(0, 10)
-    const p = new URLSearchParams({ today, min_stops: String(minStops) })
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (search) p.set('search', search)
-        if (excludeLegacy) p.set('exclude_legacy', '1')
-        const res = await fetch(`/api/admin/stats/travel-path?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+  function params() {
+    const p = new URLSearchParams({ today: new Date().toISOString().slice(0, 10), min_stops: String(minStops) })
+    if (from) p.set('from', from); if (to) p.set('to', to); if (search) p.set('search', search)
+    if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [minStops, excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<PathData>({
+    key: 'travel-path', deps: [minStops, excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/travel-path?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, search, min_stops: minStops, exclude_legacy: excludeLegacy }),
+  })
 
   function exportCsv() {
     if (!d) return
@@ -1754,13 +1750,13 @@ function TravelPath() {
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm text-gray-500">出行路徑 · 外層看去了哪幾國（不分順序），展開看實際玩法順序</p>
         <div className="flex items-center gap-2 flex-wrap">
-          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load()}
+          <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && compute()}
             placeholder="搜尋含某國" className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-40" />
           <select value={minStops} onChange={e => setMinStops(Number(e.target.value))} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
             {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>最少 {n} 國</option>)}
           </select>
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="啟用" />
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!d?.rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -1773,7 +1769,7 @@ function TravelPath() {
         </p>
       )}
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : d.rows.length === 0 ? (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :d.rows.length === 0 ? (
         <p className="mt-6 text-sm text-gray-400">此條件下無路徑（試著把「最少 N 國」調低）</p>
       ) : (
         <div className="mt-2 bg-white border border-gray-200 rounded-xl overflow-x-auto">
@@ -1853,22 +1849,20 @@ function DailyAvgAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [sub, setSub] = useState<'all' | 'general' | 'unlimited'>('all')
   const [d, setD] = useState<DailyAvgData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [step, setStep] = useState(100)
 
-  async function load() {
-    setLoading(true)
+  function params() {
     const p = new URLSearchParams({ step: String(step) })
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (excludeLegacy) p.set('exclude_legacy', '1')
-    const res = await fetch(`/api/admin/stats/daily-avg?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+    if (from) p.set('from', from); if (to) p.set('to', to); if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy, step])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<DailyAvgData>({
+    key: 'dailyavg', deps: [excludeLegacy, step],
+    fetchUrl: () => `/api/admin/stats/daily-avg?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, step, exclude_legacy: excludeLegacy }),
+  })
 
   const rows = d?.rows || []
   const key = sub
@@ -1905,12 +1899,12 @@ function DailyAvgAnalysis() {
             {[[100, '級距 100MB'], [200, '級距 200MB'], [500, '級距 500MB'], [1000, '級距 1GB']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="用量日" />
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Download className="w-4 h-4" /> CSV</button>
         </div>
       </div>
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :(
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">此分類卡數</div><div className="mt-1 text-2xl font-bold">{totalSel.toLocaleString()}</div></div>
@@ -1953,21 +1947,19 @@ function DaysAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
   const [sub, setSub] = useState<'all' | 'general' | 'unlimited'>('all')
   const [d, setD] = useState<DailyAvgData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
 
-  async function load() {
-    setLoading(true)
+  function params() {
     const p = new URLSearchParams()
-    if (from) p.set('from', from)
-    if (to) p.set('to', to)
-    if (excludeLegacy) p.set('exclude_legacy', '1')
-    const res = await fetch(`/api/admin/stats/daily-avg?${p}`)
-    if (res.ok) setD(await res.json())
-    setLoading(false)
+    if (from) p.set('from', from); if (to) p.set('to', to); if (excludeLegacy) p.set('exclude_legacy', '1'); return p
   }
-  useEffect(() => { load() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [excludeLegacy])
+  const { loading, computing, computedAt, compute } = useSnapshotLoader<DailyAvgData>({
+    key: 'days', deps: [excludeLegacy],
+    fetchUrl: () => `/api/admin/stats/daily-avg?${params()}`,
+    apply: j => setD(j),
+    buildOpts: () => ({ from, to, exclude_legacy: excludeLegacy }),
+  })
 
   const rows = d?.day_rows || []
   const key = sub
@@ -1999,12 +1991,12 @@ function DaysAnalysis() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="用量日" />
-          <button onClick={load} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
+          <button onClick={compute} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>{computedAt && <span className="ml-1 text-xs text-gray-400 self-center">{snapLabel(computedAt)}</span>}
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50"><Download className="w-4 h-4" /> CSV</button>
         </div>
       </div>
 
-      {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
+      {loading ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入最近結果...</p> : !d ? <p className="mt-8 text-sm text-gray-400">尚無結果，請按「計算」。</p> :(
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
             <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">此分類卡數</div><div className="mt-1 text-2xl font-bold">{totalSel.toLocaleString()}</div></div>

@@ -59,10 +59,41 @@ export async function GET(request: Request) {
   const to = sp.get('to') || ''
   // pack＝1GB基礎＋超量補加速包；volume＝每GB價×實際總用量
   const mode = sp.get('mode') === 'volume' ? 'volume' : 'pack'
-  // volume 的每GB價基準：0＝全階梯均價（依流量均價）；>0＝用該天數檔（如 5＝依均用流量價，perGB＝該天數結算價÷天數）
+  // volume 每GB價基準：pergb_days>0＝只取「第N天那一檔」(價÷天)；pergb_avg_days>0＝「1~N天平均」(Σ價÷Σ天GB)；皆無＝全階梯平均
   const pergbDays = Math.max(0, Number(sp.get('pergb_days')) || 0)
+  const pergbAvgDays = Math.max(0, Number(sp.get('pergb_avg_days')) || 0)
+  // pergb_basis=global：全域每GB價＝所有「非吃到飽」方案 總量/總價；globalall＝連吃到飽方案也算進去
+  const pergbBasis = sp.get('pergb_basis') || ''
+  const pergbGlobal = pergbBasis === 'global' || pergbBasis === 'globalall'
+  const inclUnlimited = pergbBasis === 'globalall'
   const supabase = createAdminClient()
-  const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
+  const legacyFlag = sp.get('exclude_legacy') === '1'
+
+  // 版本鍵：每個成本重算子頁一個快照
+  const variant = mode === 'pack' ? 'pack'
+    : pergbBasis === 'globalall' ? 'volume-globalall'
+    : pergbBasis === 'global' ? 'volume-global'
+    : pergbDays > 0 ? `volume-${pergbDays}`
+    : pergbAvgDays > 0 ? `volume-avg${pergbAvgDays}`
+    : 'volume-avg'
+
+  // 讀快取：打開頁面直接看最近一次結果，不重算
+  if (sp.get('cached')) {
+    const { data } = await supabase.from('cost_recalc_snapshots').select('payload, opts, computed_at').eq('variant', variant).maybeSingle()
+    if (!data || !data.payload) return NextResponse.json({ empty: true, variant })
+    return NextResponse.json({ ...(data.payload as object), snapshot: { variant, computed_at: data.computed_at, opts: data.opts } })
+  }
+
+  // 存快照並回傳
+  const snapScope = (from || to) ? 'range' : 'all'
+  const opts = { from, to, exclude_legacy: legacyFlag, scope: snapScope }
+  const saveSnap = async (payload: object) => {
+    const computed_at = new Date().toISOString()
+    try { await supabase.from('cost_recalc_snapshots').upsert({ variant, payload, opts, computed_at }, { onConflict: 'variant' }) } catch { /* 快照失敗不影響回傳 */ }
+    return NextResponse.json({ ...payload, snapshot: { variant, computed_at, opts } })
+  }
+
+  const legacy = legacyFlag ? await getLegacyIccids(supabase) : new Set<string>()
 
   // 1) 產品：建家族索引
   const prodBySku = new Map<string, Prod>()
@@ -190,18 +221,37 @@ export async function GET(request: Request) {
       const hit = perGbCache.get(base.sku_id); if (hit !== undefined) return hit
       let v: number | null
       if (pergbDays > 0) {
-        const price = settleAt(base, pergbDays)          // 該天數(份數)的總結算價
+        const price = settleAt(base, pergbDays)          // 只取第 N 天那一檔的總結算價
         v = price != null && price > 0 ? price / pergbDays : null   // ÷ 天數GB（1GB/天）
       } else {
+        // pergbAvgDays>0：只平均 1~N 天的階梯；否則平均全部階梯
         let sumP = 0, sumGb = 0
         for (const t of (Array.isArray(base.prices) ? base.prices : [])) {
           const p = Number(t.settlementPrice), cp = Number(t.copies)
-          if (!isNaN(p) && !isNaN(cp) && cp > 0) { sumP += p; sumGb += cp }
+          if (isNaN(p) || isNaN(cp) || cp <= 0) continue
+          if (pergbAvgDays > 0 && cp > pergbAvgDays) continue
+          sumP += p; sumGb += cp
         }
         if (sumGb === 0 && base.cost_price != null) { sumP = Number(base.cost_price); sumGb = 1 }
         v = sumGb > 0 ? sumP / sumGb : null
       }
       perGbCache.set(base.sku_id, v); return v
+    }
+
+    // 全域每GB價：所有非吃到飽方案，Σ(各階梯結算價) / Σ(份數 × 每份GB(high_flow_size))
+    let globalPerGb: number | null = null
+    if (pergbGlobal) {
+      let sumP = 0, sumGb = 0
+      for (const p of prodBySku.values()) {
+        if (!inclUnlimited && (unlimited.has(p.sku_id) || /无限|無限|吃到饱|吃到飽|unlimited/i.test(p.name || ''))) continue
+        const hfsGb = Number(p.high_flow_size) > 0 ? Number(p.high_flow_size) / KB_PER_GB : 0
+        if (hfsGb <= 0) continue
+        for (const t of (Array.isArray(p.prices) ? p.prices : [])) {
+          const pr = Number(t.settlementPrice), cp = Number(t.copies)
+          if (!isNaN(pr) && pr > 0 && !isNaN(cp) && cp > 0) { sumP += pr; sumGb += cp * hfsGb }
+        }
+      }
+      globalPerGb = sumGb > 0 ? sumP / sumGb : null
     }
 
     interface SAgg { name: string; region: string; gb: number | null; base: Prod | null; perGb: number | null; cards: number; old: number; nw: number; usedGb: number; noUsage: number }
@@ -215,12 +265,12 @@ export async function GET(request: Request) {
       if (ym && from && to && !inRange(ym)) continue
       const prod = prodBySku.get(c.sku_id)!
       const base = baseOfCard(c, prod)
-      const perGb = base ? avgPerGb(base) : null
+      const perGb = pergbGlobal ? globalPerGb : (base ? avgPerGb(base) : null)
       const oldCost = settleAt(prod, c.copies) ?? 0
       const dm = dailyKb.get(ic); const hasUsage = !!dm && dm.size > 0
       let totalKb = 0; if (dm) for (const kb of dm.values()) totalKb += kb
       const usedGb = totalKb / KB_PER_GB
-      const eligible = base != null && perGb != null
+      const eligible = perGb != null && (pergbGlobal || base != null)
       const newCost = eligible ? usedGb * (perGb as number) : 0
 
       let a = agg.get(c.sku_id)
@@ -250,7 +300,7 @@ export async function GET(request: Request) {
     const monthRows = Array.from(months.entries()).sort((a, b) => a[0] < b[0] ? -1 : 1)
       .map(([ym, v]) => ({ ym, old: round(v.old), nw: round(v.nw), savings: round(v.old - v.nw) }))
 
-    return NextResponse.json({
+    return saveSnap({
       summary: {
         cards: sCards, pending_cards: pendCards, pending_old: round(pendOld), pending_no_base: pendSku.size, no_usage_cards: sNoUsage,
         old_cost: round(sOld), new_cost: round(sNew), savings: round(sOld - sNew), savings_pct: sOld > 0 ? Math.round((1 - sNew / sOld) * 1000) / 10 : 0,
@@ -352,7 +402,7 @@ export async function GET(request: Request) {
     .map(([ym, v]) => ({ ym, old: round(v.old), nw: round(v.nw), savings: round(v.old - v.nw) }))
 
   const sNew = sBase + sAccel
-  return NextResponse.json({
+  return saveSnap({
     summary: {
       cards: sCards, pending_cards: pendCards, pending_old: round(pendOld),
       pending_no_base: pendNoBase, pending_no_accel: pendNoAccel, no_usage_cards: sNoUsage,
