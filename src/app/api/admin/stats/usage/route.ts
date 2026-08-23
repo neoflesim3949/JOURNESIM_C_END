@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
+import { usageGte } from '@/lib/usage-floor'
 
 // 數據使用量分析（card_usage_daily，用量單位 KB）
 // GET ?dim=global|sku|country & from= & to=
@@ -12,10 +13,11 @@ export async function GET(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const sp = new URL(request.url).searchParams
   const dim = sp.get('dim') || 'global'
+  const gran = sp.get('gran') === 'month' ? 'month' : sp.get('gran') === 'year' ? 'year' : 'day'   // global 趨勢粒度
   const from = sp.get('from') || ''
   const to = sp.get('to') || ''
-  // 每日趨勢：沒指定區間時預設近 30 天
-  const effFrom = (dim === 'global' && !from) ? new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10) : from
+  // 每日趨勢：沒指定區間時預設近 30 天（每月/每年趨勢不預設，看全部）
+  const effFrom = (dim === 'global' && gran === 'day' && !from) ? new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10) : from
   const supabase = createAdminClient()
   const legacy = sp.get('exclude_legacy') === '1' ? await getLegacyIccids(supabase) : new Set<string>()
 
@@ -55,10 +57,11 @@ export async function GET(request: Request) {
   const byKey = new Map<string, { label: string; usage: number; cards: Set<string>; cardDays: Set<string>; copiesDist: Map<string, { usage: number; cards: Set<string>; cardDays: Set<string> }>; skuDist: Map<string, { name: string; usage: number; cards: Set<string>; cardDays: Set<string>; copiesDist: Map<string, { usage: number; cards: Set<string>; cardDays: Set<string> }> }> }>()
   const totalCards = new Set<string>()
   const totalCardDays = new Set<string>()
+  const totalDays = new Set<string>()   // 不重複用量日期（供平均每日總量）
   let total = 0
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount')
-    if (effFrom) q = q.gte('used_date', effFrom)
+    q = q.gte('used_date', usageGte(effFrom))
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break
@@ -67,11 +70,12 @@ export async function GET(request: Request) {
       const amt = Number(r.used_amount) || 0
       total += amt
       const cardDayKey = `${r.iccid}|${r.used_date}`
+      if (r.used_date) totalDays.add(r.used_date as string)
       if (r.iccid) { totalCards.add(r.iccid); totalCardDays.add(cardDayKey) }
       let key: string, label: string, copies = ''
       if (dim === 'country') { key = r.country_region_code || r.country || '—'; label = r.country || key }
       else if (dim === 'sku') { const s = iccidToSku!.get(r.iccid); key = s?.id || '(無方案對照)'; label = s?.name || '(無方案對照)'; copies = s?.copies || '—' }
-      else { key = (r.used_date as string) || '—'; label = key }   // global：依日期
+      else { const dt = (r.used_date as string) || '—'; key = gran === 'year' ? dt.slice(0, 4) : gran === 'month' ? dt.slice(0, 7) : dt; label = key }   // global：依日/月/年
       const a = byKey.get(key) || { label, usage: 0, cards: new Set<string>(), cardDays: new Set<string>(), copiesDist: new Map(), skuDist: new Map() }
       a.usage += amt
       if (r.iccid) { a.cards.add(r.iccid); a.cardDays.add(cardDayKey) }
@@ -131,5 +135,23 @@ export async function GET(request: Request) {
   else rows = rows.sort((x, y) => y.usage - x.usage)
 
   const avgCardDay = totalCardDays.size > 0 ? Math.round(total / totalCardDays.size) : 0
-  return NextResponse.json({ dim, rows, total, total_cards: totalCards.size, total_avg_card_day: avgCardDay, count: rows.length })
+  const avgDailyTotal = totalDays.size > 0 ? Math.round(total / totalDays.size) : 0   // 平均每日總量(KB)
+
+  // 近 30 日平均每日用量（固定視窗，與上方日期篩選無關）：總用量 ÷ 有流量的不重複日期
+  const recentFrom = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10)
+  let recentTotal = 0
+  const recentDays = new Set<string>()
+  for (let f = 0; ; f += 1000) {
+    const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, used_amount').gte('used_date', usageGte(recentFrom)).range(f, f + 999)
+    if (!data || data.length === 0) break
+    for (const r of data) {
+      if (legacy.has(r.iccid)) continue
+      recentTotal += Number(r.used_amount) || 0
+      if (r.used_date) recentDays.add(r.used_date as string)
+    }
+    if (data.length < 1000) break
+  }
+  const recent30AvgDaily = recentDays.size > 0 ? Math.round(recentTotal / recentDays.size) : 0
+
+  return NextResponse.json({ dim, rows, total, total_cards: totalCards.size, total_avg_card_day: avgCardDay, total_days: totalDays.size, avg_daily_total: avgDailyTotal, recent30_avg_daily_total: recent30AvgDaily, count: rows.length })
 }

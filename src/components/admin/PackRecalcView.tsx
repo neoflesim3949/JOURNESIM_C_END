@@ -86,7 +86,7 @@ function TrendChart({ months }: { months: MonthRow[] }) {
   )
 }
 
-export default function PackRecalcView() {
+export default function PackRecalcView({ grouping }: { grouping: 'custom' | 'system' }) {
   const [d, setD] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
   const [from, setFrom] = useState('')
@@ -112,7 +112,7 @@ export default function PackRecalcView() {
   useEffect(() => {
     (async () => {
       setLoading(true)
-      const res = await fetch('/api/admin/stats/cost-recalc?cached=1')
+      const res = await fetch(`/api/admin/stats/cost-recalc?cached=1&grouping=${grouping}`)
       if (res.ok) { const j = await res.json(); if (!j.empty) { setD(j); setSnap(j.snapshot || null) } }
       setLoading(false)
     })() /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -120,7 +120,7 @@ export default function PackRecalcView() {
 
   async function compute(scope: 'range' | 'all') {
     setComputing(scope)
-    const p = new URLSearchParams()
+    const p = new URLSearchParams({ grouping })
     if (scope === 'range') { if (from) p.set('from', from); if (to) p.set('to', to) }
     if (excludeLegacy) p.set('exclude_legacy', '1')
     const res = await fetch(`/api/admin/stats/cost-recalc?${p}`)

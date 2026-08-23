@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
+import { usageGte } from '@/lib/usage-floor'
 
 // 通用用量熱力圖：row 維度 × 月份，可展開成 child 維度
 //   維度：country（用量國家）/ apn（該卡方案在該國的 apn）/ sku（該卡主方案）
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
 
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount')
-    if (from) q = q.gte('used_date', from)
+    q = q.gte('used_date', usageGte(from))
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break

@@ -41,7 +41,7 @@ export default function StatsAnalysisPage() {
         </label>
       </div>
       <div className="mt-4 flex gap-1 border-b border-gray-200 flex-wrap">
-        {([['sku', '方案分析（方案SKU）'], ['usage', '數據用量'], ['apn', 'APN'], ['travel', '目的地'], ['dailyavg', '日均用量'], ['days', '使用天數'], ['lifecycle', '生命週期'], ['expiry', '到期提醒'], ['util', '利用率'], ['lag', '開通延時']] as const).map(([k, label]) => (
+        {([['sku', '方案SKU'], ['usage', '數據用量'], ['apn', 'APN'], ['travel', '目的地'], ['dailyavg', '日均用量'], ['days', '使用天數'], ['lifecycle', '生命週期'], ['expiry', '到期提醒'], ['util', '利用率'], ['lag', '開通延時']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === k ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
             {label}
@@ -244,11 +244,14 @@ interface CopiesCell { copies: string; usage: number; cards: number; avg: number
 interface UsageRow { key: string; label: string; usage: number; cards: number; avg: number; avg_card_day: number; share: number; copies_dist: CopiesCell[]; sku_dist: { sku_id: string; sku_name: string; usage: number; cards: number; avg: number; avg_card_day: number; copies_dist: CopiesCell[] }[] }
 function UsageAnalysis() {
   const excludeLegacy = useContext(ExcludeLegacyCtx)
-  const [dim, setDim] = useState<'global' | 'sku' | 'country'>('global')
+  const [view, setView] = useState<'global-day' | 'global-month' | 'global-year' | 'sku' | 'country'>('global-day')
+  const dim = view.startsWith('global') ? 'global' : (view as 'sku' | 'country')
   const [rows, setRows] = useState<UsageRow[]>([])
   const [total, setTotal] = useState(0)
   const [totalCards, setTotalCards] = useState(0)
   const [totalAvgCardDay, setTotalAvgCardDay] = useState(0)
+  const [avgDailyTotal, setAvgDailyTotal] = useState(0)
+  const [recent30AvgDaily, setRecent30AvgDaily] = useState(0)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [expanded2, setExpanded2] = useState<Set<string>>(new Set())   // 國家維度：SKU 再展開份數
   const [loading, setLoading] = useState(true)
@@ -258,33 +261,35 @@ function UsageAnalysis() {
   const [to, setTo] = useState('')
   const mnt = useRef(false)
 
-  type UsagePayload = { rows?: UsageRow[]; total?: number; total_cards?: number; total_avg_card_day?: number }
+  type UsagePayload = { rows?: UsageRow[]; total?: number; total_cards?: number; total_avg_card_day?: number; avg_daily_total?: number; recent30_avg_daily_total?: number }
   function apply(j: UsagePayload | null) {
-    setRows(j?.rows || []); setTotal(j?.total || 0); setTotalCards(j?.total_cards || 0); setTotalAvgCardDay(j?.total_avg_card_day || 0)
+    setRows(j?.rows || []); setTotal(j?.total || 0); setTotalCards(j?.total_cards || 0); setTotalAvgCardDay(j?.total_avg_card_day || 0); setAvgDailyTotal(j?.avg_daily_total || 0); setRecent30AvgDaily(j?.recent30_avg_daily_total || 0)
   }
-  async function loadCachedDim(d: 'global' | 'sku' | 'country') {
+  async function loadCachedView(v: string) {
     setLoading(true)
-    const s = await loadSnapshot<UsagePayload>(`usage:${d}`)
+    const s = await loadSnapshot<UsagePayload>(`usage:${v}`)
     if (s) { apply(s.payload); setComputedAt(s.meta.computed_at) } else { apply(null); setComputedAt('') }
     setLoading(false)
   }
-  async function computeDim(d = dim) {
+  async function computeView(v = view) {
     setComputing(true)
-    const p = new URLSearchParams({ dim: d })
+    const isG = v.startsWith('global')
+    const p = new URLSearchParams({ dim: isG ? 'global' : v })
+    if (isG) p.set('gran', v === 'global-month' ? 'month' : v === 'global-year' ? 'year' : 'day')
     if (from) p.set('from', from)
     if (to) p.set('to', to)
     if (excludeLegacy) p.set('exclude_legacy', '1')
     const res = await fetch(`/api/admin/stats/usage?${p}`)
-    if (res.ok) { const j = await res.json(); apply(j); setComputedAt(new Date().toISOString()); saveSnapshot(`usage:${d}`, j, { from, to, dim: d, exclude_legacy: excludeLegacy }) }
+    if (res.ok) { const j = await res.json(); apply(j); setComputedAt(new Date().toISOString()); saveSnapshot(`usage:${v}`, j, { from, to, view: v, exclude_legacy: excludeLegacy }) }
     setComputing(false); setLoading(false)
   }
   useEffect(() => {
-    if (!mnt.current) { mnt.current = true; loadCachedDim('global'); return }
-    computeDim(dim)
+    if (!mnt.current) { mnt.current = true; loadCachedView('global-day'); return }
+    computeView(view)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [excludeLegacy])
 
-  function pick(d: 'global' | 'sku' | 'country') { setDim(d); setExpanded(new Set()); setExpanded2(new Set()); loadCachedDim(d) }
+  function pick(v: typeof view) { setView(v); setExpanded(new Set()); setExpanded2(new Set()); loadCachedView(v) }
   const maxUsage = rows.length ? Math.max(...rows.map(r => r.usage)) : 0
 
   function exportCsv() {
@@ -313,15 +318,15 @@ function UsageAnalysis() {
         ]
       } />
       <div className="mt-4 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-          {([['global', '每日趨勢'], ['sku', '依方案'], ['country', '依國家']] as const).map(([k, label]) => (
+        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 flex-wrap">
+          {([['global-day', '每日趨勢'], ['global-month', '每月趨勢'], ['global-year', '每年趨勢'], ['sku', '依方案'], ['country', '依國家']] as const).map(([k, label]) => (
             <button key={k} onClick={() => pick(k)}
-              className={`px-3 py-1.5 text-sm rounded-md ${dim === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
+              className={`px-3 py-1.5 text-sm rounded-md ${view === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
           ))}
         </div>
         <div className="flex items-center gap-2">
           <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
-          <button onClick={() => computeDim()} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>
+          <button onClick={() => computeView()} disabled={computing} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{computing && <Loader2 className="w-4 h-4 animate-spin" />}計算</button>
           <button onClick={exportCsv} disabled={!rows.length} className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 disabled:opacity-50">
             <Download className="w-4 h-4" /> CSV
           </button>
@@ -346,6 +351,14 @@ function UsageAnalysis() {
           <div className="bg-white border border-gray-200 rounded-xl p-4">
             <div className="text-xs text-gray-500">平均每卡每日</div>
             <div className="mt-1 text-2xl font-bold">{fmtKB(totalAvgCardDay)}</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="text-xs text-gray-500">平均每日總量</div>
+            <div className="mt-1 text-2xl font-bold">{fmtKB(avgDailyTotal)}</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="text-xs text-gray-500">近30日平均每日用量</div>
+            <div className="mt-1 text-2xl font-bold">{fmtKB(recent30AvgDaily)}</div>
           </div>
         </div>
       )}
@@ -485,7 +498,7 @@ function SkuSection() {
   return (
     <div>
       <div className="mt-4 flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit flex-wrap">
-        {([['stat', 'SKU 排行'], ['cov', '方案覆蓋國家'], ['combo', '方案 → 國家組合'], ['pure', '國家組合 → 方案']] as const).map(([k, label]) => (
+        {([['stat', '方案 → 份數'], ['cov', '方案覆蓋國家'], ['combo', '方案 → 國家組合'], ['pure', '國家組合 → 方案']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setSub(k)}
             className={`px-3 py-1.5 text-sm rounded-md ${sub === k ? 'bg-white shadow font-medium' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
         ))}

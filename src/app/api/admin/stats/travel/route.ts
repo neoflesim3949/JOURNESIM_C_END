@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
+import { usageGte } from '@/lib/usage-floor'
 
 // 出行地 × 出行日期：每張卡在某國的「首次用量日期」= 出行日期（抵達），依月份彙總
 //   形成 國家 × 月份 的矩陣（格子 = 該月出行到該國的卡數）
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
   const arrival = new Map<string, { name: string; date: string }>()  // key: iccid|code
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount')
-    if (from) q = q.gte('used_date', from)
+    q = q.gte('used_date', usageGte(from))
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break

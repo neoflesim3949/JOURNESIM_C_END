@@ -66,16 +66,18 @@ export async function GET(request: Request) {
   const pergbBasis = sp.get('pergb_basis') || ''
   const pergbGlobal = pergbBasis === 'global' || pergbBasis === 'globalall'
   const inclUnlimited = pergbBasis === 'globalall'
+  // 分組來源：custom＝自訂分組(family_id/is_base)；system＝系統組別(product_id/is_base_system)，且總量型也依用量計價
+  const grouping = sp.get('grouping') === 'system' ? 'system' : 'custom'
   const supabase = createAdminClient()
   const legacyFlag = sp.get('exclude_legacy') === '1'
 
-  // 版本鍵：每個成本重算子頁一個快照
-  const variant = mode === 'pack' ? 'pack'
+  // 版本鍵：每個成本重算子頁一個快照（系統組別另存一組）
+  const variant = (grouping === 'system' ? 'sys-' : '') + (mode === 'pack' ? 'pack'
     : pergbBasis === 'globalall' ? 'volume-globalall'
     : pergbBasis === 'global' ? 'volume-global'
     : pergbDays > 0 ? `volume-${pergbDays}`
     : pergbAvgDays > 0 ? `volume-avg${pergbAvgDays}`
-    : 'volume-avg'
+    : 'volume-avg')
 
   // 讀快取：打開頁面直接看最近一次結果，不重算
   if (sp.get('cached')) {
@@ -95,17 +97,19 @@ export async function GET(request: Request) {
 
   const legacy = legacyFlag ? await getLegacyIccids(supabase) : new Set<string>()
 
-  // 1) 產品：建家族索引
+  // 1) 產品：建家族索引 ＋ sku→product_id
   const prodBySku = new Map<string, Prod>()
+  const skuProduct = new Map<string, string>()           // sku → product_id
   const famToGb = new Map<string, Map<number, Prod>>()   // familyKey → (gb → 方案)
+  let prodCols = 'sku_id, name, plan_type, type, cost_price, prices, high_flow_size, capacity, rechargeable_product, product_id'
+  if ((await supabase.from('bc_products').select(prodCols).limit(1)).error) prodCols = 'sku_id, name, plan_type, type, cost_price, prices, high_flow_size, capacity, rechargeable_product'
   for (let f = 0; ; f += 1000) {
-    const { data } = await supabase.from('bc_products')
-      .select('sku_id, name, plan_type, type, cost_price, prices, high_flow_size, capacity, rechargeable_product')
-      .range(f, f + 999)
+    const { data } = await supabase.from('bc_products').select(prodCols).range(f, f + 999)
     if (!data || data.length === 0) break
-    for (const r of data as unknown as Prod[]) {
+    for (const r of data as unknown as (Prod & { product_id?: string })[]) {
       if (!r.sku_id) continue
       prodBySku.set(r.sku_id, r)
+      if (r.product_id) skuProduct.set(r.sku_id, r.product_id)
       // 單日型才進自動家族索引
       if (r.plan_type === '1') {
         const gb = parseDailyGB(r.name)
@@ -139,9 +143,13 @@ export async function GET(request: Request) {
   const familyOf = new Map<string, string>()          // sku → 手動 family_id
   const manualBase = new Map<string, string>()        // family_id → 基礎 sku
   const manualAccel = new Map<string, string>()       // sku → 人工選定的加速包 sku
-  let metaCols = 'sku_id, is_unlimited, family_id, is_base, accel_sku_id'
-  const probe = await supabase.from('sku_meta').select(metaCols).limit(1)
-  if (probe.error) metaCols = 'sku_id, is_unlimited, family_id, is_base'   // 095 未跑 → 降級
+  const productBase = new Map<string, string>()       // product_id → 系統基礎 sku（is_base_system）
+  const productBaseCustom = new Map<string, string>() // product_id → 自訂基礎 sku（is_base，供系統組別首次沿用）
+  let metaCols = 'sku_id, is_unlimited, family_id, is_base, accel_sku_id, is_base_system'
+  for (const fb of ['sku_id, is_unlimited, family_id, is_base, accel_sku_id', 'sku_id, is_unlimited, family_id, is_base', 'sku_id, is_unlimited']) {
+    if (!(await supabase.from('sku_meta').select(metaCols).limit(1)).error) break
+    metaCols = fb
+  }
   for (let f = 0; ; f += 1000) {
     const { data } = await supabase.from('sku_meta').select(metaCols).range(f, f + 999)
     if (!data || data.length === 0) break
@@ -150,12 +158,14 @@ export async function GET(request: Request) {
       if (r.is_unlimited) unlimited.add(sku)
       if (r.family_id) { familyOf.set(sku, r.family_id as string); if (r.is_base) manualBase.set(r.family_id as string, sku) }
       if (r.accel_sku_id) manualAccel.set(sku, r.accel_sku_id as string)
+      if (r.is_base_system) { const pid = skuProduct.get(sku); if (pid) productBase.set(pid, sku) }
+      if (r.is_base) { const pid = skuProduct.get(sku); if (pid && !productBaseCustom.has(pid)) productBaseCustom.set(pid, sku) }
     }
     if (data.length < 1000) break
   }
 
-  // 3) 每卡取主方案（單日型、非吃到飽、原SKU在bc_products；已手動分組 或 名稱解析日容量≥1GB）：同 iccid 取 total_days 最大者
-  interface CardPlan { sku_id: string; sku_name: string; copies: number; days: number; gb: number | null; start: string | null }
+  // 3) 每卡取主方案（原SKU在bc_products）：custom＝手動分組/名稱≥1GB；system＝product_id組(含總量型依用量)；同 iccid 取 total_days 最大者
+  interface CardPlan { sku_id: string; sku_name: string; copies: number; days: number; gb: number | null; total: boolean; start: string | null }
   const cardOf = new Map<string, CardPlan>()
   for (let f = 0; ; f += 1000) {
     const { data } = await supabase.from('card_plans')
@@ -165,23 +175,25 @@ export async function GET(request: Request) {
     for (const r of data) {
       const ic = r.iccid as string
       if (!ic || legacy.has(ic)) continue
-      if (r.plan_type !== '1') continue
+      const totalType = r.plan_type !== '1'     // 非單日型＝總量型（兩版都以用量計）
       const sku = (r.sku_id as string) || ''
       const prod = prodBySku.get(sku)
       if (!prod) continue                       // 原 SKU 不在 bc_products（多為舊SIMPOMATION）→ 不納入比較
       const nm = prod.name || (r.sku_name as string) || ''
       const gb = parseDailyGB(nm)
-      const grouped = familyOf.has(sku)
+      const pid = skuProduct.get(sku)
+      const grouped = grouping === 'system'
+        ? (!!pid && (productBase.has(pid) || productBaseCustom.has(pid)))
+        : familyOf.has(sku)
       const isUnl = unlimited.has(sku)
-      // 已分組：組內「日容量≥1GB 或 已勾吃到飽」都納入（吃到飽卡也用 1GB 基礎＋加速包重算）
-      // 未分組：僅名稱日容量≥1GB 且非吃到飽（走自動家族 fallback）
-      const inScope = grouped ? (isUnl || (gb != null && gb >= 1)) : (!isUnl && gb != null && gb >= 1)
+      // 已分組：組內「日容量≥1GB 或 吃到飽 或 總量型」都納入；未分組：名稱≥1GB 或 總量型（走自動家族抓基礎），且非吃到飽
+      const inScope = grouped ? (isUnl || totalType || (gb != null && gb >= 1)) : (!isUnl && (totalType || (gb != null && gb >= 1)))
       if (!inScope) continue
       const days = Number(r.total_days) || 0
       const copies = Number(r.copies) || days || 1
       const prev = cardOf.get(ic)
       if (!prev || days > prev.days) {
-        cardOf.set(ic, { sku_id: sku, sku_name: nm, copies, days, gb, start: (r.plan_start_time as string) || null })
+        cardOf.set(ic, { sku_id: sku, sku_name: nm, copies, days, gb, total: totalType, start: (r.plan_start_time as string) || null })
       }
     }
     if (data.length < 1000) break
@@ -208,8 +220,11 @@ export async function GET(request: Request) {
   const inRange = (ym: string) => (!from || ym >= from.slice(0, 7)) && (!to || ym <= to.slice(0, 7))
   const round = (n: number) => Math.round(n * 100) / 100
   const baseOfCard = (c: { sku_id: string }, prod: Prod): Prod | null => {
-    const mfam = familyOf.get(c.sku_id)
-    if (mfam) { const bsku = manualBase.get(mfam); return bsku ? (prodBySku.get(bsku) || null) : null }
+    const pid = skuProduct.get(c.sku_id)
+    if (grouping === 'system' && pid && (productBase.has(pid) || productBaseCustom.has(pid))) {
+      return prodBySku.get(productBase.get(pid) ?? productBaseCustom.get(pid)!) || null
+    }
+    if (grouping === 'custom') { const mfam = familyOf.get(c.sku_id); if (mfam) { const bsku = manualBase.get(mfam); return bsku ? (prodBySku.get(bsku) || null) : null } }
     return autoBase1Gb(autoFamily(prod.name))
   }
 
@@ -321,20 +336,28 @@ export async function GET(request: Request) {
     const ym = c.start ? String(c.start).slice(0, 7) : ''
     if (ym && from && to && !inRange(ym)) continue   // 有指定範圍才用 plan_start 過濾
     const prod = prodBySku.get(c.sku_id)!             // pass3 已保證存在
-    // 家族／基礎：手動分組優先，未分組用自動家族
+    // 家族／基礎：依 grouping 選來源；找不到才退回品名自動家族
     let fk: string, base: Prod | null
     const mfam = familyOf.get(c.sku_id)
-    if (mfam) { fk = 'M:' + mfam; const bsku = manualBase.get(mfam); base = bsku ? (prodBySku.get(bsku) || null) : null }
-    else { const ak = autoFamily(prod.name); fk = 'A:' + ak; base = autoBase1Gb(ak) }
+    const pid = skuProduct.get(c.sku_id)
+    if (grouping === 'system' && pid && (productBase.has(pid) || productBaseCustom.has(pid))) {
+      fk = 'P:' + pid; base = prodBySku.get(productBase.get(pid) ?? productBaseCustom.get(pid)!) || null
+    } else if (grouping === 'custom' && mfam) {
+      fk = 'M:' + mfam; const bsku = manualBase.get(mfam); base = bsku ? (prodBySku.get(bsku) || null) : null
+    } else { const ak = autoFamily(prod.name); fk = 'A:' + ak; base = autoBase1Gb(ak) }
     const region = regionOf((base || prod).name)
     const oldCost = settleAt(prod, c.copies) ?? 0
     const baseFound = !!base
-    const baseCost = base ? (settleAt(base, c.copies) ?? 0) : 0
 
-    let packs = 0, overDays = 0
     const dm = dailyKb.get(ic)
     const hasUsage = !!dm && dm.size > 0
-    if (dm) for (const kb of dm.values()) { const gb = kb / KB_PER_GB; if (gb > 1) { packs += Math.ceil(gb - 1); overDays++ } }
+    let packs = 0, overDays = 0, totalKb = 0
+    if (dm) for (const kb of dm.values()) { totalKb += kb; const gb = kb / KB_PER_GB; if (gb > 1) { packs += Math.ceil(gb - 1); overDays++ } }
+
+    // 單日型：1GB基礎×份數 ＋ 超量加速包；總量型（僅系統版）：依用量＝usedGB × 基礎單日價、不補加速包
+    let baseCost: number
+    if (c.total) { baseCost = base ? (totalKb / KB_PER_GB) * (settleAt(base, 1) ?? 0) : 0; packs = 0; overDays = 0 }
+    else baseCost = base ? (settleAt(base, c.copies) ?? 0) : 0
 
     let fam = fams.get(fk)
     if (!fam) { fam = { family: familyLabel((base || prod).name), region, sampleSku: base?.sku_id || c.sku_id, basep: base, cards: 0, old: 0, base: 0, packs: 0, overDays: 0, baseFound, baseSku: base?.sku_id || '', baseName: base?.name || '', noUsage: 0, gbs: new Set() }; fams.set(fk, fam) }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
+import { usageGte } from '@/lib/usage-floor'
 
 // 方案覆蓋國家：每支 SKU 實際被使用（有流量）在幾個國家
 // GET ?from=&to=（使用日期區間）
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
   const bySku = new Map<string, { usage: number; cards: Set<string>; cardDays: Set<string>; countries: Map<string, { name: string; usage: number; cards: Set<string>; cardDays: Set<string> }> }>()
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount')
-    if (from) q = q.gte('used_date', from)
+    q = q.gte('used_date', usageGte(from))
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break

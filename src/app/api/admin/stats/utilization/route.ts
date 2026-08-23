@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { USAGE_FLOOR } from '@/lib/usage-floor'
 
 // 用量分佈 / 利用率
 //  - 用量分佈：每方案在啟用期間的總用量落在哪個級距（找買了沒用 / 超用）
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
   for (let i = 0; i < iccids.length; i += 300) {
     const chunk = iccids.slice(i, i + 300)
     for (let f = 0; ; f += 1000) {
-      const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, used_amount').in('iccid', chunk).range(f, f + 999)
+      const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, used_amount').in('iccid', chunk).gte('used_date', USAGE_FLOOR).range(f, f + 999)
       if (!data || data.length === 0) break
       for (const r of data) {
         const arr = byIccid.get(r.iccid) || []

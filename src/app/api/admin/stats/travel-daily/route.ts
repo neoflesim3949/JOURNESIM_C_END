@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
+import { usageGte } from '@/lib/usage-floor'
 
 // 出行地 × 月份（依每日）：國家 × 月份 矩陣，格子＝該月該國的「卡·日數」
 //   每筆每日用量＝一個卡日；同一天在多國各計一次（例：6/30 日+韓 → 日本+1、韓國+1）
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
   const allCards = new Set<string>()               // 不重複卡數（摘要用）
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount')
-    if (from) q = q.gte('used_date', from)
+    q = q.gte('used_date', usageGte(from))
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break

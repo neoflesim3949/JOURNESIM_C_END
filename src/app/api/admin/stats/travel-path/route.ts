@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { USAGE_FLOOR } from '@/lib/usage-floor'
 import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 出行路徑分析：一張卡在一個方案期間，去過的國家「依首次出現日期」排成路徑（日本→韓國→香港）
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
   for (let i = 0; i < iccids.length; i += 300) {
     const chunk = iccids.slice(i, i + 300)
     for (let f = 0; ; f += 1000) {
-      const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount').in('iccid', chunk).range(f, f + 999)
+      const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, country, country_region_code, used_amount').in('iccid', chunk).gte('used_date', USAGE_FLOOR).range(f, f + 999)
       if (!data || data.length === 0) break
       for (const r of data) {
         const arr = byIccid.get(r.iccid) || []

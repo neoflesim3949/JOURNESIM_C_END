@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getLegacyIccids } from '@/lib/legacy-cards'
+import { usageGte } from '@/lib/usage-floor'
 
 // 日均量分佈：每張卡的「平均每日用量」＝總用量 ÷ 有流量天數，落在哪個 100MB 級距（未滿往上進位：70→100、120→200）
 //   依 sku_meta.is_unlimited 分：總覽 / 一般 / 吃到飽
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
   const byIccid = new Map<string, { kb: number; days: Set<string> }>()
   for (let f = 0; ; f += 1000) {
     let q = supabase.from('card_usage_daily').select('iccid, used_date, used_amount')
-    if (from) q = q.gte('used_date', from)
+    q = q.gte('used_date', usageGte(from))
     if (to) q = q.lte('used_date', to)
     const { data } = await q.range(f, f + 999)
     if (!data || data.length === 0) break

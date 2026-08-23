@@ -24,7 +24,8 @@ export default function HistoryAftersalesPage() {
   const [method, setMethod] = useState('')
   const [review, setReview] = useState('')
   const [refund, setRefund] = useState('')
-  const [facets, setFacets] = useState<{ methods: string[]; reviews: string[]; refunds: string[] }>({ methods: [], reviews: [], refunds: [] })
+  const [channel, setChannel] = useState('')
+  const [facets, setFacets] = useState<{ methods: string[]; reviews: string[]; refunds: string[]; channels: string[] }>({ methods: [], reviews: [], refunds: [], channels: [] })
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [msg, setMsg] = useState('')
@@ -39,6 +40,7 @@ export default function HistoryAftersalesPage() {
     if (method) params.set('method', method)
     if (review) params.set('review', review)
     if (refund) params.set('refund', refund)
+    if (channel) params.set('channel', channel)
     const res = await fetch(`/api/admin/stats/history-aftersales?${params}`)
     if (res.ok) { const d = await res.json(); setRows(d.rows || []); setTotal(d.total || 0); setPage(d.page || p) }
     setLoading(false)
@@ -112,8 +114,8 @@ export default function HistoryAftersalesPage() {
   }
 
   function exportCsv() {
-    const cols = ['aftersale_date', 'bc_order_no', 'aftersale_no', 'product_name', 'aftersale_method', 'aftersale_reason', 'problem_iccid', 'refund_amount', 'review_status', 'refund_status']
-    const head = ['日期', '亿点订单号', '售后单号', '商品名称', '售后方式', '售后原因', '问题卡号', '退款金额', '受理状态', '退款状态'].join(',')
+    const cols = ['aftersale_date', 'channel_name', 'bc_order_no', 'aftersale_no', 'product_name', 'aftersale_method', 'aftersale_reason', 'problem_iccid', 'refund_amount', 'review_status', 'refund_status']
+    const head = ['日期', '渠道', '亿点订单号', '售后单号', '商品名称', '售后方式', '售后原因', '问题卡号', '退款金额', '受理状态', '退款状态'].join(',')
     const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
     const body = rows.map(r => cols.map(c => esc(r[c])).join(',')).join('\n')
     const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
@@ -161,6 +163,9 @@ export default function HistoryAftersalesPage() {
         <select value={refund} onChange={e => setRefund(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
           <option value="">全部退款狀態</option>{facets.refunds.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
+        <select value={channel} onChange={e => setChannel(e.target.value)} className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
+          <option value="">全部渠道</option>{facets.channels.map(m => <option key={m} value={m}>{m}</option>)}<option value="（未對應）">（未對應）</option>
+        </select>
         <DateRange from={from} to={to} onFrom={setFrom} onTo={setTo} label="日期" />
         <button onClick={() => load(1)} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">查詢</button>
       </div>
@@ -170,17 +175,18 @@ export default function HistoryAftersalesPage() {
           <table className="text-sm whitespace-nowrap w-full">
             <thead className="bg-gray-50 text-xs">
               <tr>
-                {['日期', '億點單號', '售後單號', '商品', '售後方式', '售後原因', '問題卡號', '退款金額', '受理狀態', '退款狀態'].map(h => (
+                {['日期', '渠道', '億點單號', '售後單號', '商品', '售後方式', '售後原因', '問題卡號', '退款金額', '受理狀態', '退款狀態'].map(h => (
                   <th key={h} className="px-3 py-2 text-left border-b font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={10} className="px-3 py-10 text-center text-gray-400">無資料，請匯入 Excel</td></tr>
+                <tr><td colSpan={11} className="px-3 py-10 text-center text-gray-400">無資料，請匯入 Excel</td></tr>
               ) : rows.map(r => (
                 <tr key={String(r.id)} className="border-b hover:bg-gray-50">
                   <td className="px-3 py-2 text-xs text-gray-500">{fmt(r.aftersale_date)}</td>
+                  <td className="px-3 py-2 text-xs">{r.channel_name ? <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">{String(r.channel_name)}</span> : <span className="text-gray-300">—</span>}</td>
                   <td className="px-3 py-2 font-mono text-xs">{fmt(r.bc_order_no)}</td>
                   <td className="px-3 py-2 font-mono text-xs">{fmt(r.aftersale_no)}</td>
                   <td className="px-3 py-2 max-w-xs truncate" title={String(r.product_name ?? '')}>{fmt(r.product_name)}</td>

@@ -57,25 +57,31 @@ export async function GET(request: Request) {
     if (data.length < 1000) break
   }
 
-  // bc_products（有對照＝有被拉過來），優先用 bc_products 名稱
-  const inBc = new Map<string, { plan_type: string | null; name: string }>()
+  // bc_products（有對照＝有被拉過來），優先用 bc_products 名稱；帶 product_id/product_name（BC 產品層分類）
+  const inBc = new Map<string, { plan_type: string | null; name: string; product_id: string | null; product_name: string | null }>()
+  let bcCols = 'sku_id, name, plan_type, product_id, product_name'
+  if ((await supabase.from('bc_products').select(bcCols).limit(1)).error) bcCols = 'sku_id, name, plan_type'   // 098 未跑 → 降級
   for (let f = 0; ; f += 1000) {
-    const { data } = await supabase.from('bc_products').select('sku_id, name, plan_type').range(f, f + 999)
+    const { data } = await supabase.from('bc_products').select(bcCols).range(f, f + 999)
     if (!data || data.length === 0) break
-    for (const r of data) inBc.set(r.sku_id, { plan_type: r.plan_type, name: r.name })
+    for (const r of data as unknown as Record<string, unknown>[]) {
+      inBc.set(r.sku_id as string, { plan_type: (r.plan_type as string) ?? null, name: (r.name as string) || '', product_id: (r.product_id as string) || null, product_name: (r.product_name as string) || null })
+    }
     if (data.length < 1000) break
   }
 
-  // sku_meta（吃到飽標註＋分組＋加速包選定）；欄位缺（093/095 未跑）時自動降級，避免整頁歸零
-  const meta = new Map<string, { is_unlimited: boolean; family_id: string | null; is_base: boolean; accel_sku_id: string | null }>()
-  let cols = 'sku_id, is_unlimited, family_id, is_base, accel_sku_id'
-  if ((await supabase.from('sku_meta').select(cols).limit(1)).error) cols = 'sku_id, is_unlimited, family_id, is_base'
-  if ((await supabase.from('sku_meta').select(cols).limit(1)).error) cols = 'sku_id, is_unlimited'
+  // sku_meta（吃到飽標註＋分組＋加速包選定＋系統基礎）；欄位缺時自動降級，避免整頁歸零
+  const meta = new Map<string, { is_unlimited: boolean; family_id: string | null; is_base: boolean; is_base_system: boolean; accel_sku_id: string | null }>()
+  let cols = 'sku_id, is_unlimited, family_id, is_base, accel_sku_id, is_base_system'
+  for (const fb of ['sku_id, is_unlimited, family_id, is_base, accel_sku_id', 'sku_id, is_unlimited, family_id, is_base', 'sku_id, is_unlimited']) {
+    if (!(await supabase.from('sku_meta').select(cols).limit(1)).error) break
+    cols = fb
+  }
   for (let f = 0; ; f += 1000) {
     const { data } = await supabase.from('sku_meta').select(cols).range(f, f + 999)
     if (!data || data.length === 0) break
     for (const r of data as unknown as Record<string, unknown>[]) {
-      meta.set(r.sku_id as string, { is_unlimited: !!r.is_unlimited, family_id: (r.family_id as string) || null, is_base: !!r.is_base, accel_sku_id: (r.accel_sku_id as string) || null })
+      meta.set(r.sku_id as string, { is_unlimited: !!r.is_unlimited, family_id: (r.family_id as string) || null, is_base: !!r.is_base, is_base_system: !!r.is_base_system, accel_sku_id: (r.accel_sku_id as string) || null })
     }
     if (data.length < 1000) break
   }
@@ -95,7 +101,8 @@ export async function GET(request: Request) {
     const nm = bc?.name || a.name
     const pt = a.planType ?? bc?.plan_type ?? null
     const m = meta.get(sku_id)
-    const auto = autoFamily(nm)
+    // 自動分組：優先 BC product_id（同產品的多個 SKU），沒有才退回品名解析
+    const auto = bc?.product_id || autoFamily(nm)
     const accelSku = m?.accel_sku_id ?? null
     const accel = accelSku ? accelMap.get(accelSku) : undefined
     return {
@@ -106,10 +113,13 @@ export async function GET(request: Request) {
       tagged: !!m,
       name_hint_unlimited: /无限|無限|吃到饱|吃到飽|unlimited/i.test(nm),
       daily_gb: parseDailyGB(nm),
+      product_id: bc?.product_id ?? null,
+      product_name: bc?.product_name ?? null,
       family_id: m?.family_id ?? null,          // 已存的手動分組
-      family_auto: auto,                        // 自動建議鍵
+      family_auto: auto,                        // 自動建議鍵（product_id 優先）
       family_eff: m?.family_id ?? auto,         // 有效分組（手動優先）
       is_base: m?.is_base ?? false,
+      is_base_system: m?.is_base_system ?? false,   // 系統組別(product_id)的基礎
       accel_sku_id: accelSku,                   // 人工選定的加速包 sku
       accel_name: accel?.name ?? null,
       accel_price: accel?.price ?? null,
@@ -135,10 +145,21 @@ export async function PATCH(request: Request) {
     sku_id?: string; sku_name?: string; is_unlimited?: boolean
     group?: { family_id: string; members: string[]; base_sku_id?: string | null; names?: Record<string, string> }
     assign?: { sku_id: string; family_id: string; is_base?: boolean; sku_name?: string | null }[]
+    system_base?: { sku_id: string; is_base_system: boolean; sku_name?: string | null }[]
     accel?: { sku_id: string; accel_sku_id: string | null; sku_name?: string | null }
   }
   const supabase = createAdminClient()
   const now = new Date().toISOString()
+
+  // 系統組別（product_id）的基礎：只動 is_base_system，不碰 family_id / is_base（與自訂分組獨立）
+  if (body.system_base) {
+    const rows = body.system_base.filter(a => a.sku_id)
+    if (rows.length === 0) return NextResponse.json({ error: '缺少 system_base 資料' }, { status: 400 })
+    const payload = rows.map(a => ({ sku_id: a.sku_id, sku_name: a.sku_name ?? null, is_base_system: !!a.is_base_system, updated_at: now }))
+    const { error } = await supabase.from('sku_meta').upsert(payload, { onConflict: 'sku_id' })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, count: payload.length })
+  }
 
   // 為某基礎方案人工選定加速包 SKU（accel_sku_id 空＝清除）
   if (body.accel) {

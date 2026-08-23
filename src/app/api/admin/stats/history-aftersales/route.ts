@@ -9,6 +9,18 @@ const NUM = (v: unknown) => { const s = String(v ?? '').replace(/[^\d.-]/g, '');
 const DT = (v: unknown) => { const m = String(v ?? '').trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/); return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : null }
 const T = (v: unknown) => { const s = String(v ?? '').trim(); return s === '' ? null : s }
 
+// 億點單號 → 渠道名稱（來自歷史採購訂單明細 bc_history_orders）
+async function loadOrderChannel(supabase: ReturnType<typeof createAdminClient>) {
+  const map = new Map<string, string>()
+  for (let f = 0; ; f += 1000) {
+    const { data } = await supabase.from('bc_history_orders').select('bc_order_no, channel_name').range(f, f + 999)
+    if (!data || data.length === 0) break
+    for (const r of data) { if (r.bc_order_no && r.channel_name && !map.has(r.bc_order_no)) map.set(r.bc_order_no as string, r.channel_name as string) }
+    if (data.length < 1000) break
+  }
+  return map
+}
+
 export async function GET(request: Request) {
   if (!(await checkAdminAuth())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const sp = new URL(request.url).searchParams
@@ -17,7 +29,9 @@ export async function GET(request: Request) {
   if (sp.get('facets')) {
     const { data } = await supabase.from('bc_history_aftersales').select('aftersale_method, review_status, refund_status').limit(50000)
     const uniq = (k: 'aftersale_method' | 'review_status' | 'refund_status') => [...new Set((data || []).map(r => r[k]).filter(Boolean) as string[])].sort()
-    return NextResponse.json({ methods: uniq('aftersale_method'), reviews: uniq('review_status'), refunds: uniq('refund_status') })
+    const chMap = await loadOrderChannel(supabase)
+    const channels = [...new Set([...chMap.values()])].sort()
+    return NextResponse.json({ methods: uniq('aftersale_method'), reviews: uniq('review_status'), refunds: uniq('refund_status'), channels })
   }
 
   const page = Math.max(1, Number(sp.get('page')) || 1)
@@ -28,18 +42,27 @@ export async function GET(request: Request) {
   const method = sp.get('method') || ''
   const review = sp.get('review') || ''
   const refund = sp.get('refund') || ''
+  const channel = sp.get('channel') || ''
 
-  let q = supabase.from('bc_history_aftersales').select('*', { count: 'exact' })
+  // 表小（約千筆）→ 撈符合條件的全部、以億點單號歸因渠道、渠道篩選＋分頁在 JS 做
+  let q = supabase.from('bc_history_aftersales').select('*')
   if (search) q = q.or(`bc_order_no.ilike.%${search}%,aftersale_no.ilike.%${search}%,problem_iccid.ilike.%${search}%,product_name.ilike.%${search}%`)
   if (from) q = q.gte('aftersale_date', from)
   if (to) q = q.lte('aftersale_date', to)
   if (method) q = q.eq('aftersale_method', method)
   if (review) q = q.eq('review_status', review)
   if (refund) q = q.eq('refund_status', refund)
-  q = q.order('aftersale_date', { ascending: false, nullsFirst: false }).range((page - 1) * pageSize, page * pageSize - 1)
-  const { data, count, error } = await q
+  q = q.order('aftersale_date', { ascending: false, nullsFirst: false }).limit(20000)
+  const { data, error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ rows: data || [], total: count || 0, page, page_size: pageSize })
+
+  const chMap = await loadOrderChannel(supabase)
+  let withCh = (data || []).map(r => ({ ...r, channel_name: (r.bc_order_no && chMap.get(r.bc_order_no as string)) || null }))
+  if (channel) withCh = withCh.filter(r => (r.channel_name || '（未對應）') === channel)
+
+  const total = withCh.length
+  const rows = withCh.slice((page - 1) * pageSize, page * pageSize)
+  return NextResponse.json({ rows, total, page, page_size: pageSize })
 }
 
 export async function POST(request: Request) {

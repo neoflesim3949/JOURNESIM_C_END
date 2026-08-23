@@ -101,7 +101,8 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/stats/order-analysis', label: '訂單統計分析' },
       { href: '/admin/stats/history-orders', label: '歷史採購訂單明細' },
       { href: '/admin/stats/history-aftersales', label: '歷史採購售後明細' },
-      { href: '/admin/stats/cost-recalc', label: '成本重算' },
+      { href: '/admin/stats/cost-recalc', label: '成本重算（自訂分組）' },
+      { href: '/admin/stats/cost-recalc-system', label: '成本重算（系統組別）' },
     ],
   },
   {

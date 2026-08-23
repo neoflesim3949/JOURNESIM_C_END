@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { USAGE_FLOOR } from '@/lib/usage-floor'
 import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // APN 使用統計：card_plans → SKU → bc_products.country_data 的 apn 聚合
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
   // 1b) 每卡用量：iccid → 總用量(KB) + 卡日數（不重複 used_date）
   const usageByIccid = new Map<string, { kb: number; days: Set<string> }>()
   for (let f = 0; ; f += 1000) {
-    const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, used_amount').range(f, f + 999)
+    const { data } = await supabase.from('card_usage_daily').select('iccid, used_date, used_amount').gte('used_date', USAGE_FLOOR).range(f, f + 999)
     if (!data || data.length === 0) break
     for (const r of data) {
       const ic = r.iccid as string; const amt = Number(r.used_amount) || 0

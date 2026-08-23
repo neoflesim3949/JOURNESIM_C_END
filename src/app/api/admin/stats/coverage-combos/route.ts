@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { checkAdminAuth } from '@/lib/admin'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { USAGE_FLOOR } from '@/lib/usage-floor'
 import { getLegacyIccids } from '@/lib/legacy-cards'
 
 // 方案覆蓋組合：每支 SKU 的各方案，在啟用期間去了哪些地區
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
     for (let f = 0; ; f += 1000) {
       const { data } = await supabase.from('card_usage_daily')
         .select('iccid, used_date, country, country_region_code, used_amount')
-        .in('iccid', chunk).range(f, f + 999)
+        .in('iccid', chunk).gte('used_date', USAGE_FLOOR).range(f, f + 999)
       if (!data || data.length === 0) break
       for (const r of data) {
         const arr = byIccid.get(r.iccid) || []
