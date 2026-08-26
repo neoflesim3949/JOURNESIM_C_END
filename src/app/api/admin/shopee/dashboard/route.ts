@@ -78,10 +78,10 @@ export async function GET(request: Request) {
     const { data } = await supabase.from('shopee_orders').select('buyer_account').in('id', batch)
     for (const o of data || []) { const b = (o.buyer_account || '').trim(); if (b && b !== '-') buyerCount.set(b, (buyerCount.get(b) || 0) + 1) }
   }
-  let custRepeat = 0
-  for (const c of buyerCount.values()) if (c > 1) custRepeat++
-  const custTotal = buyerCount.size
-  const customers = { total: custTotal, repeat: custRepeat, ratio: custTotal ? Math.round((custRepeat / custTotal) * 1000) / 10 : 0 }
+  // 訂單次數分佈（次數 → 幾位買家），供前端自選門檻計算「下單 ≥ N 次」
+  const dist: Record<number, number> = {}
+  for (const c of buyerCount.values()) dist[c] = (dist[c] || 0) + 1
+  const customers = { total: buyerCount.size, dist }
 
   // ─── 2. 對母體訂單抓所有 settlement（分批，不限 wallet_date）──
   const allSettlements: SettlementRow[] = []

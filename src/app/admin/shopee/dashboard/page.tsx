@@ -68,15 +68,16 @@ interface DashboardData {
   backfilled?: GroupData
   product_stats?: TreeItem[]
   aftersale?: { count: number; card_count: number; refund_cny: number; refund_twd: number }
-  customers?: { total: number; repeat: number; ratio: number }
+  customers?: { total: number; dist: Record<string, number> }
 }
 
-function StatCards({ title, subtitle, cards }: { title: string; subtitle?: string; cards: { label: string; value: string; sub: string; icon: typeof ShoppingCart; color: string }[] }) {
+function StatCards({ title, subtitle, cards, action }: { title: string; subtitle?: string; cards: { label: string; value: string; sub: string; icon: typeof ShoppingCart; color: string }[]; action?: React.ReactNode }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-3">
         <h2 className="text-base font-semibold text-gray-800">{title}</h2>
         {subtitle && <span className="text-xs text-gray-400">{subtitle}</span>}
+        {action && <div className="ml-auto">{action}</div>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {cards.map(card => (
@@ -98,6 +99,7 @@ function StatCards({ title, subtitle, cards }: { title: string; subtitle?: strin
 
 export default function ShopeeDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
+  const [repeatN, setRepeatN] = useState(2)   // 回購門檻：下單 ≥ N 次
   const [loading, setLoading] = useState(true)
   const [showUnsettled, setShowUnsettled] = useState(false)
   const [showSettled, setShowSettled] = useState(false)
@@ -253,15 +255,30 @@ export default function ShopeeDashboardPage() {
               </div>
             )}
           </div>
-          {data.customers && (
-            <div>
-              <StatCards title="顧客統計" subtitle="本期不重複買家與回購（回購＝下單 ≥2 次）" cards={[
-                { label: '總顧客數', value: `${data.customers.total.toLocaleString()} 位`, sub: '不重複買家', icon: Users, color: 'text-blue-600 bg-blue-50' },
-                { label: '回購顧客數', value: `${data.customers.repeat.toLocaleString()} 位`, sub: '下單 ≥2 次', icon: Repeat, color: 'text-violet-600 bg-violet-50' },
-                { label: '回購比例', value: `${data.customers.ratio}%`, sub: '回購 / 總顧客', icon: Percent, color: 'text-emerald-600 bg-emerald-50' },
-              ]} />
-            </div>
-          )}
+          {data.customers && (() => {
+            const total = data.customers.total
+            const repeat = Object.entries(data.customers.dist).reduce((s, [k, v]) => Number(k) >= repeatN ? s + v : s, 0)
+            const ratio = total ? Math.round((repeat / total) * 1000) / 10 : 0
+            const selector = (
+              <label className="flex items-center gap-1 text-xs text-gray-500">
+                下單 ≥
+                <select value={repeatN} onChange={e => setRepeatN(Number(e.target.value))}
+                  className="px-2 py-1 border border-gray-300 rounded-md text-sm text-gray-800">
+                  {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                次
+              </label>
+            )
+            return (
+              <div>
+                <StatCards title="顧客統計" subtitle="本期不重複買家與回購" action={selector} cards={[
+                  { label: '總顧客數', value: `${total.toLocaleString()} 位`, sub: '不重複買家', icon: Users, color: 'text-blue-600 bg-blue-50' },
+                  { label: `回購顧客數（≥${repeatN} 次）`, value: `${repeat.toLocaleString()} 位`, sub: `下單 ≥${repeatN} 次`, icon: Repeat, color: 'text-violet-600 bg-violet-50' },
+                  { label: '回購比例', value: `${ratio}%`, sub: `≥${repeatN} 次 / 總顧客`, icon: Percent, color: 'text-emerald-600 bg-emerald-50' },
+                ]} />
+              </div>
+            )
+          })()}
           <div>
             <TreeTable title="產品統計" data={data.product_stats || []}
               cols={{ name: '商品 / 選項', qty: '數量', revenue: '銷售額' }} />
