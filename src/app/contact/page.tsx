@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Mail, MessageCircle, HelpCircle, MapPin, Building2, ExternalLink } from 'lucide-react'
+import { Mail, MessageCircle, HelpCircle, MapPin, Building2 } from 'lucide-react'
 
 export const metadata = { title: '聯絡我們 · FLESIM' }
 
@@ -13,7 +13,6 @@ const OFFICES = [
     email: 'tw_cs@flesim.com',
     address: '桃園市蘆竹區南崁路 265 號 6 樓之 6',
     addressEn: '6F.-6, No. 265, Nankan Rd., Luzhu Dist., Taoyuan City 338019, Taiwan (R.O.C.)',
-    map: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('桃園市蘆竹區南崁路265號6樓之6'),
   },
   {
     region: '香港 Hong Kong',
@@ -24,7 +23,6 @@ const OFFICES = [
     email: 'hk_cs@flesim.com',
     address: 'RM D07, 8/F, Kai Tak Fty Building, No. 99 King Fuk Street, San Po Kong, Hong Kong',
     addressEn: '',
-    map: 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Kai Tak Factory Building, 99 King Fuk Street, San Po Kong, Hong Kong'),
   },
 ]
 
@@ -89,9 +87,6 @@ export default function ContactPage() {
                   {o.addressEn && <div className="text-muted-foreground mt-0.5">{o.addressEn}</div>}
                 </div>
               </div>
-              <a href={o.map} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-sm text-primary hover:underline">
-                在 Google 地圖開啟 <ExternalLink className="w-3.5 h-3.5" />
-              </a>
             </div>
           </div>
         ))}
