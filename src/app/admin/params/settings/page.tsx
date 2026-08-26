@@ -147,6 +147,19 @@ export default function AdminSettingsPage() {
               />
             </div>
           </div>
+
+          {/* Company Info（台灣，tw.flesim.com 專用）*/}
+          <div>
+            <label className="text-sm font-medium">公司資訊（台灣 · tw.flesim.com）</label>
+            <p className="text-xs text-gray-400 mt-0.5">只在 tw.flesim.com 網域的頁尾顯示；留空則沿用上方「公司資訊」。</p>
+            <div className="mt-1">
+              <RichEditor
+                value={getValue('company_info_tw')}
+                onChange={(html) => handleChange('company_info_tw', html)}
+                placeholder="台灣公司名稱、統一編號、地址、客服 Email／Line..."
+              />
+            </div>
+          </div>
         </div>
       </div>
 

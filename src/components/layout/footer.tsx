@@ -15,6 +15,7 @@ interface SiteConfig {
   footer_logo: string
   brand_desc: string
   company_info: string
+  company_info_tw: string
 }
 
 const SOCIAL_LINKS = [
@@ -52,7 +53,8 @@ const SOCIAL_LINKS = [
 
 export function Footer() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
-  const [config, setConfig] = useState<SiteConfig>({ logo: '', footer_logo: '', brand_desc: '', company_info: '' })
+  const [config, setConfig] = useState<SiteConfig>({ logo: '', footer_logo: '', brand_desc: '', company_info: '', company_info_tw: '' })
+  const [isTw, setIsTw] = useState(false)   // tw.flesim.com → 顯示台灣公司資訊
 
   useEffect(() => {
     fetch('/api/shop/tappay-config')
@@ -62,7 +64,11 @@ export function Footer() {
 
     fetch('/api/shop/site-config')
       .then((r) => r.json())
-      .then(setConfig)
+      .then((c) => {
+        setConfig(c)
+        // 依網域判斷：tw.flesim.com（或任何 tw. 開頭子網域）→ 用台灣公司資訊
+        try { setIsTw(window.location.hostname.startsWith('tw.')) } catch { }
+      })
       .catch(() => { })
   }, [])
 
@@ -85,12 +91,16 @@ export function Footer() {
               className="mt-2 text-sm text-gray-400 prose prose-sm prose-invert max-w-none [&_a]:text-gray-300 [&_a:hover]:text-white"
               dangerouslySetInnerHTML={{ __html: config.brand_desc || '旅遊 eSIM 輕鬆買，出國上網不斷線' }}
             />
-            {config.company_info && (
-              <div
-                className="mt-2 text-xs text-gray-500 prose prose-xs prose-invert max-w-none [&_a]:text-gray-400 [&_a:hover]:text-white"
-                dangerouslySetInnerHTML={{ __html: config.company_info }}
-              />
-            )}
+            {(() => {
+              // tw. 網域用台灣公司資訊；留空則沿用預設公司資訊
+              const info = isTw ? (config.company_info_tw || config.company_info) : config.company_info
+              return info ? (
+                <div
+                  className="mt-2 text-xs text-gray-500 prose prose-xs prose-invert max-w-none [&_a]:text-gray-400 [&_a:hover]:text-white"
+                  dangerouslySetInnerHTML={{ __html: info }}
+                />
+              ) : null
+            })()}
           </div>
 
           {/* Right: All links in one row */}

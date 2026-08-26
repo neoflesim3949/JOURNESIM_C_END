@@ -20,7 +20,7 @@ interface Ctx {
 const CurrencyContext = createContext<Ctx | null>(null)
 
 export function CurrencyProvider({ children }: { children: React.ReactNode }) {
-  const [currency, setCurrencyState] = useState<Currency>('USD') // 預設美金（使用者曾選過則沿用）
+  const [currency, setCurrencyState] = useState<Currency>('TWD') // 預設新台幣（使用者曾選過則沿用）
   const [rates, setRates] = useState<Record<string, number>>(DEFAULT_RATES)
   const [ready, setReady] = useState(false)
 

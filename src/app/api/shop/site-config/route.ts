@@ -13,6 +13,7 @@ export async function GET() {
     site_name: settings.get('site_name') || 'FLESIM',
     brand_desc: settings.get('brand_desc') || '',
     company_info: settings.get('company_info') || '',
+    company_info_tw: settings.get('company_info_tw') || '',   // tw.flesim.com 專用（台灣公司）
     // 廣告追蹤
     ga4_measurement_id: settings.get('ga4_measurement_id') || '',
     google_ads_id: settings.get('google_ads_id') || '',
