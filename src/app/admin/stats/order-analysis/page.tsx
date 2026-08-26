@@ -5,7 +5,7 @@ import { Loader2, Download } from 'lucide-react'
 import DateRange from '@/components/admin/DateRange'
 
 interface Dist { name: string; cards: number; settle: number }
-interface MonthRow { month: string; cards: number; settle: number; refund: number; net: number; orders: number; refund_cnt: number; net_cnt: number }
+interface MonthRow { month: string; cards: number; settle: number; refund: number; net: number; orders: number; refund_cnt: number; net_cnt: number; avg: number }
 interface Data {
   summary: { cards: number; orders: number; settle: number; actual: number; refund: number; net: number; refund_cnt: number; net_cnt: number }
   months: MonthRow[]
@@ -85,7 +85,7 @@ function LineChart({ months, series, fmt }: { months: MonthRow[]; series: Series
 export default function OrderAnalysisPage() {
   const [all, setAll] = useState<{ channels: string[]; data: Record<string, Data> } | null>(null)
   const [channel, setChannel] = useState('全部')
-  const [metric, setMetric] = useState<'amount' | 'count'>('amount')   // 金額(採購) / 訂單量
+  const [metric, setMetric] = useState<'amount' | 'count' | 'cards' | 'avg'>('amount')   // 金額(採購) / 訂單量 / 卡量 / 卡均單價
   const [loading, setLoading] = useState(true)
   // 預設近一年
   const oneYearAgo = (() => { const t = new Date(); t.setFullYear(t.getFullYear() - 1); return t.toISOString().slice(0, 10) })()
@@ -110,20 +110,27 @@ export default function OrderAnalysisPage() {
   const nt = (n: number) => n.toLocaleString()
   const money = (n: number) => '$' + n.toLocaleString(undefined, { maximumFractionDigits: 0 })
 
-  const isCnt = metric === 'count'
-  const chartSeries: Series[] = isCnt
-    ? [{ key: 'orders', name: '訂單', color: '#0d9488' }, { key: 'refund_cnt', name: '售後', color: '#e11d48' }, { key: 'net_cnt', name: '淨單', color: '#2563eb' }]
+  const isMoney = metric === 'amount' || metric === 'avg'    // $ 單位（金額 / 卡均單價）
+  const avgOf = (x: Dist) => x.cards ? x.settle / x.cards : 0 // 卡均單價 = 採購 ÷ 卡數
+  const chartSeries: Series[] =
+    metric === 'count' ? [{ key: 'orders', name: '訂單', color: '#0d9488' }, { key: 'refund_cnt', name: '售後', color: '#e11d48' }, { key: 'net_cnt', name: '淨單', color: '#2563eb' }]
+    : metric === 'cards' ? [{ key: 'cards', name: '卡量', color: '#0d9488' }]
+    : metric === 'avg' ? [{ key: 'avg', name: '卡均單價', color: '#7c3aed' }]
     : [{ key: 'settle', name: '採購', color: '#0d9488' }, { key: 'refund', name: '售後', color: '#e11d48' }, { key: 'net', name: '淨額', color: '#2563eb' }]
-  const chartFmt = isCnt ? (n: number) => Math.round(n).toLocaleString() : (n: number) => '$' + Math.round(n).toLocaleString()
-  const distVal = (x: Dist) => isCnt ? x.cards : x.settle
-  const distFmt = (n: number) => isCnt ? nt(Math.round(n)) : money(n)
-  const sortDist = (list: Dist[]) => isCnt ? [...list].sort((a, b) => b.cards - a.cards) : list
+  const chartFmt = isMoney ? (n: number) => '$' + Math.round(n).toLocaleString() : (n: number) => Math.round(n).toLocaleString()
+  const chartTitle = metric === 'count' ? '訂單 / 售後 / 淨單 月趨勢' : metric === 'cards' ? '卡量 月趨勢' : metric === 'avg' ? '卡均採購單價 月趨勢' : '採購 / 售後 / 淨額 月趨勢'
+  // 分佈：金額→採購、訂單量/卡量→卡數、卡均→卡均單價
+  const distVal = (x: Dist) => metric === 'avg' ? avgOf(x) : metric === 'amount' ? x.settle : x.cards
+  const distFmt = (n: number) => isMoney ? money(n) : nt(Math.round(n))
+  const sortDist = (list: Dist[]) => metric === 'amount' ? list
+    : metric === 'avg' ? [...list].sort((a, b) => avgOf(b) - avgOf(a))
+    : [...list].sort((a, b) => b.cards - a.cards)
 
   function exportCsv() {
     if (!d) return
-    const head = isCnt ? '商品,卡數' : '商品,卡數,採購金額'
+    const head = metric === 'amount' ? '商品,卡數,採購金額' : metric === 'avg' ? '商品,卡數,卡均單價' : '商品,卡數'
     const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
-    const body = sortDist(d.products).map(r => (isCnt ? [r.name, r.cards] : [r.name, r.cards, r.settle]).map(esc).join(',')).join('\n')
+    const body = sortDist(d.products).map(r => (metric === 'amount' ? [r.name, r.cards, r.settle] : metric === 'avg' ? [r.name, r.cards, Math.round(avgOf(r) * 100) / 100] : [r.name, r.cards]).map(esc).join(',')).join('\n')
     const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'order-analysis-products.csv'; a.click(); URL.revokeObjectURL(url)
   }
@@ -134,7 +141,7 @@ export default function OrderAnalysisPage() {
         <div>
           <h1 className="text-2xl font-bold">訂單統計分析</h1>
           <p className="mt-1 text-sm text-gray-500">
-            來源：歷史採購訂單明細 · {isCnt ? '訂單量視角：以「單數／筆數」計（訂單、售後、淨單）' : '金額視角：以「應結算採購成本」計（採購、售後、淨額）'}
+            來源：歷史採購訂單明細 · {metric === 'amount' ? '金額視角：以「應結算採購成本」計（採購、售後、淨額）' : metric === 'count' ? '訂單量視角：以「單數／筆數」計（訂單、售後、淨單）' : metric === 'cards' ? '卡量視角：明細卡數月趨勢與分佈' : '卡均單價視角：採購金額 ÷ 卡數（每張卡平均採購成本）'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -147,7 +154,7 @@ export default function OrderAnalysisPage() {
       </div>
 
       <div className="mt-4 inline-flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-        {([['amount', '金額（採購）'], ['count', '訂單量']] as const).map(([k, label]) => (
+        {([['amount', '金額（採購）'], ['count', '訂單量'], ['cards', '卡量'], ['avg', '卡均單價']] as const).map(([k, label]) => (
           <button key={k} onClick={() => setMetric(k)}
             className={`px-3 py-1.5 text-sm rounded-md whitespace-nowrap ${metric === k ? 'bg-white shadow font-medium text-gray-900' : 'text-gray-500 hover:text-gray-800'}`}>{label}</button>
         ))}
@@ -167,22 +174,41 @@ export default function OrderAnalysisPage() {
       {loading || !d ? <p className="mt-8 text-sm text-gray-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> 載入中...</p> : (
         <>
           <div className="mt-4 flex gap-4 flex-wrap">
-            {isCnt ? <>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">訂單數</div><div className="mt-1 text-2xl font-bold text-teal-600">{nt(d.summary.orders)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">卡數（明細列）</div><div className="mt-1 text-2xl font-bold">{nt(d.summary.cards)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">售後筆數</div><div className="mt-1 text-2xl font-bold text-rose-600">{nt(d.summary.refund_cnt)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">淨單（訂單−售後）</div><div className="mt-1 text-2xl font-bold text-blue-600">{nt(d.summary.net_cnt)}</div></div>
-            </> : <>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">訂單數</div><div className="mt-1 text-2xl font-bold">{nt(d.summary.orders)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">卡數（明細列）</div><div className="mt-1 text-2xl font-bold">{nt(d.summary.cards)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">採購金額（應結算）</div><div className="mt-1 text-2xl font-bold text-teal-600">{money(d.summary.settle)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">售後退款</div><div className="mt-1 text-2xl font-bold text-rose-600">{money(d.summary.refund)}</div></div>
-              <div className="bg-white border border-gray-200 rounded-xl p-4"><div className="text-xs text-gray-500">淨額（採購−售後）</div><div className="mt-1 text-2xl font-bold text-blue-600">{money(d.summary.net)}</div></div>
-            </>}
+            {(() => {
+              const s = d.summary
+              const cards: { label: string; text: string; cls?: string }[] =
+                metric === 'count' ? [
+                  { label: '訂單數', text: nt(s.orders), cls: 'text-teal-600' },
+                  { label: '卡數（明細列）', text: nt(s.cards) },
+                  { label: '售後筆數', text: nt(s.refund_cnt), cls: 'text-rose-600' },
+                  { label: '淨單（訂單−售後）', text: nt(s.net_cnt), cls: 'text-blue-600' },
+                ] : metric === 'cards' ? [
+                  { label: '訂單數', text: nt(s.orders) },
+                  { label: '卡數（明細列）', text: nt(s.cards), cls: 'text-teal-600' },
+                  { label: '平均每單卡數', text: s.orders ? (s.cards / s.orders).toFixed(2) : '0' },
+                  { label: '採購金額（應結算）', text: money(s.settle) },
+                ] : metric === 'avg' ? [
+                  { label: '卡數（明細列）', text: nt(s.cards) },
+                  { label: '採購金額（應結算）', text: money(s.settle) },
+                  { label: '卡均採購單價', text: money(s.cards ? s.settle / s.cards : 0), cls: 'text-violet-600' },
+                ] : [
+                  { label: '訂單數', text: nt(s.orders) },
+                  { label: '卡數（明細列）', text: nt(s.cards) },
+                  { label: '採購金額（應結算）', text: money(s.settle), cls: 'text-teal-600' },
+                  { label: '售後退款', text: money(s.refund), cls: 'text-rose-600' },
+                  { label: '淨額（採購−售後）', text: money(s.net), cls: 'text-blue-600' },
+                ]
+              return cards.map(c => (
+                <div key={c.label} className="bg-white border border-gray-200 rounded-xl p-4">
+                  <div className="text-xs text-gray-500">{c.label}</div>
+                  <div className={`mt-1 text-2xl font-bold ${c.cls || ''}`}>{c.text}</div>
+                </div>
+              ))
+            })()}
           </div>
 
           <div className="mt-6 bg-white border border-gray-200 rounded-xl p-5">
-            <h3 className="text-sm font-semibold mb-2">{isCnt ? '訂單 / 售後 / 淨單 月趨勢' : '採購 / 售後 / 淨額 月趨勢'}</h3>
+            <h3 className="text-sm font-semibold mb-2">{chartTitle}</h3>
             <LineChart months={d.months} series={chartSeries} fmt={chartFmt} />
           </div>
 
@@ -207,7 +233,7 @@ export default function OrderAnalysisPage() {
 
           <div className="mt-4 bg-white border border-gray-200 rounded-xl overflow-x-auto">
             <div className="px-5 pt-4 pb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">{isCnt ? '商品訂單量排行（前 30）' : '商品採購排行（前 30）'}</h3>
+              <h3 className="text-sm font-semibold">{metric === 'amount' ? '商品採購排行（前 30）' : metric === 'avg' ? '商品卡均單價排行（前 30）' : metric === 'cards' ? '商品卡量排行（前 30）' : '商品訂單量排行（前 30）'}</h3>
               <button onClick={exportCsv} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700"><Download className="w-3.5 h-3.5" /> CSV</button>
             </div>
             <table className="w-full text-sm">
@@ -215,8 +241,8 @@ export default function OrderAnalysisPage() {
                 <th className="px-3 py-2 text-left border-b w-10">#</th>
                 <th className="px-3 py-2 text-left border-b">商品</th>
                 <th className="px-3 py-2 text-right border-b">卡數</th>
-                <th className="px-3 py-2 text-right border-b">{isCnt ? '占比' : '採購金額'}</th>
-                <th className="px-3 py-2 text-right border-b">{isCnt ? '—' : '平均/卡'}</th>
+                <th className="px-3 py-2 text-right border-b">{metric === 'amount' ? '採購金額' : metric === 'avg' ? '卡均單價' : '占比'}</th>
+                <th className="px-3 py-2 text-right border-b">{metric === 'amount' ? '平均/卡' : '—'}</th>
               </tr></thead>
               <tbody>
                 {sortDist(d.products).map((p, i) => (
@@ -224,8 +250,8 @@ export default function OrderAnalysisPage() {
                     <td className="px-3 py-2 text-gray-400">{i + 1}</td>
                     <td className="px-3 py-2 max-w-md truncate" title={p.name}>{p.name}</td>
                     <td className="px-3 py-2 text-right font-mono font-semibold">{nt(p.cards)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{isCnt ? (d.summary.cards ? Math.round((p.cards / d.summary.cards) * 1000) / 10 + '%' : '0%') : money(p.settle)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{isCnt ? '—' : money(p.cards ? p.settle / p.cards : 0)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{metric === 'amount' ? money(p.settle) : metric === 'avg' ? money(avgOf(p)) : (d.summary.cards ? Math.round((p.cards / d.summary.cards) * 1000) / 10 + '%' : '0%')}</td>
+                    <td className="px-3 py-2 text-right font-mono">{metric === 'amount' ? money(p.cards ? p.settle / p.cards : 0) : '—'}</td>
                   </tr>
                 ))}
               </tbody>

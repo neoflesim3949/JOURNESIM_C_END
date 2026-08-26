@@ -86,7 +86,19 @@ export async function GET(request: Request) {
   }
   const statusOptions = [...statusSet].sort((a, b) => a.localeCompare(b, 'zh-Hant'))
 
-  return NextResponse.json({ data: data || [], total: count || 0, status_options: statusOptions })
+  // 本頁出現的買家 → 歷史訂單數（全表計，不受目前篩選影響）
+  const buyers = [...new Set(data.map((o) => (o.buyer_account as string) || '').filter(Boolean))]
+  const buyerCounts: Record<string, number> = {}
+  if (buyers.length > 0) {
+    for (let f = 0; ; f += 1000) {
+      const { data: rows } = await supabase.from('shopee_orders').select('buyer_account').in('buyer_account', buyers).range(f, f + 999)
+      if (!rows || rows.length === 0) break
+      for (const r of rows) { const b = (r.buyer_account || '').trim(); if (b) buyerCounts[b] = (buyerCounts[b] || 0) + 1 }
+      if (rows.length < 1000) break
+    }
+  }
+
+  return NextResponse.json({ data: data || [], total: count || 0, status_options: statusOptions, buyer_counts: buyerCounts })
 }
 
 // POST — 手動新增蝦皮訂單

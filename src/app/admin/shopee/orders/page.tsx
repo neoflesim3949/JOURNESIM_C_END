@@ -150,6 +150,7 @@ export default function ShopeeOrdersPage() {
   const [senderInfo, setSenderInfo] = useState({ name: '', tax_id: '', phone: '', zip_city: '', address: '', contents: '文件', undeliverable: '退回寄件人' })
   // 蝦皮狀態選項（來自後端 distinct）
   const [statusOptions, setStatusOptions] = useState<string[]>([])
+  const [buyerCounts, setBuyerCounts] = useState<Record<string, number>>({})
   // 帳號
   const [accounts, setAccounts] = useState<{ id: string; name: string; excel_password: string | null }[]>([])
   const [selectedAccount, setSelectedAccount] = useState('')
@@ -210,7 +211,7 @@ export default function ShopeeOrdersPage() {
     if (filterStatus) params.set('system_status', filterStatus)
     if (filterFinanceStatus) params.set('finance_status', filterFinanceStatus)
     const res = await fetch(`/api/admin/shopee/orders?${params}`)
-    if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0); if (d.status_options) setStatusOptions(d.status_options) }
+    if (res.ok) { const d = await res.json(); setOrders(d.data || []); setTotal(d.total || 0); if (d.status_options) setStatusOptions(d.status_options); setBuyerCounts(d.buyer_counts || {}) }
     setLoading(false)
   }
 
@@ -661,7 +662,12 @@ export default function ShopeeOrdersPage() {
                       {o.shopee_order_number}
                       {o.shopee_tracking_code && <div className="text-[10px] text-gray-400">({o.shopee_tracking_code})</div>}
                     </td>
-                    <td className="px-4 py-2 text-xs">{o.buyer_account || '-'}</td>
+                    <td className="px-4 py-2 text-xs">
+                      {o.buyer_account || '-'}
+                      {o.buyer_account && buyerCounts[o.buyer_account] != null && (
+                        <span className={`ml-1 text-[10px] ${buyerCounts[o.buyer_account] > 1 ? 'text-violet-600 font-semibold' : 'text-gray-400'}`} title="該買家歷史訂單數">（{buyerCounts[o.buyer_account]}）</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-xs font-medium">NT$ {getOriginalPrice(o) || '-'}</td>
                     <td className="px-4 py-2 text-xs">
                       {(() => {

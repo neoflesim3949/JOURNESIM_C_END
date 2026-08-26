@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, ChevronDown, ChevronRight } from 'lucide-react'
+import { DollarSign, TrendingUp, ShoppingCart, Percent, CreditCard, ChevronDown, ChevronRight, Users, Repeat } from 'lucide-react'
 import { TreeTable, type TreeItem } from '@/components/admin/dashboard/HotRankings'
 import DateRange from '@/components/admin/DateRange'
 
@@ -68,6 +68,7 @@ interface DashboardData {
   backfilled?: GroupData
   product_stats?: TreeItem[]
   aftersale?: { count: number; card_count: number; refund_cny: number; refund_twd: number }
+  customers?: { total: number; repeat: number; ratio: number }
 }
 
 function StatCards({ title, subtitle, cards }: { title: string; subtitle?: string; cards: { label: string; value: string; sub: string; icon: typeof ShoppingCart; color: string }[] }) {
@@ -252,6 +253,15 @@ export default function ShopeeDashboardPage() {
               </div>
             )}
           </div>
+          {data.customers && (
+            <div>
+              <StatCards title="顧客統計" subtitle="本期不重複買家與回購（回購＝下單 ≥2 次）" cards={[
+                { label: '總顧客數', value: `${data.customers.total.toLocaleString()} 位`, sub: '不重複買家', icon: Users, color: 'text-blue-600 bg-blue-50' },
+                { label: '回購顧客數', value: `${data.customers.repeat.toLocaleString()} 位`, sub: '下單 ≥2 次', icon: Repeat, color: 'text-violet-600 bg-violet-50' },
+                { label: '回購比例', value: `${data.customers.ratio}%`, sub: '回購 / 總顧客', icon: Percent, color: 'text-emerald-600 bg-emerald-50' },
+              ]} />
+            </div>
+          )}
           <div>
             <TreeTable title="產品統計" data={data.product_stats || []}
               cols={{ name: '商品 / 選項', qty: '數量', revenue: '銷售額' }} />

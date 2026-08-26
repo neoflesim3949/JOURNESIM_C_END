@@ -107,7 +107,9 @@ export async function GET(request: Request) {
       const rf = Math.round((b.refundByMonth.get(month) || 0) * 100) / 100
       const oc = p?.orders.size || 0
       const rfc = b.refundCntByMonth.get(month) || 0
-      return { month, cards: p?.cards || 0, orders: oc, settle: s, refund: rf, net: Math.round((s - rf) * 100) / 100, refund_cnt: rfc, net_cnt: oc - rfc }
+      const cardsM = p?.cards || 0
+      const avg = cardsM > 0 ? Math.round((s / cardsM) * 100) / 100 : 0   // 卡均採購單價
+      return { month, cards: cardsM, orders: oc, settle: s, refund: rf, net: Math.round((s - rf) * 100) / 100, refund_cnt: rfc, net_cnt: oc - rfc, avg }
     })
     return {
       summary: { cards: b.cards, orders: b.orders.size, settle: Math.round(b.settle * 100) / 100, actual: Math.round(b.actual * 100) / 100, refund: Math.round(b.refundTotal * 100) / 100, net: Math.round((b.settle - b.refundTotal) * 100) / 100, refund_cnt: b.refundCntTotal, net_cnt: b.orders.size - b.refundCntTotal },

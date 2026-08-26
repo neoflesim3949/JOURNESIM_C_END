@@ -33,26 +33,37 @@ export async function GET(request: Request) {
   if (dateField === 'order_date') {
     // 用訂單日期撈所有訂單
     // 排除不成立；order_status 為 NULL（如金流誤匯洗掉狀態的訂單）仍要納入，neq 會連 NULL 排除故用 or
-    let oq = supabase.from('shopee_orders').select('id').or('order_status.is.null,order_status.neq.不成立')
-    if (accountId) oq = oq.eq('shopee_account_id', accountId)
-    if (from) oq = oq.gte('order_date', from)
-    if (to) oq = oq.lte('order_date', to + 'T23:59:59')
-    const { data } = await oq.limit(10000)
-    inRangeOrderIds = (data || []).map(o => o.id)
+    // 分頁撈全部（Supabase 單次上限 1000，.limit(10000) 無效）
+    for (let f = 0; ; f += 1000) {
+      let oq = supabase.from('shopee_orders').select('id').or('order_status.is.null,order_status.neq.不成立').order('id', { ascending: true })
+      if (accountId) oq = oq.eq('shopee_account_id', accountId)
+      if (from) oq = oq.gte('order_date', from)
+      if (to) oq = oq.lte('order_date', to + 'T23:59:59')
+      const { data } = await oq.range(f, f + 999)
+      if (!data || data.length === 0) break
+      inRangeOrderIds.push(...data.map(o => o.id))
+      if (data.length < 1000) break
+    }
   } else {
     // wallet_date / created_at 模式：撈該範圍內的 settlement，反推訂單
     const settleField = dateField === 'created_at' ? 'created_at' : 'wallet_date'
-    let sq = supabase.from('shopee_settlements').select('shopee_order_id')
-    if (accountId) sq = sq.eq('shopee_account_id', accountId)
-    if (from) sq = sq.gte(settleField, from)
-    if (to) sq = sq.lte(settleField, to + 'T23:59:59')
-    const { data } = await sq.limit(10000)
-    const ids = [...new Set((data || []).map(s => s.shopee_order_id).filter(Boolean) as string[])]
+    const settleRows: { shopee_order_id: string | null }[] = []
+    for (let f = 0; ; f += 1000) {
+      let sq = supabase.from('shopee_settlements').select('shopee_order_id').order('shopee_order_id', { ascending: true })
+      if (accountId) sq = sq.eq('shopee_account_id', accountId)
+      if (from) sq = sq.gte(settleField, from)
+      if (to) sq = sq.lte(settleField, to + 'T23:59:59')
+      const { data } = await sq.range(f, f + 999)
+      if (!data || data.length === 0) break
+      settleRows.push(...data)
+      if (data.length < 1000) break
+    }
+    const ids = [...new Set(settleRows.map(s => s.shopee_order_id).filter(Boolean) as string[])]
     if (ids.length > 0) {
       // 排除「不成立」
       const valid: string[] = []
-      for (let i = 0; i < ids.length; i += 500) {
-        const batch = ids.slice(i, i + 500)
+      for (let i = 0; i < ids.length; i += 200) {
+        const batch = ids.slice(i, i + 200)
         const { data: ord } = await supabase.from('shopee_orders').select('id, order_status').in('id', batch)
         for (const o of ord || []) if (o.order_status !== '不成立') valid.push(o.id)
       }
@@ -60,11 +71,23 @@ export async function GET(request: Request) {
     }
   }
 
+  // ─── 顧客統計（母體訂單的買家）：總顧客、回購（≥2 單）、回購比例 ──
+  const buyerCount = new Map<string, number>()
+  for (let i = 0; i < inRangeOrderIds.length; i += 200) {
+    const batch = inRangeOrderIds.slice(i, i + 200)
+    const { data } = await supabase.from('shopee_orders').select('buyer_account').in('id', batch)
+    for (const o of data || []) { const b = (o.buyer_account || '').trim(); if (b && b !== '-') buyerCount.set(b, (buyerCount.get(b) || 0) + 1) }
+  }
+  let custRepeat = 0
+  for (const c of buyerCount.values()) if (c > 1) custRepeat++
+  const custTotal = buyerCount.size
+  const customers = { total: custTotal, repeat: custRepeat, ratio: custTotal ? Math.round((custRepeat / custTotal) * 1000) / 10 : 0 }
+
   // ─── 2. 對母體訂單抓所有 settlement（分批，不限 wallet_date）──
-  let allSettlements: SettlementRow[] = []
+  const allSettlements: SettlementRow[] = []
   if (inRangeOrderIds.length > 0) {
-    for (let i = 0; i < inRangeOrderIds.length; i += 500) {
-      const batch = inRangeOrderIds.slice(i, i + 500)
+    for (let i = 0; i < inRangeOrderIds.length; i += 200) {
+      const batch = inRangeOrderIds.slice(i, i + 200)
       const { data } = await supabase.from('shopee_settlements')
         .select('shopee_order_id, original_price, seller_coupon, ams_fee, transaction_fee, other_service_fee, processing_fee, wallet_amount, wallet_date')
         .in('shopee_order_id', batch)
@@ -79,8 +102,8 @@ export async function GET(request: Request) {
   // ─── 售後退回成本（bc_aftersales）：依訂單歸屬抵減該單商品成本（不限售後日期）───
   const refundByOrder = new Map<string, number>()
   try {
-    for (let i = 0; i < inRangeOrderIds.length; i += 500) {
-      const batch = inRangeOrderIds.slice(i, i + 500)
+    for (let i = 0; i < inRangeOrderIds.length; i += 200) {
+      const batch = inRangeOrderIds.slice(i, i + 200)
       const { data } = await supabase.from('bc_aftersales').select('shopee_order_id, refund_twd')
         .or('status.is.null,status.not.in.(cancelled,reordered)').in('shopee_order_id', batch)
       for (const r of data || []) {
@@ -121,8 +144,8 @@ export async function GET(request: Request) {
   type ProdStat = { id: string; name: string; qty: number; revenue: number; children: Map<string, VarStat> }
   const prodMap = new Map<string, ProdStat>()
   if (inRangeOrderIds.length > 0) {
-    for (let i = 0; i < inRangeOrderIds.length; i += 500) {
-      const batch = inRangeOrderIds.slice(i, i + 500)
+    for (let i = 0; i < inRangeOrderIds.length; i += 200) {
+      const batch = inRangeOrderIds.slice(i, i + 200)
       const { data: items } = await supabase.from('shopee_order_items')
         .select('shopee_product_id, shopee_variation_id, shopee_product_name, shopee_variation_name, custom_product_name, custom_variation_name, quantity, sale_price, original_price')
         .in('shopee_order_id', batch)
@@ -159,8 +182,8 @@ export async function GET(request: Request) {
   let settledCardCount = 0
   const costByOrder = new Map<string, number>(), cardsByOrder = new Map<string, number>(), itemsTotalByOrder = new Map<string, number>()
   if (settledOrderIds.length > 0) {
-    for (let i = 0; i < settledOrderIds.length; i += 500) {
-      const batch = settledOrderIds.slice(i, i + 500)
+    for (let i = 0; i < settledOrderIds.length; i += 200) {
+      const batch = settledOrderIds.slice(i, i + 200)
       const { data: items } = await supabase.from('shopee_order_items')
         .select('shopee_order_id, cost_twd, quantity, sale_price, original_price').in('shopee_order_id', batch)
       for (const it of items || []) {
@@ -210,8 +233,8 @@ export async function GET(request: Request) {
   // 已結算訂單明細
   const settledOrders: { id: string; order_number: string; buyer: string; account: string; date: string | null; status: string; revenue: number; fees: number; cost: number; wallet: number; cards: number }[] = []
   if (settledOrderIds.length > 0) {
-    for (let i = 0; i < settledOrderIds.length; i += 500) {
-      const batch = settledOrderIds.slice(i, i + 500)
+    for (let i = 0; i < settledOrderIds.length; i += 200) {
+      const batch = settledOrderIds.slice(i, i + 200)
       const { data: ord } = await supabase.from('shopee_orders')
         .select('id, shopee_order_number, buyer_account, shopee_account_id, order_date, order_status').in('id', batch)
       for (const o of ord || []) {
@@ -240,8 +263,8 @@ export async function GET(request: Request) {
   const unsettledOrders: OrderStat[] = []
   const backfilledOrders: OrderStat[] = []
   if (unsettledOrderIds.length > 0) {
-    for (let i = 0; i < unsettledOrderIds.length; i += 500) {
-      const batch = unsettledOrderIds.slice(i, i + 500)
+    for (let i = 0; i < unsettledOrderIds.length; i += 200) {
+      const batch = unsettledOrderIds.slice(i, i + 200)
       const { data: orders } = await supabase.from('shopee_orders')
         .select('id, shopee_order_number, buyer_account, shopee_account_id, order_date, order_status, internal_status, product_total, transaction_fee, other_service_fee, payment_processing_fee, shopee_order_items(cost_twd, quantity, sale_price, original_price, status)')
         .in('id', batch)
@@ -295,20 +318,25 @@ export async function GET(request: Request) {
   // ─── 售後統計（售後日期 created_at 在範圍內；bc_aftersales 未建表時回零）───
   let asCount = 0, asCards = 0, asCny = 0, asTwd = 0
   try {
-    let aq = supabase.from('bc_aftersales').select('card_count, refund_cny, refund_twd')
-      .or('status.is.null,status.not.in.(cancelled,reordered)')
-    if (from) aq = aq.gte('created_at', from)
-    if (to) aq = aq.lte('created_at', to + 'T23:59:59')
-    const { data: asData } = await aq.limit(10000)
-    for (const r of asData || []) {
-      asCount++
-      asCards += r.card_count || 0
-      asCny += Number(r.refund_cny) || 0
-      asTwd += Number(r.refund_twd) || 0
+    for (let f = 0; ; f += 1000) {
+      let aq = supabase.from('bc_aftersales').select('card_count, refund_cny, refund_twd')
+        .or('status.is.null,status.not.in.(cancelled,reordered)').order('created_at', { ascending: true })
+      if (from) aq = aq.gte('created_at', from)
+      if (to) aq = aq.lte('created_at', to + 'T23:59:59')
+      const { data: asData } = await aq.range(f, f + 999)
+      if (!asData || asData.length === 0) break
+      for (const r of asData) {
+        asCount++
+        asCards += r.card_count || 0
+        asCny += Number(r.refund_cny) || 0
+        asTwd += Number(r.refund_twd) || 0
+      }
+      if (asData.length < 1000) break
     }
   } catch { /* 表不存在時忽略 */ }
 
   return NextResponse.json({
+    customers,
     aftersale: {
       count: asCount,
       card_count: asCards,

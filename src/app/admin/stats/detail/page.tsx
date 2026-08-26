@@ -44,39 +44,38 @@ export default function StatsDetailPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [jump, setJump] = useState('')
 
-  function params(extra?: Record<string, string>) {
-    const p = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...extra })
-    if (search.trim()) p.set('search', search.trim())
-    if (cardStatus) p.set('card_status', cardStatus)
-    if (planStatus) p.set('plan_status', planStatus)
-    if (aftersale) p.set('aftersale', aftersale)
-    if (installed) p.set('installed', installed)
-    if (sortBy) { p.set('sort_by', sortBy); p.set('sort_dir', sortDir) }
-    return p
+  // 統一組 query：page / sort 一律用「明確傳入值」，不讀可能未 commit 的 state（避免排序與分頁 desync）
+  function buildQuery(p: number, sb: string, sd: 'asc' | 'desc', ps = pageSize, extra?: Record<string, string>) {
+    const q = new URLSearchParams({ page: String(p), pageSize: String(ps), ...extra })
+    if (search.trim()) q.set('search', search.trim())
+    if (cardStatus) q.set('card_status', cardStatus)
+    if (planStatus) q.set('plan_status', planStatus)
+    if (aftersale) q.set('aftersale', aftersale)
+    if (installed) q.set('installed', installed)
+    if (sb) { q.set('sort_by', sb); q.set('sort_dir', sd) }
+    return q
   }
 
-  // 點欄位排序：同欄切 asc/desc，換欄預設 desc
-  function toggleSort(col: string) {
-    const dir = sortBy === col && sortDir === 'desc' ? 'asc' : 'desc'
-    setSortBy(col); setSortDir(dir)
-    setPage(1)
-    const pr = params({ page: '1', sort_by: col, sort_dir: dir })
+  // 唯一載入入口：page 與 sort 都用參數帶入（預設沿用目前 state），確保翻頁保留排序
+  async function load(p = page, sb = sortBy, sd = sortDir, ps = pageSize) {
     setLoading(true)
-    fetch(`/api/admin/stats/cards?${pr}`).then(r => r.json()).then(d => { setRows(d.data || []); setTotal(d.total || 0); setNeedSync(!!d.needSync) }).finally(() => setLoading(false))
-  }
-  function sortIcon(col: string) { return sortBy === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ⇅' }
-
-  async function load(p = page) {
-    setLoading(true)
-    const pr = params({ page: String(p) })
-    const res = await fetch(`/api/admin/stats/cards?${pr}`)
+    const res = await fetch(`/api/admin/stats/cards?${buildQuery(p, sb, sd, ps)}`)
     if (res.ok) { const d = await res.json(); setRows(d.data || []); setTotal(d.total || 0); setNeedSync(!!d.needSync) }
     setLoading(false)
   }
+
+  // 點欄位排序：同欄切 asc/desc，換欄預設 desc；回第一頁並用「新排序值」直接載入
+  function toggleSort(col: string) {
+    const dir = sortBy === col && sortDir === 'desc' ? 'asc' : 'desc'
+    setSortBy(col); setSortDir(dir); setPage(1)
+    load(1, col, dir)
+  }
+  function sortIcon(col: string) { return sortBy === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ⇅' }
+
   useEffect(() => { load(1); setPage(1) /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
 
   function doSearch() { setPage(1); load(1) }
-  function exportCsv() { window.open(`/api/admin/stats/cards?${params({ action: 'export' })}`, '_blank') }
+  function exportCsv() { window.open(`/api/admin/stats/cards?${buildQuery(page, sortBy, sortDir, pageSize, { action: 'export' })}`, '_blank') }
 
   async function syncPlans() {
     setSyncing(true); setSyncMsg('')
@@ -210,7 +209,7 @@ export default function StatsDetailPage() {
             <div className="flex items-center gap-3 text-xs text-gray-500">
               <span>共 {total.toLocaleString()} 筆</span>
               <label className="flex items-center gap-1">每頁
-                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); setTimeout(() => load(1), 0) }}
+                <select value={pageSize} onChange={e => { const ps = Number(e.target.value); setPageSize(ps); setPage(1); load(1, sortBy, sortDir, ps) }}
                   className="px-1.5 py-1 border border-gray-300 rounded">
                   {[20, 50, 100, 200].map(n => <option key={n} value={n}>{n}</option>)}
                 </select>條
