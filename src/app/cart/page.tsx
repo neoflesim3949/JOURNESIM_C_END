@@ -3,10 +3,11 @@
 import Link from 'next/link'
 import { Minus, Plus, Trash2, ShoppingBag, ArrowLeft, Wifi, CreditCard } from 'lucide-react'
 import { useCart } from '@/lib/cart'
-import { formatPrice } from '@/lib/utils'
+import { useCurrency } from '@/lib/currency'
 
 export default function CartPage() {
   const { items, esimItems, simItems, updateQuantity, removeItem, clearCart, itemCount, totalPrice } = useCart()
+  const { format } = useCurrency()   // 依所選幣別顯示（金額實為 TWD 轉換）
 
   if (itemCount === 0) {
     return (
@@ -55,7 +56,7 @@ export default function CartPage() {
                         <div className="text-xs text-muted-foreground">{item.countryName}</div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{item.displayName}</td>
-                      <td className="px-4 py-3 text-right">{formatPrice(item.unitPrice)}</td>
+                      <td className="px-4 py-3 text-right">{format(item.unitPrice)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center border border-border rounded-lg w-fit mx-auto">
                           <button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="px-2 py-1 hover:bg-muted"><Minus className="w-3.5 h-3.5" /></button>
@@ -63,7 +64,7 @@ export default function CartPage() {
                           <button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="px-2 py-1 hover:bg-muted"><Plus className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold">{formatPrice(item.unitPrice * item.quantity)}</td>
+                      <td className="px-4 py-3 text-right font-semibold">{format(item.unitPrice * item.quantity)}</td>
                       <td className="px-2 py-3">
                         <button onClick={() => removeItem(item.id)} className="p-1 text-muted-foreground hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                       </td>
@@ -103,7 +104,7 @@ export default function CartPage() {
                         <div className="text-xs text-muted-foreground">{item.countryName}</div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{item.displayName}</td>
-                      <td className="px-4 py-3 text-right">{formatPrice(item.unitPrice)}</td>
+                      <td className="px-4 py-3 text-right">{format(item.unitPrice)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center border border-border rounded-lg w-fit mx-auto">
                           <button onClick={() => updateQuantity(item.id, item.quantity - 1)} className="px-2 py-1 hover:bg-muted"><Minus className="w-3.5 h-3.5" /></button>
@@ -111,7 +112,7 @@ export default function CartPage() {
                           <button onClick={() => updateQuantity(item.id, item.quantity + 1)} className="px-2 py-1 hover:bg-muted"><Plus className="w-3.5 h-3.5" /></button>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold">{formatPrice(item.unitPrice * item.quantity)}</td>
+                      <td className="px-4 py-3 text-right font-semibold">{format(item.unitPrice * item.quantity)}</td>
                       <td className="px-2 py-3">
                         <button onClick={() => removeItem(item.id)} className="p-1 text-muted-foreground hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
                       </td>
@@ -129,9 +130,9 @@ export default function CartPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm text-muted-foreground">訂單摘要</div>
-            {esimItems.length > 0 && <div className="text-xs text-muted-foreground mt-1">eSIM: {esimItems.reduce((s, i) => s + i.quantity, 0)} 件 · {formatPrice(esimItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0))}</div>}
-            {simItems.length > 0 && <div className="text-xs text-muted-foreground mt-0.5">SIM: {simItems.reduce((s, i) => s + i.quantity, 0)} 件 · {formatPrice(simItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0))}</div>}
-            <div className="text-2xl font-bold text-primary mt-2">{formatPrice(totalPrice)}</div>
+            {esimItems.length > 0 && <div className="text-xs text-muted-foreground mt-1">eSIM: {esimItems.reduce((s, i) => s + i.quantity, 0)} 件 · {format(esimItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0))}</div>}
+            {simItems.length > 0 && <div className="text-xs text-muted-foreground mt-0.5">SIM: {simItems.reduce((s, i) => s + i.quantity, 0)} 件 · {format(simItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0))}</div>}
+            <div className="text-2xl font-bold text-primary mt-2">{format(totalPrice)}</div>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={clearCart} className="px-4 py-2 text-sm text-muted-foreground hover:text-red-500 border border-border rounded-lg hover:border-red-200">清空購物車</button>

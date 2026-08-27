@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, CheckCircle, Wifi, CreditCard, Gift } from 'lucide-react'
 import { TapPayForm } from '@/components/checkout/tappay-form'
-import { formatPrice } from '@/lib/utils'
+import { useCurrency } from '@/lib/currency'
 import { useCart } from '@/lib/cart'
 import { trackPurchase, trackBeginCheckout } from '@/components/tracking/analytics'
 import { loadAntomElement } from '@/lib/antom-sdk'
@@ -19,6 +19,7 @@ export default function CheckoutPage() {
 
 function CheckoutContent() {
   const { items, esimItems, simItems, totalPrice, clearCart } = useCart()
+  const { format } = useCurrency()   // 依所選幣別顯示（實際以 TWD 收款）
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [orderComplete, setOrderComplete] = useState(false)
@@ -370,7 +371,7 @@ function CheckoutContent() {
               {esimItems.map((item) => (
                 <div key={item.id} className="flex justify-between text-sm mt-1">
                   <span className="text-muted-foreground">{item.packageName} · {item.displayName} × {item.quantity}</span>
-                  <span className="font-medium">{formatPrice(item.unitPrice * item.quantity)}</span>
+                  <span className="font-medium">{format(item.unitPrice * item.quantity)}</span>
                 </div>
               ))}
             </div>
@@ -384,7 +385,7 @@ function CheckoutContent() {
               {simItems.map((item) => (
                 <div key={item.id} className="flex justify-between text-sm mt-1">
                   <span className="text-muted-foreground">{item.packageName} · {item.displayName} × {item.quantity}</span>
-                  <span className="font-medium">{formatPrice(item.unitPrice * item.quantity)}</span>
+                  <span className="font-medium">{format(item.unitPrice * item.quantity)}</span>
                 </div>
               ))}
             </div>
@@ -392,12 +393,12 @@ function CheckoutContent() {
 
           <div className="flex justify-between pt-3 border-t border-border">
             <span className="font-medium text-muted-foreground">折抵點數</span>
-            <span className="font-medium text-orange-600">-{formatPrice(pointsToRedeem)}</span>
+            <span className="font-medium text-orange-600">-{format(pointsToRedeem)}</span>
           </div>
 
           <div className="flex justify-between pt-3 border-t border-border">
             <span className="font-medium">合計</span>
-            <span className="text-lg font-bold text-primary">{formatPrice(Math.max(0, totalPrice - pointsToRedeem))}</span>
+            <span className="text-lg font-bold text-primary">{format(Math.max(0, totalPrice - pointsToRedeem))}</span>
           </div>
 
           {esimItems.length > 0 && simItems.length > 0 && (
@@ -506,7 +507,7 @@ function CheckoutContent() {
                   disabled={antomSubmitting || !isEmailValid(email)}
                   className="w-full mt-3 py-3 bg-primary text-white font-medium rounded-lg hover:bg-primary-hover transition-colors disabled:opacity-50"
                 >
-                  {antomSubmitting ? '付款送出中…' : (!isEmailValid(email) ? '請先填寫 Email' : `確認付款 ${formatPrice(totalPrice)}`)}
+                  {antomSubmitting ? '付款送出中…' : (!isEmailValid(email) ? '請先填寫 Email' : `確認付款 ${format(totalPrice)}`)}
                 </button>
               )}
               {antomMsg &&<p className="mt-3 text-sm text-center font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 break-words">{antomMsg}</p>}
