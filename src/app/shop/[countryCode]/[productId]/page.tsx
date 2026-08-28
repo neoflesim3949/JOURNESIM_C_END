@@ -43,7 +43,7 @@ function ProductDetailContent() {
 
   const router = useRouter()
   const { addItem } = useCart()
-  const { format, currency } = useCurrency()
+  const { format } = useCurrency()
   const [product, setProduct] = useState<ProductData | null>(null)
   const [plans, setPlans] = useState<PlanData[]>([])
   const [loading, setLoading] = useState(true)
@@ -388,7 +388,6 @@ function ProductDetailContent() {
               <div>
                 <div className="text-sm text-muted-foreground">總計</div>
                 <div className="text-3xl font-bold text-primary">{format(totalPrice)}</div>
-                {currency !== 'TWD' && <div className="text-xs text-muted-foreground mt-0.5">結帳以新台幣計價 NT$ {totalPrice.toLocaleString()}</div>}
               </div>
             </div>
             <div className="flex gap-3">
