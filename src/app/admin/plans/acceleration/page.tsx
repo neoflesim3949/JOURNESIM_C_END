@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Search, RefreshCw, Info, FileSpreadsheet } f
 import { formatCapacity, formatSpeed } from '@/lib/format'
 import { getProductTypeLabel, getPlanTypeLabel, getSalesMethodLabel, PLAN_TYPE, SALES_METHOD } from '@/lib/bc-enums'
 import SkuCompareModal from '@/components/admin/sku-compare-modal'
+import PriceHistory from '@/components/admin/price-history'
 
 interface PriceItem { copies: string; retailPrice: string; settlementPrice: string }
 interface CountryItem { mcc: string; name: string }
@@ -292,6 +293,8 @@ export default function AdminAccelerationPlansPage() {
                   <div className="text-xs text-gray-600 whitespace-pre-line">{detailProduct.refund_policy}</div>
                 </div>
               )}
+
+              <PriceHistory skuId={detailProduct.sku_id} />
             </div>
           </div>
         </div>

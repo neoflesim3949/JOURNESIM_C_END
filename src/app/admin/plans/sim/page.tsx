@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Search, RefreshCw, Info, FileSpreadsheet } f
 import { formatCapacity, formatSpeed } from '@/lib/format'
 import { getProductTypeLabel, getPlanTypeLabel, getSalesMethodLabel, PLAN_TYPE, SALES_METHOD, SIM_TYPE_OPTIONS } from '@/lib/bc-enums'
 import SkuCompareModal from '@/components/admin/sku-compare-modal'
+import PriceHistory from '@/components/admin/price-history'
 import CountryMultiSelect from '@/components/admin/country-multi-select'
 import PlanCompareModal from '@/components/admin/plan-compare-modal'
 
@@ -414,6 +415,8 @@ export default function AdminSimPlansPage() {
                   <div className="text-xs text-gray-600 whitespace-pre-line">{detailProduct.refund_policy}</div>
                 </div>
               )}
+
+              <PriceHistory skuId={detailProduct.sku_id} />
             </div>
           </div>
         </div>

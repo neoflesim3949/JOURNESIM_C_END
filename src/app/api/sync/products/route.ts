@@ -9,6 +9,37 @@ export const maxDuration = 300
 const BATCH_SIZE = 200
 const SALES_METHODS = ['1', '2', '3', '4', '5', '6']
 
+// 價格簽章：把價格階正規化成字串以比對是否變動（不受 key 順序影響）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const priceSig = (p: any): string => Array.isArray(p) ? p.map((t: any) => `${t.copies}:${t.settlementPrice}:${t.retailPrice}`).sort().join('|') : ''
+// copies=1 的結算價（採購成本）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const settleOf = (p: any): number | null => { if (!Array.isArray(p)) return null; const t = p.find((x: any) => String(x.copies) === '1'); const v = t?.settlementPrice; return v != null && v !== '' ? Number(v) : null }
+
+interface OldPrice { name: string | null; prices: unknown; cost_price: unknown }
+// 比對新舊價格：回傳「調價清單」與「要寫入的歷史列」（只針對既有商品且價格有變）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function detectPriceChanges(newPriceMap: Map<string, any>, oldMap: Map<string, OldPrice>, syncedAt: string) {
+  const changed: { sku_id: string; name: string | null; old_cost: number | null; new_cost: number | null }[] = []
+  const historyRows: Record<string, unknown>[] = []
+  for (const [sku, newPrices] of newPriceMap) {
+    const old = oldMap.get(sku)
+    if (!old) continue                                   // 新商品 → 算「新上架」，不算調價
+    if (priceSig(newPrices) === priceSig(old.prices)) continue
+    const oldCost = old.cost_price != null ? Number(old.cost_price) : settleOf(old.prices)
+    const newCost = settleOf(newPrices)
+    changed.push({ sku_id: sku, name: old.name ?? null, old_cost: oldCost, new_cost: newCost })
+    historyRows.push({ sku_id: sku, name: old.name ?? null, prices: newPrices, cost_price: newCost, prev_cost_price: oldCost, synced_at: syncedAt })
+  }
+  return { changed, historyRows }
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function insertPriceHistory(supabase: any, rows: Record<string, unknown>[]) {
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    await supabase.from('bc_price_history').insert(rows.slice(i, i + BATCH_SIZE))
+  }
+}
+
 // 分批 upsert，回傳寫入筆數
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function batchUpsert(supabase: any, records: Record<string, unknown>[]) {
@@ -39,32 +70,41 @@ export async function POST(request: Request) {
       const priceMap = new Map<string, BCProductPrice['price']>()
       for (const arr of allPricesArrays) for (const p of arr) priceMap.set(p.skuId, p.price)
 
-      // 既有 sku_id → name（避免插入只有價格、缺商品主檔的稀疏列；
+      // 既有 sku_id → name / 舊價格（避免插入只有價格、缺商品主檔的稀疏列；
       // name 必須帶上：upsert 的 INSERT 檢查 NOT NULL 在 ON CONFLICT 之前，缺 name 會 23502）
-      const existing = new Map<string, string>()
+      const existing = new Map<string, OldPrice>()
       for (let from = 0; ; from += 1000) {
-        const { data } = await supabase.from('bc_products').select('sku_id, name').range(from, from + 999)
+        const { data } = await supabase.from('bc_products').select('sku_id, name, prices, cost_price').range(from, from + 999)
         if (!data || data.length === 0) break
-        for (const r of data) existing.set(r.sku_id, r.name)
+        for (const r of data) existing.set(r.sku_id, { name: r.name, prices: r.prices, cost_price: r.cost_price })
         if (data.length < 1000) break
       }
 
       const now = new Date().toISOString()
       const records: Record<string, unknown>[] = []
       for (const [skuId, skuPrices] of priceMap) {
-        const name = existing.get(skuId)
-        if (name === undefined) continue
+        const old = existing.get(skuId)
+        if (old === undefined) continue
         const costPrice = Array.isArray(skuPrices) ? skuPrices.find((t) => t.copies === '1')?.settlementPrice || null : null
         records.push({
           sku_id: skuId,
-          name,
+          name: old.name,
           prices: Array.isArray(skuPrices) && skuPrices.length > 0 ? skuPrices : null,
           cost_price: costPrice ? Number(costPrice) : null,
           updated_at: now,
         })
       }
       const synced = await batchUpsert(supabase, records)
-      return NextResponse.json({ synced })
+
+      // 調價偵測 + 歷史（在覆蓋前的 existing 就是舊價）
+      const { changed, historyRows } = detectPriceChanges(priceMap, existing, now)
+      if (historyRows.length > 0) await insertPriceHistory(supabase, historyRows)
+      await supabase.from('bc_sync_diffs').insert({
+        scope: 'prices', bc_count: priceMap.size, db_count: existing.size,
+        added_count: 0, removed_count: 0, changed_count: changed.length,
+        changed: changed.slice(0, 1000), applied_removal: true, note: null,
+      })
+      return NextResponse.json({ synced, changed: changed.length })
     }
 
     // ── 同步商品主檔（F002，可含 F003 視 parts）──
@@ -99,15 +139,16 @@ export async function POST(request: Request) {
     }
     for (const p of accelEn) enMap.set(p.skuId, { name: p.name, desc: p.desc })
 
-    // ── 上下架比對：載入同步前的本地商品（sku_id, name, is_active）──
-    const existingRows: { sku_id: string; name: string | null; is_active: boolean | null }[] = []
+    // ── 上下架比對：載入同步前的本地商品（含舊價格供調價偵測）──
+    const existingRows: { sku_id: string; name: string | null; is_active: boolean | null; prices: unknown; cost_price: unknown }[] = []
     for (let from = 0; ; from += 1000) {
-      const { data } = await supabase.from('bc_products').select('sku_id, name, is_active').range(from, from + 999)
+      const { data } = await supabase.from('bc_products').select('sku_id, name, is_active, prices, cost_price').range(from, from + 999)
       if (!data || data.length === 0) break
       existingRows.push(...data)
       if (data.length < 1000) break
     }
     const dbSkus = new Map(existingRows.map((r) => [r.sku_id, r]))
+    const oldPriceMap = new Map<string, OldPrice>(existingRows.map((r) => [r.sku_id, { name: r.name, prices: r.prices, cost_price: r.cost_price }]))
     const bcSkus = new Set(productMap.keys())
 
     // 新上架＝BC 有、本地沒有（或先前已停用又回來）
@@ -195,6 +236,14 @@ export async function POST(request: Request) {
       }
     }
 
+    // 調價偵測 + 歷史（只有 all 有帶價格；oldPriceMap 是覆蓋前的舊價）
+    let changed: { sku_id: string; name: string | null; old_cost: number | null; new_cost: number | null }[] = []
+    if (doPrices) {
+      const r = detectPriceChanges(priceMap, oldPriceMap, new Date().toISOString())
+      changed = r.changed
+      if (r.historyRows.length > 0) await insertPriceHistory(supabase, r.historyRows)
+    }
+
     // 寫入本次比對紀錄（最多各留 1000 筆明細）
     const cap = <T,>(a: T[]) => a.slice(0, 1000)
     await supabase.from('bc_sync_diffs').insert({
@@ -203,8 +252,10 @@ export async function POST(request: Request) {
       db_count: existingRows.length,
       added_count: added.length,
       removed_count: applyRemoval ? removed.length : 0,
+      changed_count: changed.length,
       added: cap(added),
       removed: cap(removed),
+      changed: cap(changed),
       applied_removal: applyRemoval,
       note,
     })
@@ -213,6 +264,7 @@ export async function POST(request: Request) {
       synced,
       added: added.length,
       removed: applyRemoval ? removed.length : 0,
+      changed: changed.length,
       removal_skipped: !applyRemoval,
       note,
     })

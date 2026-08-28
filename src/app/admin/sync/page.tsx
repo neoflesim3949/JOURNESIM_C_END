@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { RefreshCw, CheckCircle, AlertCircle, Database, Search } from 'lucide-react'
+import { Fragment, useEffect, useState } from 'react'
+import { RefreshCw, CheckCircle, AlertCircle, Database, Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { getProductTypeLabel, getPlanTypeLabel, getSalesMethodLabel } from '@/lib/bc-enums'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 
@@ -32,12 +32,22 @@ interface BCProductRow {
   plan_type: string | null
   updated_at: string
   delisted_at?: string | null
+  prices?: PriceTier[] | null
+  cost_price?: number | null
+  prev_cost_price?: number | null
+  prev_prices?: PriceTier[] | null
 }
+interface PriceTier { copies: string; retailPrice: string; settlementPrice: string }
+// copies=1 的結算價
+const tierSettle = (prices?: PriceTier[] | null): number | null => { if (!Array.isArray(prices)) return null; const t = prices.find((x) => String(x.copies) === '1'); const v = t?.settlementPrice; return v != null && v !== '' ? Number(v) : null }
+const changePct = (oldV: number | null, newV: number | null): number | null => (oldV != null && newV != null && oldV !== 0) ? Math.round(((newV - oldV) / oldV) * 1000) / 10 : null
 
 interface SkuRef { sku_id: string; name: string | null }
+interface ChangedRef { sku_id: string; name: string | null; old_cost: number | null; new_cost: number | null }
 interface SyncDiff {
-  id: string; synced_at: string; bc_count: number | null; db_count: number | null
-  added_count: number; removed_count: number; added: SkuRef[] | null; removed: SkuRef[] | null
+  id: string; synced_at: string; scope?: string; bc_count: number | null; db_count: number | null
+  added_count: number; removed_count: number; changed_count?: number
+  added: SkuRef[] | null; removed: SkuRef[] | null; changed?: ChangedRef[] | null
   applied_removal: boolean; note: string | null
 }
 
@@ -47,6 +57,8 @@ export default function AdminSyncPage() {
   const [activeTab, setActiveTab] = useState<'countries' | 'products' | 'delisted'>('countries')
   const [diffs, setDiffs] = useState<SyncDiff[]>([])
   const [showDiffLists, setShowDiffLists] = useState(false)
+  const [selIdx, setSelIdx] = useState(0)   // 選看哪一次同步的比對
+  const [expandedSku, setExpandedSku] = useState<Set<string>>(new Set())   // 展開看所有 copies 價格
 
   // 下架商品 state
   const [delisted, setDelisted] = useState<BCProductRow[]>([])
@@ -118,8 +130,8 @@ export default function AdminSyncPage() {
 
   async function loadDiffs() {
     try {
-      const res = await fetch('/api/admin/sync/diffs?limit=5')
-      if (res.ok) { const d = await res.json(); setDiffs(d.diffs || []) }
+      const res = await fetch('/api/admin/sync/diffs?limit=30')
+      if (res.ok) { const d = await res.json(); setDiffs(d.diffs || []); setSelIdx(0) }
     } catch { /* 忽略 */ }
   }
 
@@ -265,43 +277,62 @@ export default function AdminSyncPage() {
           <p className="mt-1 text-xs text-gray-500">執行一次「同步商品」或「全部同步」後，這裡會顯示本次新上架／下架的商品比對。</p>
         </div>
       ) : (() => {
-        const latest = diffs[0]
+        const sel = diffs[selIdx] || diffs[0]
         return (
           <div className="mt-6 bg-white border border-gray-200 rounded-xl p-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-gray-800">上下架比對</span>
-                <span className="text-xs text-gray-400">最近同步 {new Date(latest.synced_at).toLocaleString('zh-TW')}</span>
+                {/* 同步時間選單：選哪一次就看那次相對上次的變化 */}
+                <select value={selIdx} onChange={e => setSelIdx(Number(e.target.value))}
+                  className="px-2 py-1 border border-gray-300 rounded-md text-xs text-gray-700 max-w-[280px]">
+                  {diffs.map((d, i) => (
+                    <option key={d.id} value={i}>
+                      {new Date(d.synced_at).toLocaleString('zh-TW')}{i === 0 ? '（最新）' : ''}{d.scope === 'prices' ? '·價格' : ''} ／ +{d.added_count} -{d.removed_count} ~{d.changed_count ?? 0}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex items-center gap-2 text-sm">
-                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700">新上架 {latest.added_count}</span>
-                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700">下架 {latest.removed_count}</span>
-                <span className="text-xs text-gray-400">BC {latest.bc_count ?? '—'} · 本地(同步前) {latest.db_count ?? '—'}</span>
-                {(latest.added_count > 0 || latest.removed_count > 0) && (
+                <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700">新上架 {sel.added_count}</span>
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700">下架 {sel.removed_count}</span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">調價 {sel.changed_count ?? 0}</span>
+                <span className="text-xs text-gray-400">BC {sel.bc_count ?? '—'} · 本地(同步前) {sel.db_count ?? '—'}</span>
+                {(sel.added_count > 0 || sel.removed_count > 0 || (sel.changed_count ?? 0) > 0) && (
                   <button onClick={() => setShowDiffLists(v => !v)} className="text-xs text-blue-600 hover:underline">
                     {showDiffLists ? '收合明細' : '查看明細'}
                   </button>
                 )}
               </div>
             </div>
-            {latest.note && <div className="mt-2 text-xs text-amber-600">⚠ {latest.note}</div>}
+            <div className="mt-1 text-xs text-gray-400">此為「該次同步」相對「上一次」的產品與價格變化</div>
+            {sel.note && <div className="mt-2 text-xs text-amber-600">⚠ {sel.note}</div>}
             {showDiffLists && (
-              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <DiffList title="新上架" color="green" items={latest.added || []} />
-                <DiffList title="已下架（已標記停用，資料保留）" color="red" items={latest.removed || []} />
+              <div className="mt-3 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <DiffList title="新上架" color="green" items={sel.added || []} />
+                  <DiffList title="已下架（已標記停用，資料保留）" color="red" items={sel.removed || []} />
+                </div>
+                <ChangedList items={sel.changed || []} />
+                {(sel.changed_count ?? 0) === 0 && (
+                  <div className="text-xs text-gray-400">此次無調價（或為功能上線前的舊同步紀錄）。之後同步偵測到結算價變動時，這裡會列出「商品名 · 舊價 → 新價」。</div>
+                )}
               </div>
             )}
             {diffs.length > 1 && (
               <div className="mt-3 pt-3 border-t border-gray-100">
-                <div className="text-xs text-gray-400 mb-1">歷史</div>
+                <div className="text-xs text-gray-400 mb-1">歷史（點選可切換）</div>
                 <div className="space-y-1">
-                  {diffs.slice(1).map(d => (
-                    <div key={d.id} className="flex items-center gap-3 text-xs text-gray-500">
+                  {diffs.map((d, i) => (
+                    <button key={d.id} onClick={() => { setSelIdx(i); setShowDiffLists(true) }}
+                      className={`w-full flex items-center gap-3 text-xs px-2 py-1 rounded text-left ${i === selIdx ? 'bg-blue-50 text-gray-800' : 'text-gray-500 hover:bg-gray-50'}`}>
                       <span>{new Date(d.synced_at).toLocaleString('zh-TW')}</span>
+                      {d.scope === 'prices' && <span className="px-1.5 rounded bg-gray-100 text-gray-500">價格</span>}
                       <span className="text-green-600">+{d.added_count}</span>
                       <span className="text-red-600">-{d.removed_count}</span>
+                      <span className="text-amber-600">~{d.changed_count ?? 0}</span>
                       {d.note && <span className="text-amber-600">略過下架</span>}
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -423,6 +454,7 @@ export default function AdminSyncPage() {
                       <th className="text-left px-4 py-3 font-medium">套餐類型</th>
                       <th className="text-left px-4 py-3 font-medium">銷售方式</th>
                       <th className="text-left px-4 py-3 font-medium">流量 / 限速</th>
+                      <th className="text-left px-4 py-3 font-medium">結算價（vs 上次）</th>
                       <th className="text-left px-4 py-3 font-medium">同步時間</th>
                     </tr>
                   </thead>
@@ -431,20 +463,80 @@ export default function AdminSyncPage() {
                       const isDaily = p.plan_type === '1'
                       const capacity = formatCapacity(p.high_flow_size ?? p.capacity, isDaily)
                       const speed = formatSpeed(p.limit_flow_speed)
+                      const cost = p.cost_price != null ? Number(p.cost_price) : tierSettle(p.prices)
+                      const pct = changePct(p.prev_cost_price ?? null, cost)
+                      const up = pct != null && pct > 0, down = pct != null && pct < 0
+                      const open = expandedSku.has(p.sku_id)
+                      const tiers = Array.isArray(p.prices) ? p.prices : []
+                      const prevMap = new Map((Array.isArray(p.prev_prices) ? p.prev_prices : []).map((t) => [String(t.copies), t.settlementPrice]))
                       return (
-                        <tr key={p.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2">
-                            <div className="font-medium max-w-[280px] truncate">{p.name}</div>
-                            <div className="text-xs text-gray-400 font-mono mt-0.5">{p.sku_id}</div>
-                          </td>
-                          <td className="px-4 py-2 text-xs">{p.type ? getProductTypeLabel(p.type) : '-'}</td>
-                          <td className="px-4 py-2 text-xs">{getPlanTypeLabel(p.plan_type)}</td>
-                          <td className="px-4 py-2 text-xs">{getSalesMethodLabel(p.sales_method)}</td>
-                          <td className="px-4 py-2 text-xs">
-                            {capacity !== '-' ? capacity : ''}{capacity !== '-' && speed !== '-' ? ' / ' : ''}{speed !== '-' ? speed : ''}{capacity === '-' && speed === '-' ? '-' : ''}
-                          </td>
-                          <td className="px-4 py-2 text-gray-400 text-xs">{new Date(p.updated_at).toLocaleString('zh-TW')}</td>
-                        </tr>
+                        <Fragment key={p.id}>
+                          <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedSku(s => { const n = new Set(s); n.has(p.sku_id) ? n.delete(p.sku_id) : n.add(p.sku_id); return n })}>
+                            <td className="px-4 py-2">
+                              <div className="font-medium max-w-[280px] truncate flex items-center gap-1">
+                                {open ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
+                                <span className="truncate">{p.name}</span>
+                              </div>
+                              <div className="text-xs text-gray-400 font-mono mt-0.5 pl-4">{p.sku_id}</div>
+                            </td>
+                            <td className="px-4 py-2 text-xs">{p.type ? getProductTypeLabel(p.type) : '-'}</td>
+                            <td className="px-4 py-2 text-xs">{getPlanTypeLabel(p.plan_type)}</td>
+                            <td className="px-4 py-2 text-xs">{getSalesMethodLabel(p.sales_method)}</td>
+                            <td className="px-4 py-2 text-xs">
+                              {capacity !== '-' ? capacity : ''}{capacity !== '-' && speed !== '-' ? ' / ' : ''}{speed !== '-' ? speed : ''}{capacity === '-' && speed === '-' ? '-' : ''}
+                            </td>
+                            <td className="px-4 py-2 text-xs">
+                              {cost != null ? (
+                                <span className="font-mono">¥{cost}
+                                  {pct != null && pct !== 0 && (
+                                    <span className={up ? 'text-red-600 ml-1' : down ? 'text-green-600 ml-1' : 'ml-1'}>
+                                      {up ? '▲' : '▼'}{Math.abs(pct)}%<span className="text-gray-400">（前 ¥{p.prev_cost_price}）</span>
+                                    </span>
+                                  )}
+                                </span>
+                              ) : '-'}
+                            </td>
+                            <td className="px-4 py-2 text-gray-400 text-xs whitespace-nowrap">{new Date(p.updated_at).toLocaleString('zh-TW')}</td>
+                          </tr>
+                          {open && (
+                            <tr className="bg-gray-50/60">
+                              <td colSpan={7} className="px-4 py-3">
+                                {tiers.length === 0 ? <span className="text-xs text-gray-400">無價格資料</span> : (
+                                  <div className="overflow-x-auto">
+                                    <table className="text-xs">
+                                      <thead className="text-gray-400">
+                                        <tr>
+                                          <th className="text-left pr-6 py-1 font-medium">份數 copies</th>
+                                          <th className="text-right pr-6 py-1 font-medium">結算價</th>
+                                          <th className="text-right pr-6 py-1 font-medium">上次結算</th>
+                                          <th className="text-right pr-6 py-1 font-medium">漲跌</th>
+                                          <th className="text-right py-1 font-medium">零售價</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {tiers.slice().sort((a, b) => (Number(a.copies) || 0) - (Number(b.copies) || 0)).map((t) => {
+                                          const prev = prevMap.get(String(t.copies))
+                                          const pv = prev != null && prev !== '' ? Number(prev) : null
+                                          const cv = t.settlementPrice != null && t.settlementPrice !== '' ? Number(t.settlementPrice) : null
+                                          const tp = changePct(pv, cv)
+                                          return (
+                                            <tr key={t.copies} className="border-t border-gray-100">
+                                              <td className="text-left pr-6 py-1">{t.copies}</td>
+                                              <td className="text-right pr-6 py-1 font-mono">¥{t.settlementPrice}</td>
+                                              <td className="text-right pr-6 py-1 font-mono text-gray-400">{pv != null ? `¥${pv}` : '—'}</td>
+                                              <td className={`text-right pr-6 py-1 font-mono ${tp != null && tp > 0 ? 'text-red-600' : tp != null && tp < 0 ? 'text-green-600' : 'text-gray-300'}`}>{tp != null && tp !== 0 ? `${tp > 0 ? '▲' : '▼'}${Math.abs(tp)}%` : '—'}</td>
+                                              <td className="text-right py-1 font-mono text-gray-500">¥{t.retailPrice}</td>
+                                            </tr>
+                                          )
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -548,6 +640,34 @@ export default function AdminSyncPage() {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function ChangedList({ items }: { items: ChangedRef[] }) {
+  const fmt = (n: number | null) => n == null ? '—' : `¥${n}`
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-3 py-1.5 text-xs font-medium bg-gray-50 text-amber-700">調價（{items.length}）· 結算價變動</div>
+      <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
+        {items.length === 0 ? (
+          <div className="px-3 py-3 text-xs text-gray-400">無</div>
+        ) : items.map((it) => {
+          const up = it.old_cost != null && it.new_cost != null && it.new_cost > it.old_cost
+          const down = it.old_cost != null && it.new_cost != null && it.new_cost < it.old_cost
+          return (
+            <div key={it.sku_id} className="px-3 py-1.5 text-xs flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-gray-700 truncate">{it.name || '—'}</div>
+                <div className="text-gray-400 font-mono">{it.sku_id}</div>
+              </div>
+              <div className={`shrink-0 font-mono ${up ? 'text-red-600' : down ? 'text-green-600' : 'text-gray-500'}`}>
+                {fmt(it.old_cost)} → {fmt(it.new_cost)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
