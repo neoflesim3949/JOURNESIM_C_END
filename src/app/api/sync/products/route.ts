@@ -17,19 +17,24 @@ const priceSig = (p: any): string => Array.isArray(p) ? p.map((t: any) => `${t.c
 const settleOf = (p: any): number | null => { if (!Array.isArray(p)) return null; const t = p.find((x: any) => String(x.copies) === '1'); const v = t?.settlementPrice; return v != null && v !== '' ? Number(v) : null }
 
 interface OldPrice { name: string | null; prices: unknown; cost_price: unknown }
-// 比對新舊價格：回傳「調價清單」與「要寫入的歷史列」（只針對既有商品且價格有變）
+// 每次同步「全量快照」：對每個有價格的 SKU 都記一筆（保留該次時間點的完整價格），
+// 同時標出「調價清單」（既有商品且結算價階有變）。sync_id 由外層寫入後補上。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function detectPriceChanges(newPriceMap: Map<string, any>, oldMap: Map<string, OldPrice>, syncedAt: string) {
+function buildPriceSnapshot(newPriceMap: Map<string, any>, oldMap: Map<string, OldPrice>, syncedAt: string) {
   const changed: { sku_id: string; name: string | null; old_cost: number | null; new_cost: number | null }[] = []
   const historyRows: Record<string, unknown>[] = []
   for (const [sku, newPrices] of newPriceMap) {
     const old = oldMap.get(sku)
-    if (!old) continue                                   // 新商品 → 算「新上架」，不算調價
-    if (priceSig(newPrices) === priceSig(old.prices)) continue
-    const oldCost = old.cost_price != null ? Number(old.cost_price) : settleOf(old.prices)
     const newCost = settleOf(newPrices)
-    changed.push({ sku_id: sku, name: old.name ?? null, old_cost: oldCost, new_cost: newCost })
-    historyRows.push({ sku_id: sku, name: old.name ?? null, prices: newPrices, cost_price: newCost, prev_cost_price: oldCost, synced_at: syncedAt })
+    const oldCost = old ? (old.cost_price != null ? Number(old.cost_price) : settleOf(old.prices)) : null
+    const isChanged = !!old && priceSig(newPrices) !== priceSig(old.prices)
+    historyRows.push({
+      sku_id: sku, name: old?.name ?? null,
+      prices: newPrices, cost_price: newCost,
+      prev_cost_price: old ? oldCost : null, prev_prices: old?.prices ?? null,
+      synced_at: syncedAt,
+    })
+    if (isChanged) changed.push({ sku_id: sku, name: old?.name ?? null, old_cost: oldCost, new_cost: newCost })
   }
   return { changed, historyRows }
 }
@@ -96,14 +101,17 @@ export async function POST(request: Request) {
       }
       const synced = await batchUpsert(supabase, records)
 
-      // 調價偵測 + 歷史（在覆蓋前的 existing 就是舊價）
-      const { changed, historyRows } = detectPriceChanges(priceMap, existing, now)
-      if (historyRows.length > 0) await insertPriceHistory(supabase, historyRows)
-      await supabase.from('bc_sync_diffs').insert({
+      // 全量快照 + 調價（existing 是覆蓋前的舊價）
+      const { changed, historyRows } = buildPriceSnapshot(priceMap, existing, now)
+      const { data: diffRow } = await supabase.from('bc_sync_diffs').insert({
         scope: 'prices', bc_count: priceMap.size, db_count: existing.size,
         added_count: 0, removed_count: 0, changed_count: changed.length,
         changed: changed.slice(0, 1000), applied_removal: true, note: null,
-      })
+      }).select('id').single()
+      if (historyRows.length > 0) {
+        for (const r of historyRows) r.sync_id = diffRow?.id ?? null
+        await insertPriceHistory(supabase, historyRows)
+      }
       return NextResponse.json({ synced, changed: changed.length })
     }
 
@@ -236,17 +244,13 @@ export async function POST(request: Request) {
       }
     }
 
-    // 調價偵測 + 歷史（只有 all 有帶價格；oldPriceMap 是覆蓋前的舊價）
-    let changed: { sku_id: string; name: string | null; old_cost: number | null; new_cost: number | null }[] = []
-    if (doPrices) {
-      const r = detectPriceChanges(priceMap, oldPriceMap, new Date().toISOString())
-      changed = r.changed
-      if (r.historyRows.length > 0) await insertPriceHistory(supabase, r.historyRows)
-    }
+    // 全量快照 + 調價（只有 all 有帶價格；oldPriceMap 是覆蓋前的舊價）
+    const snap = doPrices ? buildPriceSnapshot(priceMap, oldPriceMap, new Date().toISOString()) : { changed: [], historyRows: [] }
+    const changed = snap.changed
 
-    // 寫入本次比對紀錄（最多各留 1000 筆明細）
+    // 寫入本次比對紀錄（最多各留 1000 筆明細）→ 取回 id 供快照關聯
     const cap = <T,>(a: T[]) => a.slice(0, 1000)
-    await supabase.from('bc_sync_diffs').insert({
+    const { data: diffRow } = await supabase.from('bc_sync_diffs').insert({
       scope: 'products',
       bc_count: bcSkus.size,
       db_count: existingRows.length,
@@ -258,7 +262,13 @@ export async function POST(request: Request) {
       changed: cap(changed),
       applied_removal: applyRemoval,
       note,
-    })
+    }).select('id').single()
+
+    // 全量價格快照連到本次同步
+    if (doPrices && snap.historyRows.length > 0) {
+      for (const r of snap.historyRows) r.sync_id = diffRow?.id ?? null
+      await insertPriceHistory(supabase, snap.historyRows)
+    }
 
     return NextResponse.json({
       synced,

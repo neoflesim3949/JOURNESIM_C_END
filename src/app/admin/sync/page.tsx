@@ -83,6 +83,7 @@ export default function AdminSyncPage() {
   const [productPageSize, setProductPageSize] = useState(50)
   const [productSearch, setProductSearch] = useState('')
   const [productLoading, setProductLoading] = useState(true)
+  const [changedOnly, setChangedOnly] = useState(false)   // 僅顯示有變價
 
   async function loadCountries() {
     setCountryLoading(true)
@@ -101,6 +102,11 @@ export default function AdminSyncPage() {
     setProductLoading(true)
     const params = new URLSearchParams({ tab: 'products', page: String(productPage), pageSize: String(productPageSize) })
     if (productSearch) params.set('search', productSearch)
+    if (changedOnly) {
+      params.set('changed_only', '1')
+      const sid = diffs[selIdx]?.id           // 連動：僅顯示所選同步時間的變價
+      if (sid) params.set('sync_id', sid)
+    }
     const res = await fetch(`/api/admin/sync/data?${params}`)
     if (res.ok) {
       const data = await res.json()
@@ -124,7 +130,8 @@ export default function AdminSyncPage() {
   }
 
   useEffect(() => { loadCountries() }, [countryPage, countryPageSize])
-  useEffect(() => { loadProducts() }, [productPage, productPageSize])
+  useEffect(() => { loadProducts() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [productPage, productPageSize, changedOnly, selIdx])
+  // 切換同步時間：只在「僅顯示有變價」時需要重載商品表（回第一頁由上方 selectSync 處理）
   useEffect(() => { loadDelisted() }, [delistedPage, delistedPageSize])
   useEffect(() => { loadDiffs() }, [])
 
@@ -284,7 +291,7 @@ export default function AdminSyncPage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-gray-800">上下架比對</span>
                 {/* 同步時間選單：選哪一次就看那次相對上次的變化 */}
-                <select value={selIdx} onChange={e => setSelIdx(Number(e.target.value))}
+                <select value={selIdx} onChange={e => { setSelIdx(Number(e.target.value)); setProductPage(1) }}
                   className="px-2 py-1 border border-gray-300 rounded-md text-xs text-gray-700 max-w-[280px]">
                   {diffs.map((d, i) => (
                     <option key={d.id} value={i}>
@@ -324,7 +331,7 @@ export default function AdminSyncPage() {
                 <div className="text-xs text-gray-400 mb-1">歷史（點選可切換）</div>
                 <div className="space-y-1">
                   {diffs.map((d, i) => (
-                    <button key={d.id} onClick={() => { setSelIdx(i); setShowDiffLists(true) }}
+                    <button key={d.id} onClick={() => { setSelIdx(i); setShowDiffLists(true); setProductPage(1) }}
                       className={`w-full flex items-center gap-3 text-xs px-2 py-1 rounded text-left ${i === selIdx ? 'bg-blue-50 text-gray-800' : 'text-gray-500 hover:bg-gray-50'}`}>
                       <span>{new Date(d.synced_at).toLocaleString('zh-TW')}</span>
                       {d.scope === 'prices' && <span className="px-1.5 rounded bg-gray-100 text-gray-500">價格</span>}
@@ -441,7 +448,16 @@ export default function AdminSyncPage() {
                 className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm" />
             </div>
             <button onClick={handleProductSearch} className="px-4 py-2 bg-gray-100 text-sm rounded-lg hover:bg-gray-200">搜尋</button>
+            <label className="ml-auto flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+              <input type="checkbox" checked={changedOnly} onChange={(e) => { setChangedOnly(e.target.checked); setProductPage(1) }} className="w-4 h-4" />
+              僅顯示有變價
+            </label>
           </div>
+          {changedOnly && diffs[selIdx] && (
+            <p className="mt-2 text-xs text-amber-600">
+              顯示「{new Date(diffs[selIdx].synced_at).toLocaleString('zh-TW')}」這次同步的變價（{diffs[selIdx].changed_count ?? 0} 項）· 切換上方同步時間可看不同次
+            </p>
+          )}
 
           {productLoading ? <p className="mt-4 text-sm text-gray-500">載入中...</p> : (
             <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -466,16 +482,18 @@ export default function AdminSyncPage() {
                       const cost = p.cost_price != null ? Number(p.cost_price) : tierSettle(p.prices)
                       const pct = changePct(p.prev_cost_price ?? null, cost)
                       const up = pct != null && pct > 0, down = pct != null && pct < 0
+                      const isChanged = pct != null && pct !== 0
                       const open = expandedSku.has(p.sku_id)
                       const tiers = Array.isArray(p.prices) ? p.prices : []
                       const prevMap = new Map((Array.isArray(p.prev_prices) ? p.prev_prices : []).map((t) => [String(t.copies), t.settlementPrice]))
                       return (
                         <Fragment key={p.id}>
-                          <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedSku(s => { const n = new Set(s); n.has(p.sku_id) ? n.delete(p.sku_id) : n.add(p.sku_id); return n })}>
+                          <tr className={`cursor-pointer ${isChanged ? 'bg-red-50 hover:bg-red-100 border-l-2 border-red-400' : 'hover:bg-gray-50'}`} onClick={() => setExpandedSku(s => { const n = new Set(s); n.has(p.sku_id) ? n.delete(p.sku_id) : n.add(p.sku_id); return n })}>
                             <td className="px-4 py-2">
                               <div className="font-medium max-w-[280px] truncate flex items-center gap-1">
                                 {open ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
-                                <span className="truncate">{p.name}</span>
+                                {isChanged && <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0" />}
+                                <span className={`truncate ${isChanged ? 'text-red-700' : ''}`}>{p.name}</span>
                               </div>
                               <div className="text-xs text-gray-400 font-mono mt-0.5 pl-4">{p.sku_id}</div>
                             </td>
