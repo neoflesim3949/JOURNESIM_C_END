@@ -254,9 +254,15 @@ export default function ShopeeOrderDetailPage() {
 
   async function saveIccid(itemId: string, iccids: string[]) {
     const filled = iccids.filter(Boolean)
+    // 卡號可在「未對應」時就先填；未對應仍維持待對應(pending)，只是卡號已存起來
+    const it = items.find(i => i.id === itemId)
+    const matched = !!(it && (it.bc_sku_id || it.matched_package_id || it.matched_plan_id))
+    const status = filled.length > 0
+      ? (matched ? 'iccid_filled' : 'pending')
+      : (matched ? 'matched' : 'pending')
     await fetch(`/api/admin/shopee/orders/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id: itemId, iccid: filled.length > 0 ? filled : null, status: filled.length > 0 ? 'iccid_filled' : 'matched' }),
+      body: JSON.stringify({ item_id: itemId, iccid: filled.length > 0 ? filled : null, status }),
     }); load()
   }
 
@@ -292,10 +298,11 @@ export default function ShopeeOrderDetailPage() {
   }
 
   async function unmatchItem(itemId: string) {
-    if (!confirm('確定取消此商品對應？')) return
+    if (!confirm('確定取消此商品對應？（已填的卡號會保留）')) return
+    // 不清 iccid：卡號保留，不因取消/重新對應而消失
     await fetch(`/api/admin/shopee/orders/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item_id: itemId, matched_package_id: null, matched_plan_id: null, matched_copies: null, bc_sku_id: null, iccid: null, status: 'pending' }),
+      body: JSON.stringify({ item_id: itemId, matched_package_id: null, matched_plan_id: null, matched_copies: null, bc_sku_id: null, status: 'pending' }),
     }); load()
   }
 
@@ -918,7 +925,7 @@ export default function ShopeeOrderDetailPage() {
                     )}
                   </div>
                 </div>
-                {(item.status === 'matched' || item.status === 'iccid_filled') && item.delivery_type !== 'esim' && <IccidInput item={item} onSave={saveIccid} />}
+                {item.delivery_type !== 'esim' && <IccidInput item={item} onSave={saveIccid} />}
                 {item.delivery_type === 'esim' && item.bc_sku_id && (
                   <EsimManualEdit item={item} orderId={id} onSaved={load} />
                 )}
