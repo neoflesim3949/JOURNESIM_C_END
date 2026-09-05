@@ -41,6 +41,8 @@ interface PriceTier { copies: string; retailPrice: string; settlementPrice: stri
 // copies=1 的結算價
 const tierSettle = (prices?: PriceTier[] | null): number | null => { if (!Array.isArray(prices)) return null; const t = prices.find((x) => String(x.copies) === '1'); const v = t?.settlementPrice; return v != null && v !== '' ? Number(v) : null }
 const changePct = (oldV: number | null, newV: number | null): number | null => (oldV != null && newV != null && oldV !== 0) ? Math.round(((newV - oldV) / oldV) * 1000) / 10 : null
+// 任一份數價格簽章：判斷是否有調價（不限 copies=1）
+const priceSig = (p?: PriceTier[] | null): string => Array.isArray(p) ? p.map((t) => `${t.copies}:${t.settlementPrice}:${t.retailPrice}`).sort().join('|') : ''
 
 interface SkuRef { sku_id: string; name: string | null }
 interface ChangedRef { sku_id: string; name: string | null; old_cost: number | null; new_cost: number | null }
@@ -482,7 +484,10 @@ export default function AdminSyncPage() {
                       const cost = p.cost_price != null ? Number(p.cost_price) : tierSettle(p.prices)
                       const pct = changePct(p.prev_cost_price ?? null, cost)
                       const up = pct != null && pct > 0, down = pct != null && pct < 0
-                      const isChanged = pct != null && pct !== 0
+                      // 變價＝任一份數有變（不限 copies=1）
+                      const tierChanged = !!(p.prev_prices && priceSig(p.prices) !== priceSig(p.prev_prices))
+                      const isChanged = tierChanged || (pct != null && pct !== 0)
+                      const otherTierOnly = isChanged && (pct == null || pct === 0)   // 只有其他份數變、copies=1 沒變
                       const open = expandedSku.has(p.sku_id)
                       const tiers = Array.isArray(p.prices) ? p.prices : []
                       const prevMap = new Map((Array.isArray(p.prev_prices) ? p.prev_prices : []).map((t) => [String(t.copies), t.settlementPrice]))
@@ -511,6 +516,7 @@ export default function AdminSyncPage() {
                                       {up ? '▲' : '▼'}{Math.abs(pct)}%<span className="text-gray-400">（前 ¥{p.prev_cost_price}）</span>
                                     </span>
                                   )}
+                                  {otherTierOnly && <span className="ml-1 text-amber-600">（其他份數調整，展開看）</span>}
                                 </span>
                               ) : '-'}
                             </td>
@@ -673,6 +679,7 @@ function ChangedList({ items }: { items: ChangedRef[] }) {
         ) : items.map((it) => {
           const up = it.old_cost != null && it.new_cost != null && it.new_cost > it.old_cost
           const down = it.old_cost != null && it.new_cost != null && it.new_cost < it.old_cost
+          const pct = changePct(it.old_cost, it.new_cost)
           return (
             <div key={it.sku_id} className="px-3 py-1.5 text-xs flex items-center justify-between gap-2">
               <div className="min-w-0">
@@ -680,7 +687,9 @@ function ChangedList({ items }: { items: ChangedRef[] }) {
                 <div className="text-gray-400 font-mono">{it.sku_id}</div>
               </div>
               <div className={`shrink-0 font-mono ${up ? 'text-red-600' : down ? 'text-green-600' : 'text-gray-500'}`}>
-                {fmt(it.old_cost)} → {fmt(it.new_cost)}
+                {it.old_cost != null && it.new_cost != null && Number(it.old_cost) === Number(it.new_cost)
+                  ? <>{fmt(it.new_cost)} <span className="text-amber-600">（其他份數調整）</span></>
+                  : <>{fmt(it.old_cost)} → {fmt(it.new_cost)}{pct != null && pct !== 0 && <span className="ml-1">（{up ? '▲' : '▼'}{Math.abs(pct)}%）</span>}</>}
               </div>
             </div>
           )

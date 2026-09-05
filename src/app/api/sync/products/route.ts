@@ -9,12 +9,12 @@ export const maxDuration = 300
 const BATCH_SIZE = 200
 const SALES_METHODS = ['1', '2', '3', '4', '5', '6']
 
-// 價格簽章：把價格階正規化成字串以比對是否變動（不受 key 順序影響）
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const priceSig = (p: any): string => Array.isArray(p) ? p.map((t: any) => `${t.copies}:${t.settlementPrice}:${t.retailPrice}`).sort().join('|') : ''
-// copies=1 的結算價（採購成本）
+// copies=1 的結算價（採購成本）— 供顯示
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const settleOf = (p: any): number | null => { if (!Array.isArray(p)) return null; const t = p.find((x: any) => String(x.copies) === '1'); const v = t?.settlementPrice; return v != null && v !== '' ? Number(v) : null }
+// 價格簽章：任一份數的 結算價/零售價 有變就視為調價（不受 key 順序影響）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const priceSig = (p: any): string => Array.isArray(p) ? p.map((t: any) => `${t.copies}:${t.settlementPrice}:${t.retailPrice}`).sort().join('|') : ''
 
 interface OldPrice { name: string | null; prices: unknown; cost_price: unknown }
 // 每次同步「全量快照」：對每個有價格的 SKU 都記一筆（保留該次時間點的完整價格），
@@ -27,7 +27,8 @@ function buildPriceSnapshot(newPriceMap: Map<string, any>, oldMap: Map<string, O
     const old = oldMap.get(sku)
     const newCost = settleOf(newPrices)
     const oldCost = old ? (old.cost_price != null ? Number(old.cost_price) : settleOf(old.prices)) : null
-    const isChanged = !!old && priceSig(newPrices) !== priceSig(old.prices)
+    // 「調價」＝原本有價、且任一份數價格有變（不限 copies=1）；首次定價不算
+    const isChanged = !!old && Array.isArray(old.prices) && priceSig(newPrices) !== priceSig(old.prices)
     historyRows.push({
       sku_id: sku, name: old?.name ?? null,
       prices: newPrices, cost_price: newCost,

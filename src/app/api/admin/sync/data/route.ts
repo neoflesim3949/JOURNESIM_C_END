@@ -40,6 +40,9 @@ export async function GET(request: Request) {
   const to = from + pageSize - 1
   const activeOk = (r: { is_active: boolean | null }) => delisted ? r.is_active === false : (r.is_active === null || r.is_active === true)
   const kw = search.trim().toLowerCase()
+  // 價格簽章：任一份數的 結算/零售價 有變即視為調價
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sig = (p: any): string => Array.isArray(p) ? p.map((t: any) => `${t.copies}:${t.settlementPrice}:${t.retailPrice}`).sort().join('|') : ''
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let rows: any[] = []
@@ -58,7 +61,7 @@ export async function GET(request: Request) {
       snap.push(...h)
       if (h.length < 1000) break
     }
-    const changedRows = snap.filter((r) => r.prev_cost_price != null && Number(r.prev_cost_price) !== Number(r.cost_price))
+    const changedRows = snap.filter((r) => r.prev_prices != null && sig(r.prices) !== sig(r.prev_prices))
     // 補 metadata（type/plan_type…）
     const skus = [...new Set(changedRows.map((r) => r.sku_id))]
     const meta = new Map<string, Record<string, unknown>>()
@@ -85,12 +88,12 @@ export async function GET(request: Request) {
     rows = all.slice(from, from + pageSize)
     augment = false
   } else if (changedOnly) {
-    // 無指定同步：歷來真正有變過價的商品（某筆歷史 prev_cost_price ≠ cost_price）
+    // 無指定同步：歷來任一份數價格有變過的商品
     const changed = new Set<string>()
     for (let f = 0; ; f += 1000) {
-      const { data: h } = await supabase.from('bc_price_history').select('sku_id, prev_cost_price, cost_price').not('prev_cost_price', 'is', null).range(f, f + 999)
+      const { data: h } = await supabase.from('bc_price_history').select('sku_id, prices, prev_prices').not('prev_prices', 'is', null).range(f, f + 999)
       if (!h || h.length === 0) break
-      for (const r of h) if (Number(r.prev_cost_price) !== Number(r.cost_price)) changed.add(r.sku_id)
+      for (const r of h) if (sig(r.prices) !== sig(r.prev_prices)) changed.add(r.sku_id)
       if (h.length < 1000) break
     }
     const ids = [...changed]

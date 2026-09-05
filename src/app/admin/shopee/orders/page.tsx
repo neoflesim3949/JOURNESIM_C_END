@@ -970,6 +970,7 @@ interface SkuGroup {
   bc_sku_id: string | null
   bcSkuName: string | null
   matched_copies: string | null
+  delivery_type: 'sim' | 'esim' | null
   count: number
 }
 
@@ -1018,6 +1019,7 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved, onReload }:
           bc_sku_id: item.bc_sku_id,
           bcSkuName: null,
           matched_copies: item.matched_copies,
+          delivery_type: item.delivery_type ?? null,
           count: 1,
         })
       }
@@ -1169,6 +1171,7 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved, onReload }:
         {matchingIdx !== null && (
           <BcMatchModal
             subtitle={`${groups[matchingIdx].shopee_product_name} · ${groups[matchingIdx].shopee_variation_name}`}
+            defaultKind={groups[matchingIdx].delivery_type === 'esim' ? 'esim' : groups[matchingIdx].delivery_type === 'sim' ? 'sim' : ''}
             onMatch={(skuId, copies) => matchBc(skuId, copies)}
             onClose={() => setMatchingIdx(null)}
           />

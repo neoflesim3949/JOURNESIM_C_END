@@ -113,6 +113,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         updates.cost_twd = Math.ceil(costCny / cnyRate)
       }
     }
+    // 依「實際欄位」重算 status，避免存的值與對應/回填不同步（已送BC/完成不動）
+    {
+      const { data: cur } = await supabase.from('shopee_order_items')
+        .select('bc_sku_id, matched_package_id, matched_plan_id, iccid, bc_order_id, status')
+        .eq('id', body.item_id).single()
+      if (cur) {
+        const pick = (k: string) => (k in updates ? (updates as Record<string, unknown>)[k] : (cur as Record<string, unknown>)[k])
+        const bcOrderId = pick('bc_order_id')
+        const curStatus = pick('status')
+        if (!bcOrderId && curStatus !== 'completed' && curStatus !== 'bc_ordered') {
+          const matched = !!(pick('bc_sku_id') || pick('matched_package_id') || pick('matched_plan_id'))
+          const iccidFinal = pick('iccid')
+          const hasIccid = Array.isArray(iccidFinal) && iccidFinal.filter(Boolean).length > 0
+          updates.status = matched ? (hasIccid ? 'iccid_filled' : 'matched') : 'pending'
+        }
+      }
+    }
     await supabase.from('shopee_order_items').update(updates).eq('id', body.item_id)
 
     // 訂單端對應回寫 V2 蝦皮表（讓 V2 逐步補齊；只在設定 BC 對應時寫，缺的選項自動建立）

@@ -31,17 +31,23 @@ export async function GET(request: Request) {
   const supabase = createAdminClient()
 
   // 先算搜尋用的 iccid 命中訂單 id（與下方 base() 共用）
+  //  iccid 是 jsonb 陣列，.contains 對 jsonb 送錯格式會報錯；改用「分頁掃描 + JS 比對」：
+  //  精準(等於) 或 數字部分比對(includes)，並分頁避免 1000 列上限漏掉
   let iccidOrderIds: string[] = []
   if (search) {
     const trimmed = search.trim()
-    const { data: exactItems } = await supabase.from('shopee_order_items').select('shopee_order_id').contains('iccid', [trimmed])
-    iccidOrderIds = (exactItems || []).map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean)
-    if (iccidOrderIds.length === 0 && /^\d{4,}$/.test(trimmed)) {
-      const { data: anyItems } = await supabase.from('shopee_order_items').select('shopee_order_id, iccid').not('iccid', 'is', null)
-      iccidOrderIds = (anyItems || []).filter((i: { iccid: unknown }) => (Array.isArray(i.iccid) ? i.iccid : []).some((x) => typeof x === 'string' && x.includes(trimmed)))
-        .map((i: { shopee_order_id: string }) => i.shopee_order_id).filter(Boolean)
+    const partial = /^\d{4,}$/.test(trimmed)   // 純數字才做部分比對
+    const set = new Set<string>()
+    for (let f = 0; ; f += 1000) {
+      const { data } = await supabase.from('shopee_order_items').select('shopee_order_id, iccid').not('iccid', 'is', null).range(f, f + 999)
+      if (!data || data.length === 0) break
+      for (const it of data as { shopee_order_id: string; iccid: unknown }[]) {
+        const arr = Array.isArray(it.iccid) ? it.iccid as string[] : []
+        if (it.shopee_order_id && arr.some((x) => String(x) === trimmed || (partial && String(x).includes(trimmed)))) set.add(it.shopee_order_id)
+      }
+      if (data.length < 1000) break
     }
-    iccidOrderIds = [...new Set(iccidOrderIds)]
+    iccidOrderIds = [...set]
   }
 
   // 套用所有 DB 層篩選的查詢（withCount 由 count 模式決定）
