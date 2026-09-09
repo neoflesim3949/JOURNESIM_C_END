@@ -49,7 +49,7 @@ interface ShopeeOrder {
   transaction_fee: number | null; other_service_fee: number | null
   payment_processing_fee: number | null; created_at: string
   shopee_account_id: string | null; shopee_tracking_code: string | null
-  internal_status: string; shopee_order_items: { id: string; status: string; cost_twd: number | null; quantity: number; sale_price: number | null; original_price: number | null }[]
+  internal_status: string; shopee_order_items: { id: string; status: string; cost_twd: number | null; quantity: number; sale_price: number | null; original_price: number | null; iccid?: string[] | null; delivery_type?: string | null; lpa_code?: string | null; qr_code_url?: string | null }[]
   shopee_settlements: ShopeeSettlement[]
 }
 
@@ -110,6 +110,16 @@ function orderIsBackfilled(o: ShopeeOrder): boolean {
   if (orderIsCompleted(o)) return false
   const its = o.shopee_order_items || []
   return its.length > 0 && its.every(i => ['iccid_filled', 'bc_ordered', 'completed'].includes(i.status))
+}
+// 單一品項是否已回填號碼（SIM 看 ICCID；eSIM 另可 LPA/QR）——不要求成本，故「未對應」也算
+function itemHasBackfilledNumber(i: ShopeeOrder['shopee_order_items'][number]): boolean {
+  const hasIccid = Array.isArray(i.iccid) && i.iccid.filter(Boolean).length > 0
+  if (i.delivery_type === 'esim') return hasIccid || !!i.lpa_code || !!i.qr_code_url
+  return hasIccid
+}
+// 處理中：至少一張已回填卡號（即使該品項尚未對應商品），但整單尚未「已完成/已回填」
+function orderIsProcessing(o: ShopeeOrder): boolean {
+  return (o.shopee_order_items || []).some(itemHasBackfilledNumber)
 }
 export default function ShopeeOrdersPage() {
   const [orders, setOrders] = useState<ShopeeOrder[]>([])
@@ -636,7 +646,9 @@ export default function ShopeeOrdersPage() {
                     ? STATUS_LABELS.completed
                     : orderIsBackfilled(o)
                       ? { label: '已回填', color: 'bg-indigo-100 text-indigo-700' }
-                      : (STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' })
+                      : orderIsProcessing(o)
+                        ? STATUS_LABELS.processing
+                        : (STATUS_LABELS[o.internal_status] || { label: o.internal_status, color: 'bg-gray-100 text-gray-600' })
                 const fs = getFinanceStatus(o)
                 const pendingItems = o.shopee_order_items?.filter(i => i.status === 'pending').length || 0
                 const fmtDate = (d: string | null) => {
@@ -1136,7 +1148,7 @@ function BatchEditModal({ data, loading, orderIds, onClose, onSaved, onReload }:
                   <tr key={g.shopee_sku_code} className="hover:bg-gray-50">
                     <td className="px-3 py-2">
                       <div className="text-xs font-medium max-w-[200px] truncate" title={g.shopee_product_name}>{g.shopee_product_name}</div>
-                      <div className="text-[10px] text-gray-400 max-w-[200px] truncate" title={g.shopee_variation_name}>{g.shopee_variation_name}</div>
+                      <div className="text-xs text-green-600 max-w-[200px] truncate" title={g.shopee_variation_name}>{g.shopee_variation_name}</div>
                     </td>
                     <td className="px-3 py-2 font-mono text-[10px] text-gray-500 max-w-[120px] truncate">{g.shopee_sku_code}</td>
                     <td className="px-3 py-2">

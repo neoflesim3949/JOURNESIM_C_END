@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, X, Trash2, DollarSign, Eye } from 'lucide-react'
+import { ArrowLeft, Download, Save, ChevronDown, ChevronRight, Plus, X, Trash2, DollarSign, Eye, Copy } from 'lucide-react'
 import { formatCapacity, formatSpeed } from '@/lib/format'
 import { buildOptionCode } from '@/lib/option-code'
 
@@ -886,10 +886,13 @@ function PlanTable({ plans, mainCode, onToggleUnlimited, onConfirmName, editedPr
                         {(() => {
                           const code = buildOptionCode(mainCode, plan, days, plan.is_unlimited)
                           return code ? (
-                            <button type="button" onClick={() => { navigator.clipboard?.writeText(code) }}
-                              title="點擊複製選項貨號" className="font-mono text-[11px] text-gray-500 hover:text-blue-600">
-                              {code}
-                            </button>
+                            <span className="inline-flex items-center gap-1">
+                              <span className="font-mono text-[11px] text-gray-500">{code}</span>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(code) }}
+                                title="複製選項貨號" className="p-0.5 text-gray-400 hover:text-blue-600 rounded">
+                                <Copy className="w-3 h-3" />
+                              </button>
+                            </span>
                           ) : <span className="text-[10px] text-gray-300">設定「主選項ID」後產生貨號</span>
                         })()}
                       </td>

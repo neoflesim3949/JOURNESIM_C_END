@@ -52,3 +52,6 @@ Docs/payment-review/*.png
 docs/payment-review/*.png
 Docs/payment-review/**/*.html
 docs/payment-review/**/*.html
+
+# PXPay Plus OpenID SDK（本地開發，暫不進 git）
+/src/lib/pxpayplus-openid/
