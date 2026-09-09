@@ -37,8 +37,12 @@ export async function POST(request: Request) {
     const rows = its || []
     const hasIccid = (it: { iccid: unknown }) => Array.isArray(it.iccid) && it.iccid.length > 0
 
-    // status：有卡號(iccid)的維持原狀（已回填），沒卡號的設為 matched
+    // status（只動 pending/matched，不碰 bc_ordered/completed）：
+    //   有卡號 → iccid_filled（含「未對應時就先填卡號、status 仍是 pending」的情況，對應後應升為已回填）
+    //   沒卡號 → matched
+    const toIccidFilled = rows.filter(it => hasIccid(it) && (it.status === 'pending' || it.status === 'matched')).map(it => it.id)
     const toMatched = rows.filter(it => !hasIccid(it) && (it.status === 'pending' || it.status === 'matched')).map(it => it.id)
+    if (toIccidFilled.length) await supabase.from('shopee_order_items').update({ status: 'iccid_filled' }).in('id', toIccidFilled)
     if (toMatched.length) await supabase.from('shopee_order_items').update({ status: 'matched' }).in('id', toMatched)
 
     // 對應 BC 時立即帶入成本（依 copies 結算價換算；SIM 實體卡 +¥3 運費，存單張價）
