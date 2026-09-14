@@ -14,7 +14,7 @@ declare global {
       }
       linePay: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
       jkoPay: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
-      pxpayPlus: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
+      pxPayPlus: { getPrime: (cb: (result: { status: number; prime: string; msg: string }) => void) => void }
     }
   }
 }
@@ -132,7 +132,7 @@ export function TapPayForm({
           onPrimeReady(result.prime, 'jko_pay')
         })
       } else if (selectedMethod === 'pxpay') {
-        window.TPDirect.pxpayPlus.getPrime((result: { status: number; prime: string; msg: string }) => {
+        window.TPDirect.pxPayPlus.getPrime((result: { status: number; prime: string; msg: string }) => {
           if (result.status !== 0) { setCardError(result.msg || 'PX Pay 啟動失敗'); return }
           onPrimeReady(result.prime, 'pxpay')
         })
