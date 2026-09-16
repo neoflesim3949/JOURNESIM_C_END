@@ -1,7 +1,54 @@
 import { getSettings } from '@/lib/settings'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const TAPPAY_SANDBOX = 'https://sandbox.tappaysdk.com/tpc'
 const TAPPAY_PROD = 'https://prod.tappaysdk.com/tpc'
+
+// 記 log 前遮罩敏感欄位（partner_key / prime / card_token / card_key / card_secret），不落地
+function maskBody(body: unknown): unknown {
+  if (body == null || typeof body !== 'object') return body ?? null
+  const SENSITIVE = new Set(['partner_key', 'prime', 'card_token', 'card_key'])
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk)
+    if (v && typeof v === 'object') {
+      const out: Record<string, unknown> = {}
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        if (SENSITIVE.has(k)) out[k] = typeof val === 'string' && val ? `***${val.slice(-4)}` : '***'
+        else if (k === 'card_secret') out[k] = '***'   // 回應內的卡片 token/key 整包遮掉
+        else out[k] = walk(val)
+      }
+      return out
+    }
+    return v
+  }
+  try { return walk(body) } catch { return null }
+}
+
+// 寫入 TapPay API log（失敗不影響主流程）
+export async function logTappayApi(entry: {
+  action: string; endpoint?: string; direction?: string
+  order_number?: string | null; trade_id?: string | null
+  request_body?: unknown; response_body?: unknown
+  status: string; tappay_status?: string | null; error_message?: string | null; duration_ms?: number
+}) {
+  try {
+    await createAdminClient().from('tappay_api_logs').insert({
+      action: entry.action,
+      endpoint: entry.endpoint || null,
+      direction: entry.direction || 'outgoing',
+      order_number: entry.order_number || null,
+      trade_id: entry.trade_id || null,
+      request_body: maskBody(entry.request_body),
+      response_body: maskBody(entry.response_body),
+      status: entry.status,
+      tappay_status: entry.tappay_status ?? null,
+      error_message: entry.error_message || null,
+      duration_ms: entry.duration_ms ?? null,
+    }).abortSignal(AbortSignal.timeout(8000))
+  } catch (e) {
+    console.error('[TAPPAY LOG] 寫入失敗:', e)
+  }
+}
 
 interface PayByPrimeResponse {
   status: number
@@ -122,13 +169,31 @@ export async function payByPrime(params: {
     }
   }
 
-  const res = await fetch(`${baseUrl}/payment/pay-by-prime`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': partnerKey },
-    body: JSON.stringify(body),
-  })
+  const endpoint = `${baseUrl}/payment/pay-by-prime`
+  const startedAt = Date.now()
+  let data: PayByPrimeResponse
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': partnerKey },
+      body: JSON.stringify(body),
+    })
+    data = await res.json() as PayByPrimeResponse
+  } catch (err) {
+    await logTappayApi({
+      action: 'payByPrime', endpoint, order_number: params.orderNumber,
+      request_body: body, response_body: null, status: 'error',
+      error_message: err instanceof Error ? err.message : String(err), duration_ms: Date.now() - startedAt,
+    })
+    throw err
+  }
 
-  const data = await res.json() as PayByPrimeResponse
+  await logTappayApi({
+    action: 'payByPrime', endpoint, order_number: params.orderNumber, trade_id: data.rec_trade_id || null,
+    request_body: body, response_body: data,
+    status: data.status === 0 ? 'success' : 'error', tappay_status: String(data.status),
+    error_message: data.status === 0 ? null : data.msg, duration_ms: Date.now() - startedAt,
+  })
 
   return {
     success: data.status === 0,
@@ -167,13 +232,31 @@ export async function payByToken(params: {
     },
   }
 
-  const res = await fetch(`${baseUrl}/payment/pay-by-token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': partnerKey },
-    body: JSON.stringify(body),
-  })
+  const endpoint = `${baseUrl}/payment/pay-by-token`
+  const startedAt = Date.now()
+  let data: PayByTokenResponse
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': partnerKey },
+      body: JSON.stringify(body),
+    })
+    data = await res.json() as PayByTokenResponse
+  } catch (err) {
+    await logTappayApi({
+      action: 'payByToken', endpoint, order_number: params.orderNumber,
+      request_body: body, response_body: null, status: 'error',
+      error_message: err instanceof Error ? err.message : String(err), duration_ms: Date.now() - startedAt,
+    })
+    throw err
+  }
 
-  const data = await res.json() as PayByTokenResponse
+  await logTappayApi({
+    action: 'payByToken', endpoint, order_number: params.orderNumber, trade_id: data.rec_trade_id || null,
+    request_body: body, response_body: data,
+    status: data.status === 0 ? 'success' : 'error', tappay_status: String(data.status),
+    error_message: data.status === 0 ? null : data.msg, duration_ms: Date.now() - startedAt,
+  })
 
   return {
     success: data.status === 0,

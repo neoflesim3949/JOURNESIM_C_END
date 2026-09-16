@@ -119,6 +119,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: '/admin/bc-logs', label: 'BC Log' },
       { href: '/admin/antom-logs', label: 'Antom Log' },
+      { href: '/admin/tappay-logs', label: 'TapPay Log' },
       { href: '/admin/smse-logs', label: 'smse Log' },
     ],
   },
