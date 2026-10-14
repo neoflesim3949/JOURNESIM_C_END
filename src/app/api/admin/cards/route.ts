@@ -161,7 +161,8 @@ export async function GET(request: Request) {
     if (cardStatus) q = q.eq('card_status', cardStatus)
     if (expireFrom) q = q.gte('expiration_date', expireFrom)
     if (expireTo) q = q.lte('expiration_date', expireTo + ' 23:59:59')
-    q = q.order('created_at', { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1)
+    // created_at 有大量同值，分頁需加唯一鍵(id)當 tiebreaker，避免換頁時列重複/跳過
+    q = q.order('created_at', { ascending: false }).order('id', { ascending: true }).range((page - 1) * pageSize, page * pageSize - 1)
 
     const { data: batch, count } = await q
     const paged = (batch || []).map(m => ({
@@ -181,6 +182,36 @@ export async function GET(request: Request) {
     }))
 
     return NextResponse.json({ data: paged, total: count || 0 })
+  }
+
+  // ─── export：依目前篩選匯出「全部」卡片（分頁掃完，不限當頁）────────
+  if (action === 'export') {
+    const search = searchParams.get('search') || ''
+    const cardType = searchParams.get('card_type') || ''
+    const cardStatus = searchParams.get('card_status') || ''
+    const expireFrom = searchParams.get('expire_from') || ''
+    const expireTo = searchParams.get('expire_to') || ''
+    const base = () => {
+      let q = supabase.from('manual_iccids')
+        .select('iccid, type, note, card_type, card_status, expiration_date, postponed_month, usage_count, bc_synced_at, activation_start_time, activation_end_time')
+      if (search) q = q.or(`iccid.ilike.%${search}%,note.ilike.%${search}%`)
+      if (cardType) q = q.eq('card_type', cardType)
+      if (cardStatus) q = q.eq('card_status', cardStatus)
+      if (expireFrom) q = q.gte('expiration_date', expireFrom)
+      if (expireTo) q = q.lte('expiration_date', expireTo + ' 23:59:59')
+      // created_at 有大量同值，分頁必須再加唯一鍵(id)當 tiebreaker，否則 range 分頁會重複/漏列
+      return q.order('created_at', { ascending: false }).order('id', { ascending: true })
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const all: any[] = []
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await base().range(off, off + 999)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (!data || data.length === 0) break
+      all.push(...data)
+      if (data.length < 1000) break
+    }
+    return NextResponse.json({ data: all, total: all.length })
   }
 
   // ─── expiry：F010 卡片有效期 ──────────────────────────────

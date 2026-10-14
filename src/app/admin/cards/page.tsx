@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import DateRange from '@/components/admin/DateRange'
-import { Search, CreditCard, RefreshCw, X, Database, Calendar, Plus, Trash2, Upload } from 'lucide-react'
+import { Search, CreditCard, RefreshCw, X, Database, Calendar, Plus, Trash2, Upload, Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 interface CardRow {
@@ -105,6 +105,46 @@ export default function AdminCardsPage() {
   const [addNote, setAddNote] = useState('')
   const [addBusy, setAddBusy] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [exporting, setExporting] = useState(false)
+
+  // 匯出：依目前篩選把全部卡片抓齊，產生 xlsx 下載
+  async function handleExport() {
+    setExporting(true)
+    try {
+      const params = new URLSearchParams({ action: 'export' })
+      if (search) params.set('search', search)
+      if (filterCardType) params.set('card_type', filterCardType)
+      if (filterCardStatus) params.set('card_status', filterCardStatus)
+      if (filterExpireFrom) params.set('expire_from', filterExpireFrom)
+      if (filterExpireTo) params.set('expire_to', filterExpireTo)
+      const res = await fetch(`/api/admin/cards?${params}`)
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || '匯出失敗'); return }
+      const d = await res.json()
+      const list: CardRow[] = d.data || []
+      if (list.length === 0) { alert('沒有符合條件的卡片可匯出'); return }
+      const rows = list.map((c) => ({
+        ICCID: c.iccid,
+        '類型': c.type === 'esim' ? 'eSIM' : 'SIM',
+        '卡類型': c.card_type ? (CARD_TYPE_LABEL[c.card_type] || c.card_type) : '',
+        '狀態': c.card_status ? (CARD_STATUS_LABEL[c.card_status] || c.card_status) : '',
+        '充值': c.usage_count ?? '',
+        '延期(天)': c.postponed_month ?? '',
+        '啟用時間': c.activation_start_time || '',
+        '到期時間': c.activation_end_time || '',
+        '有效期截止': c.expiration_date || '',
+        '同步時間': c.bc_synced_at || '',
+        '備註': c.note || '',
+      }))
+      const ws = XLSX.utils.json_to_sheet(rows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, '卡片')
+      XLSX.writeFile(wb, `卡片清單_${new Date().toISOString().slice(0, 10)}_${list.length}筆.xlsx`)
+    } catch (err) {
+      alert('匯出失敗：' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setExporting(false)
+    }
+  }
   const [syncing, setSyncing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -323,6 +363,10 @@ export default function AdminCardsPage() {
           <Upload className="w-4 h-4" /> {importing ? '匯入中...' : '匯入 Excel'}
           <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleExcelImport} className="hidden" disabled={importing} />
         </label>
+        <button onClick={handleExport} disabled={exporting}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">
+          <Download className="w-4 h-4" /> {exporting ? '匯出中...' : '匯出 Excel'}
+        </button>
         <button onClick={syncBcAll} disabled={syncing}
           className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? '同步中...' : '同步 BC 資料'}
