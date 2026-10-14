@@ -1,0 +1,574 @@
+/* =============================================
+   FLESIM E-Card — ecard.css  (Light Theme)
+   ============================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
+
+/* ── Root ── */
+.ecard-root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: #f4f6fb;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  font-family: 'Inter', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* ── Subtle background blobs ── */
+.ecard-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.ecard-bg-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.45;
+}
+
+.ecard-bg-blob-1 {
+  width: 480px;
+  height: 480px;
+  background: radial-gradient(circle, #c8dafc 0%, transparent 70%);
+  top: -120px;
+  right: -100px;
+  animation: blobFloat1 14s ease-in-out infinite;
+}
+
+.ecard-bg-blob-2 {
+  width: 380px;
+  height: 380px;
+  background: radial-gradient(circle, #dce8ff 0%, transparent 70%);
+  bottom: 80px;
+  left: -100px;
+  animation: blobFloat2 18s ease-in-out infinite;
+}
+
+.ecard-bg-dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, #b8cfe8 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.35;
+}
+
+@keyframes blobFloat1 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-24px, 32px); }
+}
+@keyframes blobFloat2 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(24px, -24px); }
+}
+
+/* ── Container ── */
+.ecard-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 440px;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Entrance animations ── */
+.ecard-animate-up {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+
+.ecard-loaded .ecard-animate-up {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Header ── */
+.ecard-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.ecard-logo-img {
+  object-fit: contain;
+  height: 44px;
+  width: auto;
+}
+
+/* ── Main card ── */
+.ecard-card {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    0 12px 40px rgba(59, 118, 200, 0.08),
+    0 0 0 1px rgba(59, 118, 200, 0.08);
+  overflow: hidden;
+}
+
+.ecard-card-accent {
+  height: 5px;
+  background: linear-gradient(90deg, #3B76C8 0%, #64a0e8 50%, #3B76C8 100%);
+  background-size: 200% 100%;
+  animation: shimmer 4s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Profile ── */
+.ecard-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 24px 20px;
+  gap: 10px;
+}
+
+/* ── Avatar ── */
+.ecard-avatar-wrap {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  margin-bottom: 4px;
+}
+
+.ecard-avatar-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: conic-gradient(
+    #3B76C8 0deg,
+    #8ab8f0 90deg,
+    #3B76C8 180deg,
+    #8ab8f0 270deg,
+    #3B76C8 360deg
+  );
+  animation: ringRotate 5s linear infinite;
+  opacity: 0.5;
+}
+
+@keyframes ringRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.ecard-avatar {
+  position: relative;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #dbe9ff 0%, #c3d8f8 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 4px solid #ffffff;
+  z-index: 1;
+  box-shadow: 0 4px 16px rgba(59, 118, 200, 0.15);
+}
+
+.ecard-avatar-initials {
+  font-size: 42px;
+  font-weight: 900;
+  color: #2a5ba8;
+  font-family: 'Noto Sans TC', sans-serif;
+  line-height: 1;
+  user-select: none;
+}
+
+/* ── Name ── */
+.ecard-name-block {
+  text-align: center;
+}
+
+.ecard-name-zh {
+  font-size: 36px;
+  font-weight: 900;
+  color: #1a2340;
+  font-family: 'Noto Sans TC', sans-serif;
+  margin: 0;
+  line-height: 1.1;
+  letter-spacing: 0.03em;
+}
+
+.ecard-name-en {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a9bbf;
+  margin: 5px 0 0;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ── Badges ── */
+.ecard-badge-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.ecard-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #3B76C8 0%, #2a5ba8 100%);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 22px;
+  border-radius: 100px;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 14px rgba(59, 118, 200, 0.35);
+  white-space: nowrap;
+}
+
+.ecard-badge-outline {
+  background: transparent;
+  color: #3B76C8;
+  border: 1.5px solid #3B76C8;
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ── Tagline ── */
+.ecard-tagline {
+  font-size: 11px;
+  font-weight: 700;
+  color: #a0b0cc;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  margin: 2px 0 0;
+}
+
+/* ── Company ── */
+.ecard-company {
+  font-size: 13px;
+  font-weight: 500;
+  color: #7a8baa;
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+/* ── Divider ── */
+.ecard-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 24px;
+  opacity: 0.35;
+}
+
+.ecard-divider-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #3B76C8, transparent);
+}
+
+/* ── Contact list ── */
+.ecard-contact-list {
+  padding: 8px 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ecard-contact-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  border-radius: 14px;
+  background: #f8faff;
+  border: 1px solid #e8eef8;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+}
+
+.ecard-contact-item:hover {
+  background: #eef4ff;
+  border-color: #b8d0f4;
+  transform: translateX(3px);
+  box-shadow: 0 2px 12px rgba(59, 118, 200, 0.1);
+}
+
+.ecard-contact-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #e8f0fd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #3B76C8;
+  flex-shrink: 0;
+}
+
+.ecard-contact-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ecard-contact-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #a0b0cc;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ecard-contact-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: #2a3a5c;
+}
+
+.ecard-contact-arrow {
+  font-size: 22px;
+  color: #c0cce0;
+  line-height: 1;
+  margin-top: -2px;
+}
+
+/* ── Social buttons ── */
+.ecard-social {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.ecard-social-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 16px 8px;
+  background: #ffffff;
+  border: 1px solid #e4ecf8;
+  border-radius: 18px;
+  text-decoration: none;
+  color: #4a6080;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.ecard-social-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(59, 118, 200, 0.15);
+  border-color: #b8d0f4;
+  background: #f0f6ff;
+}
+
+.ecard-social-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#btn-line .ecard-social-icon { color: #00b900; }
+#btn-instagram .ecard-social-icon { color: #e1306c; }
+#btn-linkedin .ecard-social-icon { color: #0a66c2; }
+
+#btn-line:hover { border-color: rgba(0, 185, 0, 0.35); box-shadow: 0 6px 20px rgba(0, 185, 0, 0.12); }
+#btn-instagram:hover { border-color: rgba(225, 48, 108, 0.35); box-shadow: 0 6px 20px rgba(225, 48, 108, 0.12); }
+#btn-linkedin:hover { border-color: rgba(10, 102, 194, 0.35); box-shadow: 0 6px 20px rgba(10, 102, 194, 0.12); }
+
+/* ── Action buttons ── */
+.ecard-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ecard-action-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ecard-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 15px 20px;
+  border-radius: 14px;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  font-family: 'Inter', 'Noto Sans TC', sans-serif;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.ecard-action-primary {
+  background: linear-gradient(135deg, #3B76C8 0%, #2a5ba8 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 18px rgba(59, 118, 200, 0.35);
+}
+
+.ecard-action-primary:hover {
+  background: linear-gradient(135deg, #4a85d8 0%, #336aba 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 28px rgba(59, 118, 200, 0.45);
+}
+
+.ecard-action-secondary {
+  background: #ffffff;
+  color: #3a5080;
+  border: 1.5px solid #d0ddf0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.ecard-action-secondary:hover {
+  background: #f0f6ff;
+  border-color: #99bbee;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(59, 118, 200, 0.12);
+}
+
+.ecard-action-share {
+  background: #eef4ff;
+  color: #3B76C8;
+  border: 1.5px solid #c0d8f4;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.ecard-action-share:hover {
+  background: #ddeaff;
+  border-color: #90bcef;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(59, 118, 200, 0.18);
+}
+
+/* ── Promo card ── */
+.ecard-promo-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #eef4ff 0%, #e0ecff 100%);
+  border: 1px solid #c8daf8;
+  border-radius: 18px;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: 0 2px 10px rgba(59, 118, 200, 0.08);
+  transition: all 0.2s ease;
+}
+
+.ecard-promo-card:hover {
+  background: linear-gradient(135deg, #e0ecff 0%, #d0e4ff 100%);
+  border-color: #90bbf0;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(59, 118, 200, 0.18);
+}
+
+.ecard-promo-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.ecard-promo-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ecard-promo-text strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a2e50;
+}
+
+.ecard-promo-text span {
+  font-size: 12px;
+  color: #6080aa;
+}
+
+.ecard-promo-arrow {
+  font-size: 24px;
+  color: #3B76C8;
+  line-height: 1;
+}
+
+/* ── Footer ── */
+.ecard-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.ecard-footer-logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8090b0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ecard-footer-copy {
+  font-size: 11px;
+  color: #a8b8cc;
+  margin: 0;
+}
+
+/* ── Responsive ── */
+@media (max-width: 480px) {
+  .ecard-container {
+    padding: 16px 12px 36px;
+  }
+
+  .ecard-name-zh {
+    font-size: 30px;
+  }
+
+  .ecard-avatar-wrap,
+  .ecard-avatar {
+    width: 92px;
+    height: 92px;
+  }
+
+  .ecard-action-btn {
+    font-size: 13px;
+    padding: 13px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ecard-animate-up {
+    transition: none;
+  }
+  .ecard-bg-blob,
+  .ecard-avatar-ring,
+  .ecard-card-accent {
+    animation: none;
+  }
+}
