@@ -36,10 +36,13 @@ export async function POST(request: Request) {
     }
   }
 
-  // 2) 依 channelOrderId 分組
-  const groups = new Map<string, { iccids: string[]; channelSubOrderIds: Set<string>; sourceItems: typeof items }>()
+  // 2) 依「子單(channelSubOrderId)」分組 —— BC 的 F017 是「子單層級」，每個子單一次呼叫且必須帶 channelSubOrderId。
+  //    （舊版依 channelOrderId 分組，同主單多子單時會省略 channelSubOrderId、又塞多張卡 → BC 回 1003 Parameter error）
+  type Grp = { channelOrderId: string; channelSubOrderId?: string; iccids: string[] }
+  const groups = new Map<string, Grp>()
   const failed: { iccid: string; error: string }[] = []
   for (const it of items) {
+    // 還原 channelOrderId：item 直接給 → 由子單去尾數字 → F011(orderId) 反查
     let cOrder = it.channelOrderId
     if (!cOrder && it.channelSubOrderId && /[SE]\d+$/.test(it.channelSubOrderId)) {
       cOrder = it.channelSubOrderId.replace(/\d+$/, '')
@@ -49,22 +52,21 @@ export async function POST(request: Request) {
       failed.push({ iccid: it.iccid, error: '缺 channelOrderId 且 F011 反查失敗' })
       continue
     }
-    if (!groups.has(cOrder)) groups.set(cOrder, { iccids: [], channelSubOrderIds: new Set(), sourceItems: [] })
-    const g = groups.get(cOrder)!
+    // 分組鍵：有子單 → 以「子單」為單位（BC F017 的單位，必帶 channelSubOrderId）；無子單 → 退回「主單」一組
+    const sub = it.channelSubOrderId || undefined
+    const key = sub ? `S:${sub}` : `O:${cOrder}`
+    if (!groups.has(key)) groups.set(key, { channelOrderId: cOrder, channelSubOrderId: sub, iccids: [] })
+    const g = groups.get(key)!
     if (!g.iccids.includes(it.iccid)) g.iccids.push(it.iccid)
-    if (it.channelSubOrderId) g.channelSubOrderIds.add(it.channelSubOrderId)
-    g.sourceItems.push(it)
   }
 
-  // 3) 每組打一次 F017
-  const results: { channelOrderId: string; iccids: string[]; ok: boolean; afterSaleId?: string; error?: string }[] = []
-  for (const [channelOrderId, g] of groups) {
+  // 3) 每個子單打一次 F017（帶 channelOrderId + channelSubOrderId + 該子單的 iccid）
+  const results: { channelOrderId: string; channelSubOrderId?: string; iccids: string[]; ok: boolean; afterSaleId?: string; error?: string }[] = []
+  for (const g of groups.values()) {
     try {
-      // 若該組僅來自單一子單，帶上 channelSubOrderId（更精準）；多子單就不帶
-      const channelSubOrderId = g.channelSubOrderIds.size === 1 ? [...g.channelSubOrderIds][0] : undefined
       const r = await createAfterSale({
-        channelOrderId,
-        channelSubOrderId,
+        channelOrderId: g.channelOrderId,
+        channelSubOrderId: g.channelSubOrderId,
         reason,
         iccid: g.iccids,
         refundType: '0',
@@ -72,14 +74,14 @@ export async function POST(request: Request) {
         returnCardOrNot: '0',
         receivingState: '1',
       })
-      results.push({ channelOrderId, iccids: g.iccids, ok: true, afterSaleId: r.afterSaleId })
+      results.push({ channelOrderId: g.channelOrderId, channelSubOrderId: g.channelSubOrderId, iccids: g.iccids, ok: true, afterSaleId: r.afterSaleId })
       // 生成售後訂單（含退回成本推算），不影響主流程
       await recordBcAftersale(createAdminClient(), {
-        afterSaleId: r.afterSaleId, channelOrderId, channelSubOrderId,
+        afterSaleId: r.afterSaleId, channelOrderId: g.channelOrderId, channelSubOrderId: g.channelSubOrderId,
         iccids: g.iccids, reason, source: String(body.source || 'cards_lookup'),
       })
     } catch (err) {
-      results.push({ channelOrderId, iccids: g.iccids, ok: false, error: err instanceof Error ? err.message : String(err) })
+      results.push({ channelOrderId: g.channelOrderId, channelSubOrderId: g.channelSubOrderId, iccids: g.iccids, ok: false, error: err instanceof Error ? err.message : String(err) })
     }
   }
 
