@@ -77,6 +77,7 @@ interface PayByTokenResponse {
   bank_transaction_id: string
   order_number: string
   amount: number
+  payment_url?: string
 }
 
 // 取非空值的 helper
@@ -160,11 +161,18 @@ export async function payByPrime(params: {
     remember: params.remember ?? false,
   }
 
-  // 跳轉型付款需要 result_url
+  // 3DS 開關（後台 tappay_3ds_enabled = 'true'）：僅信用卡直接付款(Direct Pay)支援 3D 驗證
+  const threeDS = (settings.get('tappay_3ds_enabled') || '') === 'true'
+  if (method === 'credit_card' && threeDS) body.three_domain_secure = true
+
+  // 跳轉型付款、或信用卡開 3DS 時，都需要 result_url（回應會給 payment_url 讓前端導頁完成驗證）
   const redirectMethods = ['line_pay', 'jko_pay', 'pxpay']
-  if (params.resultUrl && redirectMethods.includes(method)) {
+  const needResultUrl = redirectMethods.includes(method) || (method === 'credit_card' && threeDS)
+  if (params.resultUrl && needResultUrl) {
+    const sep = params.resultUrl.includes('?') ? '&' : '?'
     body.result_url = {
-      frontend_redirect_url: params.resultUrl,
+      // 官方建議把 order_number 帶進 frontend_redirect_url（跨網域回跳不依賴 sessionStorage）
+      frontend_redirect_url: `${params.resultUrl}${sep}order_number=${encodeURIComponent(params.orderNumber)}`,
       backend_notify_url: params.resultUrl.replace('/payment/result', '/api/payment/notify'),
     }
   }
@@ -213,10 +221,11 @@ export async function payByToken(params: {
   orderNumber: string
   email: string
   details?: string
-}): Promise<{ success: boolean; trade_id: string; raw: PayByTokenResponse }> {
+  resultUrl?: string
+}): Promise<{ success: boolean; trade_id: string; payment_url?: string; raw: PayByTokenResponse }> {
   const { settings, partnerKey, baseUrl } = await getTapPayConfig()
 
-  const body = {
+  const body: Record<string, unknown> = {
     card_key: params.cardKey,
     card_token: params.cardToken,
     partner_key: partnerKey,
@@ -230,6 +239,19 @@ export async function payByToken(params: {
       name: '',
       email: params.email,
     },
+  }
+
+  // 3DS 開關：存卡付款(Token)亦支援 3D 驗證，開啟時帶 three_domain_secure + result_url
+  const threeDS = (settings.get('tappay_3ds_enabled') || '') === 'true'
+  if (threeDS) {
+    body.three_domain_secure = true
+    if (params.resultUrl) {
+      const sep = params.resultUrl.includes('?') ? '&' : '?'
+      body.result_url = {
+        frontend_redirect_url: `${params.resultUrl}${sep}order_number=${encodeURIComponent(params.orderNumber)}`,
+        backend_notify_url: params.resultUrl.replace('/payment/result', '/api/payment/notify'),
+      }
+    }
   }
 
   const endpoint = `${baseUrl}/payment/pay-by-token`
@@ -261,6 +283,7 @@ export async function payByToken(params: {
   return {
     success: data.status === 0,
     trade_id: data.rec_trade_id || '',
+    payment_url: data.payment_url,
     raw: data,
   }
 }

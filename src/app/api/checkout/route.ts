@@ -94,11 +94,18 @@ export async function POST(request: Request) {
         cardToken: card.card_token, cardKey: card.card_key,
         amount: totalAmount, orderNumber, email,
         details: `FLESIM - ${productNames}`,
+        resultUrl: result_url,
       })
       tappayTradeId = tokenResult.trade_id
       tappayRaw = tokenResult.raw
-      paymentStatus = tokenResult.success ? 'paid' : 'failed'
-      if (!tokenResult.success) return NextResponse.json({ error: `付款失敗：${tokenResult.raw.msg || '卡片授權失敗'}` }, { status: 400 })
+      if (tokenResult.payment_url) {
+        // 3DS：需導頁完成驗證，訂單先設待付款
+        paymentStatus = 'pending_payment'
+        paymentUrl = tokenResult.payment_url
+      } else {
+        paymentStatus = tokenResult.success ? 'paid' : 'failed'
+      }
+      if (!tokenResult.success && !tokenResult.payment_url) return NextResponse.json({ error: `付款失敗：${tokenResult.raw.msg || '卡片授權失敗'}` }, { status: 400 })
     } catch (err) {
       return NextResponse.json({ error: `付款處理異常：${err instanceof Error ? err.message : '請稍後再試'}` }, { status: 500 })
     }

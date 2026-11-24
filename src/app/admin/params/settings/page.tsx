@@ -199,6 +199,18 @@ export default function AdminSettingsPage() {
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono text-xs" placeholder="partner_..." />
             <p className="text-xs text-gray-400 mt-1">用於 Pay by Prime 後端扣款，沒有則使用前端模式</p>
           </div>
+          <div className="flex items-center justify-between pt-1 border-t border-gray-100 mt-1">
+            <div className="pt-3">
+              <label className="text-sm font-medium">3D 驗證（3DS）</label>
+              <p className="text-xs text-gray-400 mt-0.5">開啟後信用卡付款會導向銀行 3D 驗證頁，降低盜刷爭議（需 Partner Key / 後端模式）</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer pt-3 shrink-0 ml-4">
+              <input type="checkbox" className="sr-only peer"
+                checked={getValue('tappay_3ds_enabled') === 'true'}
+                onChange={(e) => handleChange('tappay_3ds_enabled', e.target.checked ? 'true' : 'false')} />
+              <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-teal-600 peer-checked:after:translate-x-5 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+            </label>
+          </div>
         </div>
       </div>
 
