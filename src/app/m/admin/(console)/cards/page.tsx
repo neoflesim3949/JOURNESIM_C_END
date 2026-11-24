@@ -23,13 +23,15 @@ const CARD_STATUS_COLOR: Record<string, string> = { '0': 'bg-blue-50 text-blue-6
 const PLAN_STATUS: Record<string, string> = { '0': '未使用', '1': '正在使用', '2': '使用結束', '3': '已取消' }
 const PLAN_STATUS_COLOR: Record<string, string> = { '0': 'bg-teal-50 text-teal-600', '1': 'bg-green-50 text-green-600', '2': 'bg-gray-100 text-gray-500', '3': 'bg-gray-100 text-gray-400' }
 
+// F012 的 totalTraffic / remainingTraffic / highFlowSize 單位為 KB
 function fmtTraffic(s?: string) {
   if (s == null || s === '') return '—'
   const n = Number(s)
   if (isNaN(n)) return s
   if (n < 0) return '不限'
-  if (n >= 1024) return (n / 1024).toFixed(2) + ' GB'
-  return n + ' MB'
+  if (n >= 1048576) return (n / 1048576).toFixed(2) + ' GB'
+  if (n >= 1024) return (n / 1024).toFixed(2) + ' MB'
+  return n + ' KB'
 }
 function fmtSpeed(s?: string) {
   if (s == null || s === '') return '—'
