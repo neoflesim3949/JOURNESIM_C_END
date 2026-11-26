@@ -20,6 +20,8 @@ interface BCProduct {
   hotspot_support: string | null; acceleration_support: string | null
   usage_count: string | null; time_zone: string | null; point_contact_type: string | null
   provider: string | null; refund_policy: string | null
+  rechargeable_product: string | null
+  rechargeable_product_series_id: string | null; rechargeable_product_series_name: string | null
 }
 
 export default function AdminAccelerationPlansPage() {
@@ -261,6 +263,10 @@ export default function AdminAccelerationPlansPage() {
                   ['日切點類型', detailProduct.point_contact_type || '—'],
                   ['運營商時區', detailProduct.time_zone || '—'],
                   ['供應商', detailProduct.provider || '—'],
+                  ['復充商品', detailProduct.rechargeable_product === '1' ? '是' : '否'],
+                  ['復充系列', detailProduct.rechargeable_product_series_name
+                    ? (detailProduct.rechargeable_product_series_id ? `${detailProduct.rechargeable_product_series_name}（${detailProduct.rechargeable_product_series_id}）` : detailProduct.rechargeable_product_series_name)
+                    : (detailProduct.rechargeable_product_series_id || '—')],
                 ].map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between py-1.5 border-b border-gray-100">
                     <span className="text-gray-500">{label}</span>
