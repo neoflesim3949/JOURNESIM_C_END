@@ -72,6 +72,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: '/admin/shopee/coverage', label: '跨帳號對應主檔' },
       { href: '/admin/shopee/accounts', label: '帳號管理' },
       { href: '/admin/shopee/cards-lookup', label: '卡片查詢退卡' },
+      { href: '/admin/shopee/cards-acceleration', label: '卡片加購' },
     ],
   },
   {

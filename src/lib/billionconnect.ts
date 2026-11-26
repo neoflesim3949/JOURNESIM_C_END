@@ -240,6 +240,32 @@ export async function getPlanUsage(params: {
 }
 
 // =====================================================
+// F015 — 查詢加速包商品（給定訂單+卡號，列出可加購/升級的加速包）
+// 注意：BC 規定 F015 的 tradeData 為「陣列」；此處一次查一張卡，回傳第一筆
+// =====================================================
+export async function getAccelerationSkus(params: {
+  orderId: string
+  iccid: string
+  dayType: string // 0-單日加速 1-套餐升級 2-總量升級
+  language?: string
+}): Promise<BCAccelerationQuery | null> {
+  const arr = await callBC<BCAccelerationQuery[]>('F015', [{
+    orderId: params.orderId,
+    iccid: params.iccid,
+    dayType: params.dayType,
+    language: params.language || '1',
+  }])
+  return Array.isArray(arr) && arr.length > 0 ? arr[0] : null
+}
+
+// =====================================================
+// F016 — 創建加速包訂單（為已有卡下加購單；會動用 BC 預存款，真實扣款）
+// =====================================================
+export async function createAccelerationOrder(data: BCAccelerationOrderInput) {
+  return callBC<BCAccelerationOrderResult>('F016', data)
+}
+
+// =====================================================
 // F017 — 售後申請
 // =====================================================
 export async function createAfterSale(data: BCAfterSaleInput) {
@@ -503,6 +529,74 @@ export interface BCPlanUsage {
       operator?: string
       authenticationType?: string
     }[]
+  }[]
+}
+
+// --- F015 查詢加速包商品 ---
+export interface BCAccelerationSku {
+  skuId: string
+  name?: string
+  settlementPrice?: string // 結算價
+  days?: string
+  planType?: string // 0-總量型 1-單日型
+  capacity?: string // 流量包大小（KB）
+  highFlowSize?: string // 高速流量（KB/天）
+  limitFlowSpeed?: string // 限速後峰值（kbps）
+  hotspotSupport?: string // 0-不支持 1-支持
+  desc?: string
+  pointContactType?: string
+  serviceZone?: string
+  pointOfContact?: string
+  country?: {
+    mcc?: string
+    name?: string
+    apn?: string
+    apnType?: string
+    operatorInfo?: { operator?: string; network?: string; priority?: string }[]
+  }[]
+}
+export interface BCAccelerationQuery {
+  orderId: string
+  iccid: string
+  skuId?: string // 目前使用中的商品 ID（= F016 的 originalSaleGoodsId）
+  accelerationSku?: string[]
+  accelerationSkuList?: BCAccelerationSku[]
+  pointContactType?: string
+  serviceZone?: string
+  pointOfContact?: string
+}
+
+// --- F016 創建加速包訂單 ---
+export interface BCAccelerationOrderSub {
+  channelSubOrderId: string
+  iccid: string
+  skuId: string
+  copies: string
+  settlementPrice: string
+}
+export interface BCAccelerationOrderInput {
+  originalOrderId: string
+  originalSaleGoodsId: string
+  channelOrderId: string
+  dayType: string
+  subOrderList: BCAccelerationOrderSub[]
+  totalAmount?: string
+  discountAmount?: string
+  estimatedUseTime?: string
+  comment?: string
+}
+export interface BCAccelerationOrderResult {
+  orderId: string
+  channelOrderId: string
+  subOrderList: {
+    subOrderId: string
+    channelSubOrderId: string
+    isActivated?: string
+    startTime?: string
+    countryRegion?: string
+    apn?: string
+    apnUsername?: string
+    apnPassword?: string
   }[]
 }
 
