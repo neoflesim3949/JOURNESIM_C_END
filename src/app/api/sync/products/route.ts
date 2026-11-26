@@ -213,6 +213,8 @@ export async function POST(request: Request) {
         provider: p.provider || null,
         refund_policy: p.refundPolicy || null,
         rechargeable_product: p.rechargeableProduct || null,
+        rechargeable_product_series_id: p.rechargeableProductSeriesId || null,
+        rechargeable_product_series_name: p.rechargeableProductSeriesName || null,
         speed_limit_rule: p.speedLimitRule || null,
         validity_period: p.validityPeroid || null,
         desc: p.desc,

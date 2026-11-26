@@ -65,6 +65,10 @@ export default function BcDetailModal({ skuId, onClose }: { skuId: string; onClo
                   ['日切點類型', p.point_contact_type || '—'],
                   ['運營商時區', p.time_zone || '—'],
                   ['供應商', p.provider || '—'],
+                  ['復充商品', p.rechargeable_product === '1' ? '是' : '否'],
+                  ['復充系列', p.rechargeable_product_series_name
+                    ? (p.rechargeable_product_series_id ? `${p.rechargeable_product_series_name}（${p.rechargeable_product_series_id}）` : p.rechargeable_product_series_name)
+                    : (p.rechargeable_product_series_id || '—')],
                 ] as [string, string][]).map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between py-1.5 border-b border-gray-100">
                     <span className="text-gray-500">{label}</span>
